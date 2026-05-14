@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ddf8f36fd3ca4a4c918d1711f3e46a54, type: 3}
+  m_Name: DogBaseIdleSettings
+  m_EditorClassIdentifier: 
+  movementSpeed: 3.5
+  stoppingDistance: 0.4
+  wanderRadius: 6
+  minWanderDistance: 1.5
+  arrivalTimeout: 15
+  destinationSampleRadius: 2
+  maxDestinationAttempts: 20
+  maxDistanceFromRoamCenter: 6.5
+  minPauseDuration: 2
+  maxPauseDuration: 6
+  sitChanceDuringPause: 0.25
+  barkChanceDuringPause: 0.25
+  sitDuration: 3
+  barkDuration: 1.5
+  sitCooldown: 12
+  barkCooldown: 8

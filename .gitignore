@@ -1,0 +1,102 @@
+# =========================================
+# Unity + Rider/VSCode + Privacy-safe .gitignore
+# =========================================
+
+# ---------- Unity generated folders ----------
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+UserSettings/
+
+# ---------- Cache ----------
+.DS_Store
+Thumbs.db
+
+# ---------- IDE ----------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+*.sln.iml
+
+# Visual Studio / Rider
+.vs/
+*.csproj
+*.unityproj
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# JetBrains Rider
+.idea/
+*.DotSettings.user
+
+# ---------- Unity auto-generated ----------
+Assets/AssetStoreTools*
+
+# ---------- Addressables / Bundles ----------
+ServerData/
+StreamingAssets/aa*
+
+# ---------- Crash Reports ----------
+sysinfo.txt
+
+# ---------- Blender / PSD / Source files ----------
+*.blend1
+*.blend2
+*.psd
+*.xcf
+
+# ---------- Large media files ----------
+# (optional, prevents GitHub size problems)
+
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.flac
+*.psb
+
+# ---------- Privacy / Internet Assets ----------
+# Ignore downloaded asset packs and external content
+
+Assets/3rd Party Packs/
+Assets/Adaptiv*/*
+Assets/Downloaded*/
+Assets/Imported*/
+Assets/Store*/
+Assets/AssetStore*/
+Assets/Plugins/*
+
+# BUT keep your own plugin-play code if needed
+!Assets/Plugin'n'Play Folder/
+
+# ---------- Terrain / baked data ----------
+*.terrainlayer
+*.lightmap
+*.exr
+
+# ---------- Auto-save / backups ----------
+*.bak
+*.backup
+*.old
+*.orig
+
+# ---------- Unity Collab / Plastic ----------
+.plastic/
