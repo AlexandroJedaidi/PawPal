@@ -8,7 +8,6 @@ public class ProximityLock : MonoBehaviour
     public float detectionRadius = 1f;
     public string dogLayerName = "DogFace";    // Start is called once before the first execution of Update after the MonoBehaviour is created
     RigBuilder rigs;
-    bool hasTarget;
     Collider[] hitList;
     Transform nearestDog;
     Transform oldTarget;
@@ -19,7 +18,6 @@ public class ProximityLock : MonoBehaviour
     {
         aimConstraint = GetComponentsInChildren<MultiAimConstraint>()[0];
         rigs = GetComponent<RigBuilder>();
-        hasTarget = false; 
         oldTarget = null;
         nearestDog = null;
         hasNewTarget = false;
@@ -96,6 +94,5 @@ public class ProximityLock : MonoBehaviour
 
         // Update constraint weight (optional but safe)
         aimConstraint.weight = 1f;
-        hasTarget = true;
     }
 }
