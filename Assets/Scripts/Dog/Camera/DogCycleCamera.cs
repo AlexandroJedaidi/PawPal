@@ -295,6 +295,12 @@ public class DogCycleCamera : MonoBehaviour
 
     private void HandleMouseLookInput()
     {
+        if (PawPalPlayerToyThrowController.IsPointerInteractionActive)
+        {
+            mouseDragActive = false;
+            return;
+        }
+
         if (Input.GetMouseButtonDown(0))
         {
             if (IsPointerOverUi())
@@ -323,6 +329,12 @@ public class DogCycleCamera : MonoBehaviour
 
     private void HandleTouchLookInput()
     {
+        if (PawPalPlayerToyThrowController.IsPointerInteractionActive)
+        {
+            activeTouchFingerId = -1;
+            return;
+        }
+
         if (Input.touchCount <= 0)
         {
             activeTouchFingerId = -1;

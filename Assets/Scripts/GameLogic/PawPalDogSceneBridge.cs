@@ -79,6 +79,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         if (runtime == gameRuntime)
         {
             RefreshSceneBindings();
+            EnsurePlayerToyThrowController();
             return;
         }
 
@@ -96,6 +97,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         RefreshSceneBindings();
+        EnsurePlayerToyThrowController();
     }
 
     private void OnDestroy()
@@ -114,6 +116,8 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         {
             return;
         }
+
+        EnsurePlayerToyThrowController();
 
         DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
         if (agents == null || agents.Length == 0)
@@ -367,6 +371,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
     private void HandleRuntimeStateChanged()
     {
         RefreshSceneBindings();
+        EnsurePlayerToyThrowController();
     }
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -377,6 +382,21 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         DestroyFallbackToyFloor();
         ClearAllRuntimeCollars();
         RefreshSceneBindings();
+        EnsurePlayerToyThrowController();
+    }
+
+    private void EnsurePlayerToyThrowController()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        if (mainCamera.GetComponent<PawPalPlayerToyThrowController>() == null)
+        {
+            mainCamera.gameObject.AddComponent<PawPalPlayerToyThrowController>();
+        }
     }
 
     private void RefreshSingleAgentPresentation(DogRoomAgent agent)

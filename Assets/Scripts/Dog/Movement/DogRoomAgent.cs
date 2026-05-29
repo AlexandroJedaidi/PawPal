@@ -119,7 +119,6 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private bool disableLegacyDogControllers = true;
     [SerializeField] private string[] standingIdleStateNames = { "Idle1", "Idle2", "Idle3", "Idle4" };
     [SerializeField] private bool useImportedStandingIdleClipsInEditor = true;
-    [SerializeField] private bool useImportedIdleFiveSequence = true;
     [SerializeField] private float importedIdleFiveLoopDuration = 1.6f;
     [SerializeField] private string scratchStateName = "Scratching";
     [SerializeField] private string tailWagStateName = "TailWag";
@@ -261,6 +260,7 @@ public class DogRoomAgent : MonoBehaviour
     private bool isSleeping;
     private bool isPlayingOneShotAnimation;
     private bool isToyRoutineActive;
+    private Coroutine fetchRoutine;
     private PlayableGraph directClipGraph;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
@@ -280,6 +280,16 @@ public class DogRoomAgent : MonoBehaviour
         && !isResting
         && !isSleeping
         && !isPlayingOneShotAnimation
+        && !HasHeldToy
+        && claimedToy == null
+        && Time.time >= movementLockedUntil;
+    public bool CanStartFetchToy => isActiveAndEnabled
+        && !IsBusy
+        && !socialPaused
+        && !isResting
+        && !isSleeping
+        && !isPlayingOneShotAnimation
+        && !isToyRoutineActive
         && !HasHeldToy
         && claimedToy == null
         && Time.time >= movementLockedUntil;
@@ -340,6 +350,7 @@ public class DogRoomAgent : MonoBehaviour
         ClearRestState();
         isPlayingOneShotAnimation = false;
         isToyRoutineActive = false;
+        fetchRoutine = null;
         DropHeldToyImmediately();
         ReleaseReservedDestination();
         ReleaseClaimedToy();
@@ -391,6 +402,33 @@ public class DogRoomAgent : MonoBehaviour
 
         IsPreparingToMove = false;
         StopAgent();
+    }
+
+    public bool TryStartFetchToy(GameObject toy, Transform returnTarget, System.Action onCompleted)
+    {
+        if (toy == null || !CanStartFetchToy)
+        {
+            return false;
+        }
+
+        if (toy.GetComponentInParent<PawPalPlayerHeldToyMarker>() != null)
+        {
+            return false;
+        }
+
+        Transform toyRoot = ResolvePickupToyRoot(toy.transform);
+        if (!IsPickupToyCandidate(toyRoot) || IsPawHitRollToy(toyRoot))
+        {
+            return false;
+        }
+
+        if (!TryClaimToy(toyRoot))
+        {
+            return false;
+        }
+
+        fetchRoutine = StartCoroutine(FetchToyRoutine(toyRoot.gameObject, returnTarget, onCompleted));
+        return true;
     }
 
     public bool TrySetDestination(Vector3 destination)
@@ -1636,6 +1674,11 @@ public class DogRoomAgent : MonoBehaviour
             return false;
         }
 
+        if (candidate.GetComponentInParent<PawPalPlayerHeldToyMarker>() != null)
+        {
+            return false;
+        }
+
         if (ClaimedToyTransforms.Contains(candidate))
         {
             return false;
@@ -1746,6 +1789,118 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         FinishToyRoutine();
+    }
+
+    private IEnumerator FetchToyRoutine(GameObject toy, Transform returnTarget, System.Action onCompleted)
+    {
+        IsBusy = true;
+        socialPaused = true;
+        isToyRoutineActive = true;
+        ClearRestState();
+
+        if (roamRoutine != null)
+        {
+            StopCoroutine(roamRoutine);
+            roamRoutine = null;
+        }
+
+        StopAgent();
+
+        if (toy == null)
+        {
+            FinishFetchToyRoutine(false, onCompleted);
+            yield break;
+        }
+
+        Transform toyTransform = toy.transform;
+        Vector3 approachPoint;
+        if (TryGetToyApproachPoint(toyTransform, out approachPoint))
+        {
+            yield return TravelTo(approachPoint, toyApproachTimeout, DogMovementPace.Run, false, Mathf.Max(0.04f, destinationReachedDistance * 0.65f), true);
+        }
+
+        if (toy == null)
+        {
+            FinishFetchToyRoutine(false, onCompleted);
+            yield break;
+        }
+
+        StopAgent();
+        yield return FaceWorldPoint(toyTransform.position, toyFaceDuration);
+
+        if (!IsToyWithinPickupDistance(toyTransform))
+        {
+            yield return MoveNearPrecise(
+                toyTransform.position,
+                Mathf.Max(1.2f, toyApproachTimeout * 0.35f),
+                DogMovementPace.Walk,
+                Mathf.Max(0.04f, maxToyPickupPlanarDistance * 0.75f));
+            StopAgent();
+            yield return FaceWorldPoint(toyTransform.position, Mathf.Max(0.1f, toyFaceDuration * 0.5f));
+        }
+
+        if (!IsToyWithinPickupDistance(toyTransform))
+        {
+            FinishFetchToyRoutine(false, onCompleted);
+            yield break;
+        }
+
+        yield return PlayPickupToy(toy);
+        if (!HasHeldToy)
+        {
+            FinishFetchToyRoutine(false, onCompleted);
+            yield break;
+        }
+
+        if (returnTarget != null)
+        {
+            Vector3 returnPoint = returnTarget.position;
+            Vector3 safeReturnPoint;
+            if (TryGetReachableRoomPoint(returnPoint, sampleRadius, out safeReturnPoint))
+            {
+                returnPoint = safeReturnPoint;
+            }
+
+            yield return TravelToIgnoringCrowding(
+                returnPoint,
+                Mathf.Max(2.5f, toyApproachTimeout),
+                DogMovementPace.Trot,
+                false);
+
+            if (returnTarget != null)
+            {
+                yield return FaceWorldPoint(returnTarget.position, Mathf.Max(0.15f, toyFaceDuration * 0.6f));
+            }
+        }
+
+        if (HasHeldToy)
+        {
+            yield return PlayPutDownToy();
+        }
+
+        FinishFetchToyRoutine(true, onCompleted);
+    }
+
+    private void FinishFetchToyRoutine(bool completed, System.Action onCompleted)
+    {
+        DropHeldToyImmediately();
+        ReleaseClaimedToy();
+        nextAllowedToyPickupTime = Time.time + minimumSecondsBetweenToyPickups;
+        isToyRoutineActive = false;
+        isPlayingOneShotAnimation = false;
+        IsBusy = false;
+        socialPaused = false;
+        fetchRoutine = null;
+
+        if (completed && onCompleted != null)
+        {
+            onCompleted();
+        }
+
+        if (isActiveAndEnabled)
+        {
+            StartRoaming();
+        }
     }
 
     private bool TryGetToyApproachPoint(Transform toy, out Vector3 approachPoint)
@@ -2946,8 +3101,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         int stateCount = standingIdleStateHashes != null ? standingIdleStateHashes.Length : 0;
         int importedSingleCount = useImportedStandingIdleClipsInEditor ? ImportedStandingIdleClipSuffixes.Length : 0;
-        int importedSequenceCount = useImportedStandingIdleClipsInEditor && useImportedIdleFiveSequence ? 1 : 0;
-        return stateCount + importedSingleCount + importedSequenceCount;
+        return stateCount + importedSingleCount;
     }
 
     private bool CanPlayStandingIdleOption(int optionIndex)
@@ -2965,7 +3119,7 @@ public class DogRoomAgent : MonoBehaviour
             return TryGetImportedStandingIdleClip(ImportedStandingIdleClipSuffixes[importedIndex], out clip);
         }
 
-        return useImportedStandingIdleClipsInEditor && useImportedIdleFiveSequence && CanPlayImportedIdleFiveSequence();
+        return false;
     }
 
     private IEnumerator PlayStandingIdleOption(int optionIndex, float duration)
@@ -2986,11 +3140,6 @@ public class DogRoomAgent : MonoBehaviour
                 yield return PlayImportedStandingIdleClip(clip, duration, false);
                 yield break;
             }
-        }
-
-        if (useImportedStandingIdleClipsInEditor && useImportedIdleFiveSequence)
-        {
-            yield return PlayImportedIdleFiveSequence(duration);
         }
     }
 

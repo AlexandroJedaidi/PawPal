@@ -213,6 +213,7 @@ public sealed class PawPalCatalogItemDefinition
 public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 {
     private static readonly List<PawPalToyRuntimeMetadata> NavigationBlockers = new List<PawPalToyRuntimeMetadata>();
+    private static BoxCollider largeToySupportFloor;
     private static float nextSceneLargeToyScanTime;
 
     [SerializeField] private string itemId;
@@ -335,6 +336,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         dogNavigationBlockCenterLocal = transform.InverseTransformPoint(bounds.center);
         SetBlocksDogNavigation(true, paddedRadius);
         EnsureLargeToyCollider(bounds, radius);
+        EnsureLargeToySupportFloor(bounds);
 
         Rigidbody body = GetComponent<Rigidbody>();
         if (body == null)
@@ -407,6 +409,41 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 
         float colliderPlanarRadius = Mathf.Max(colliderBounds.extents.x, colliderBounds.extents.z);
         return colliderPlanarRadius >= Mathf.Max(0.08f, visualRadius * 0.55f);
+    }
+
+    private static void EnsureLargeToySupportFloor(Bounds toyBounds)
+    {
+        if (largeToySupportFloor == null)
+        {
+            GameObject floorObject = new GameObject("PawPalLargeToySupportFloor");
+            floorObject.hideFlags = HideFlags.HideAndDontSave;
+            floorObject.layer = 2;
+            largeToySupportFloor = floorObject.AddComponent<BoxCollider>();
+        }
+
+        Bounds supportBounds = toyBounds;
+        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
+        for (int i = 0; i < agents.Length; i++)
+        {
+            DogRoomAgent agent = agents[i];
+            if (agent != null)
+            {
+                supportBounds.Encapsulate(agent.transform.position);
+            }
+        }
+
+        float width = Mathf.Max(8f, supportBounds.size.x + 6f);
+        float depth = Mathf.Max(8f, supportBounds.size.z + 6f);
+        float floorTopY = toyBounds.min.y - 0.01f;
+        float floorThickness = 0.16f;
+
+        largeToySupportFloor.transform.position = new Vector3(
+            supportBounds.center.x,
+            floorTopY - floorThickness * 0.5f,
+            supportBounds.center.z);
+        largeToySupportFloor.size = new Vector3(width, floorThickness, depth);
+        largeToySupportFloor.center = Vector3.zero;
+        largeToySupportFloor.enabled = true;
     }
 
     public static bool IsDogNavigationPathBlocked(Vector3[] pathCorners, Transform ignoredRoot, float extraPadding)
