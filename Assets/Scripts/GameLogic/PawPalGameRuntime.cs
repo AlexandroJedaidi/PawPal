@@ -337,6 +337,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         SetBlocksDogNavigation(true, paddedRadius);
         EnsureLargeToyCollider(bounds, radius);
         EnsureLargeToySupportFloor(bounds);
+        PawPalBallBounceAudio.EnsureOn(gameObject);
 
         Rigidbody body = GetComponent<Rigidbody>();
         if (body == null)

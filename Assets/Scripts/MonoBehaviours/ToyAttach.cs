@@ -10,6 +10,7 @@ public class ToyAttach : MonoBehaviour
     [SerializeField] private float generatedMouthHeightOffset = 0.015f;
     [SerializeField] private float anatomicalMouthForwardOffset = 0.04f;
     [SerializeField] private float anatomicalMouthDownOffset = 0.006f;
+    [SerializeField] private float releasedToyFloorPadding = 0.035f;
 
     private GameObject currentToy;
     private Transform originalParent;
@@ -185,8 +186,9 @@ public class ToyAttach : MonoBehaviour
             return;
         }
 
-        float adjustment = supportHeight - bounds.min.y;
-        if (Mathf.Abs(adjustment) <= 0.0001f)
+        float desiredMinimumY = supportHeight + Mathf.Max(0f, releasedToyFloorPadding);
+        float adjustment = desiredMinimumY - bounds.min.y;
+        if (adjustment <= 0.0001f)
         {
             return;
         }

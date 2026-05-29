@@ -1028,12 +1028,12 @@ public class DogSocialDirector : MonoBehaviour
 
     private IEnumerator PlayBarkForAgent(DogRoomAgent agent)
     {
-        AudioClip barkClip = GetBarkClipForAgent(agent);
-        if (agent == null)
+        if (agent == null || agent.HasHeldToy)
         {
             yield break;
         }
 
+        AudioClip barkClip = GetBarkClipForAgent(agent);
         float barkDuration = 0f;
         if (barkClip != null)
         {
@@ -1071,6 +1071,11 @@ public class DogSocialDirector : MonoBehaviour
         float repeatDelay = Mathf.Max(0.01f, barkClip.length + barkAudioRepeatGap);
         for (int i = 0; i < repeatCount; i++)
         {
+            if (agent == null || agent.HasHeldToy)
+            {
+                break;
+            }
+
             barkSource.PlayOneShot(barkClip, barkVolume);
             if (i < repeatCount - 1)
             {

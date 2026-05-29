@@ -34,6 +34,11 @@ internal enum DogRestFlavor
 [RequireComponent(typeof(NavMeshAgent))]
 public class DogRoomAgent : MonoBehaviour
 {
+#if UNITY_EDITOR
+    private const string EditorWalkAudioAssetPath = "Assets/Audio/dog_walk.mp3";
+    private const string EditorBallBounceAudioAssetPath = "Assets/Audio/ball_bounce.mp3";
+    private const string EditorToyPickupAudioAssetPath = "Assets/Audio/toy_pickup.mp3";
+#endif
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
@@ -71,6 +76,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private Vector2 roomBoundsSize = new Vector2(6.4f, 5.6f);
     [SerializeField] private float roomBoundsPadding = 0.25f;
     [SerializeField] private float outsideRoomRepathDistance = 0.05f;
+    [SerializeField] private float navMeshRecoverySearchRadius = 4.5f;
 
     [Header("Movement")]
     [SerializeField] private float calmWalkSpeed = 0.38f;
@@ -210,9 +216,19 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float bigBallChaseTimeout = 2.5f;
     [SerializeField] private float bigBallChaseFollowDistance = 0.55f;
 
+    [Header("Audio")]
+    [SerializeField] private AudioClip walkingClip;
+    [SerializeField, Range(0f, 1f)] private float walkingVolume = 0.18f;
+    [SerializeField] private AudioClip ballBounceClip;
+    [SerializeField, Range(0f, 1f)] private float ballBounceVolume = 0.65f;
+    [SerializeField] private AudioClip toyPickupClip;
+    [SerializeField, Range(0f, 1f)] private float toyPickupVolume = 0.7f;
+    [SerializeField] private float minSecondsBetweenBallBounceSounds = 0.18f;
+
     private Animator animator;
     private NavMeshAgent agent;
     private ToyAttach toyAttach;
+    private AudioSource walkingAudioSource;
     private Coroutine roamRoutine;
     private bool socialPaused;
     private bool warnedMissingNavMesh;
@@ -261,6 +277,7 @@ public class DogRoomAgent : MonoBehaviour
     private bool isPlayingOneShotAnimation;
     private bool isToyRoutineActive;
     private Coroutine fetchRoutine;
+    private float nextAllowedBallBounceAudioTime;
     private PlayableGraph directClipGraph;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
@@ -325,6 +342,8 @@ public class DogRoomAgent : MonoBehaviour
         sitEndStateHash = ResolveAnimatorStateHash(sitEndStateName);
         animator.applyRootMotion = false;
         homePosition = ClampToRoomBounds(transform.position);
+        AutoAssignEditorAudioClips();
+        EnsureWalkingAudioSource();
     }
 
     private void OnEnable()
@@ -335,6 +354,7 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         DogSocialDirector.Register(this);
+        AutoAssignEditorAudioClips();
     }
 
     private void Start()
@@ -346,6 +366,7 @@ public class DogRoomAgent : MonoBehaviour
 
     private void OnDisable()
     {
+        StopWalkingAudio();
         StopDirectClipGraph();
         ClearRestState();
         isPlayingOneShotAnimation = false;
@@ -362,6 +383,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         KeepInsideRoomBounds();
         UpdateAnimator();
+        UpdateWalkingAudio();
     }
 
     public void StartRoaming()
@@ -564,6 +586,11 @@ public class DogRoomAgent : MonoBehaviour
 
     public IEnumerator PlayBark(float duration)
     {
+        if (HasHeldToy)
+        {
+            yield break;
+        }
+
         float barkDuration = duration > 0f ? duration : barkIdleDuration;
         yield return PlayOneShotAnimation(barkStateHash, barkStateName, barkIdleIndex, barkDuration);
     }
@@ -726,7 +753,7 @@ public class DogRoomAgent : MonoBehaviour
 
     private IEnumerator PlayAmbientIdleAfterRoam()
     {
-        if (socialPaused || Random.value > ambientIdleChanceAfterRoam)
+        if (socialPaused || HasHeldToy || Random.value > ambientIdleChanceAfterRoam)
         {
             yield break;
         }
@@ -759,7 +786,7 @@ public class DogRoomAgent : MonoBehaviour
     private DogAmbientActionType SelectAmbientAction()
     {
         float shortIdleWeight = Mathf.Max(0f, 1f - ambientChillChance - ambientSleepChance);
-        float barkWeight = Time.time >= nextAllowedAmbientBarkTime
+        float barkWeight = !HasHeldToy && Time.time >= nextAllowedAmbientBarkTime
             ? Mathf.Max(0f, ambientBarkChance)
             : 0f;
         bool canLieDown = Time.time >= nextAllowedAmbientLieDownTime;
@@ -799,6 +826,11 @@ public class DogRoomAgent : MonoBehaviour
 
     private IEnumerator PlayAmbientBark()
     {
+        if (HasHeldToy)
+        {
+            yield break;
+        }
+
         nextAllowedAmbientBarkTime = Time.time + Mathf.Max(0f, ambientBarkCooldown);
         DogSocialDirector barkDirector = DogSocialDirector.Instance;
         if (barkDirector != null)
@@ -975,7 +1007,17 @@ public class DogRoomAgent : MonoBehaviour
             }
         }
 
-        point = transform.position;
+        NavMeshHit fallbackHit;
+        if (TrySampleRoomPosition(transform.position, Mathf.Max(sampleRadius, 0.75f), out fallbackHit)
+            || TrySampleRoomPosition(homePosition, Mathf.Max(sampleRadius, 0.75f), out fallbackHit)
+            || TryFindFallbackRoomNavMeshPoint(out fallbackHit))
+        {
+            point = fallbackHit.position;
+            homePosition = ClampToRoomBounds(point);
+            return true;
+        }
+
+        point = ClampToRoomBounds(transform.position);
         return false;
     }
 
@@ -1236,7 +1278,8 @@ public class DogRoomAgent : MonoBehaviour
         NavMeshHit hit;
         if (TrySampleRoomPosition(transform.position, sampleRadius, out hit)
             || TrySampleRoomPosition(homePosition, sampleRadius, out hit)
-            || TrySampleRoomPosition(roomBoundsCenter, Mathf.Max(sampleRadius, 2f), out hit))
+            || TrySampleRoomPosition(roomBoundsCenter, Mathf.Max(sampleRadius, 2f), out hit)
+            || TryFindFallbackRoomNavMeshPoint(out hit))
         {
             if (agent.isOnNavMesh)
             {
@@ -1245,7 +1288,7 @@ public class DogRoomAgent : MonoBehaviour
             }
 
             agent.Warp(hit.position);
-            homePosition = ClampToRoomBounds(homePosition);
+            homePosition = ClampToRoomBounds(hit.position);
             return agent.isOnNavMesh && IsInsideRoomBounds(transform.position);
         }
 
@@ -1357,6 +1400,107 @@ public class DogRoomAgent : MonoBehaviour
         animator.SetBool(MoveHash, shouldMove);
         animator.SetFloat(SpeedHash, animatorSpeedValue);
         animator.SetFloat(DirectionHash, animatorDirectionValue);
+    }
+
+    private void UpdateWalkingAudio()
+    {
+        EnsureWalkingAudioSource();
+        if (walkingAudioSource == null)
+        {
+            return;
+        }
+
+        bool shouldPlayWalking = IsMoving
+            && !isPlayingOneShotAnimation
+            && !isResting
+            && !isSleeping
+            && agent != null
+            && agent.enabled
+            && agent.velocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold;
+
+        if (shouldPlayWalking)
+        {
+            walkingAudioSource.volume = Mathf.Clamp01(walkingVolume);
+            if (!walkingAudioSource.isPlaying)
+            {
+                walkingAudioSource.Play();
+            }
+
+            return;
+        }
+
+        if (walkingAudioSource.isPlaying)
+        {
+            walkingAudioSource.Stop();
+        }
+    }
+
+    private void EnsureWalkingAudioSource()
+    {
+        if (walkingClip == null)
+        {
+            return;
+        }
+
+        if (walkingAudioSource == null)
+        {
+            walkingAudioSource = gameObject.AddComponent<AudioSource>();
+            walkingAudioSource.playOnAwake = false;
+            walkingAudioSource.loop = true;
+            walkingAudioSource.spatialBlend = 1f;
+            walkingAudioSource.rolloffMode = AudioRolloffMode.Linear;
+            walkingAudioSource.minDistance = 0.3f;
+            walkingAudioSource.maxDistance = 5f;
+        }
+
+        walkingAudioSource.clip = walkingClip;
+        walkingAudioSource.volume = Mathf.Clamp01(walkingVolume);
+    }
+
+    private void StopWalkingAudio()
+    {
+        if (walkingAudioSource != null && walkingAudioSource.isPlaying)
+        {
+            walkingAudioSource.Stop();
+        }
+    }
+
+    private void PlayToyPickupAudio(Vector3 position)
+    {
+        PlaySpatialOneShot(toyPickupClip, position, toyPickupVolume);
+    }
+
+    private void PlayBallBounceAudio(Vector3 position)
+    {
+        if (Time.time < nextAllowedBallBounceAudioTime)
+        {
+            return;
+        }
+
+        nextAllowedBallBounceAudioTime = Time.time + Mathf.Max(0f, minSecondsBetweenBallBounceSounds);
+        PlaySpatialOneShot(ballBounceClip, position, ballBounceVolume);
+    }
+
+    private void PlaySpatialOneShot(AudioClip clip, Vector3 position, float volume)
+    {
+        if (clip == null || volume <= 0f)
+        {
+            return;
+        }
+
+        GameObject audioObject = new GameObject(name + "_ActionAudio");
+        audioObject.hideFlags = HideFlags.DontSave;
+        audioObject.transform.position = position;
+
+        AudioSource source = audioObject.AddComponent<AudioSource>();
+        source.playOnAwake = false;
+        source.loop = false;
+        source.spatialBlend = 1f;
+        source.rolloffMode = AudioRolloffMode.Linear;
+        source.minDistance = 0.25f;
+        source.maxDistance = 6f;
+        source.PlayOneShot(clip, Mathf.Clamp01(volume));
+        Destroy(audioObject, Mathf.Max(0.1f, clip.length + 0.15f));
     }
 
     private void BeginPreMoveTurnAnimation(float turnBlendDirection)
@@ -1979,9 +2123,9 @@ public class DogRoomAgent : MonoBehaviour
             yield return FaceTarget(chasePartner.transform, toyFaceDuration);
             yield return chasePartner.FaceTarget(transform, toyFaceDuration);
             Coroutine wagPartner = StartCoroutine(chasePartner.PlayTailWag());
-            Coroutine barkHolder = StartCoroutine(PlayBark(barkIdleDuration));
+            Coroutine wagHolder = StartCoroutine(PlayTailWag());
             yield return wagPartner;
-            yield return barkHolder;
+            yield return wagHolder;
             chasePartner.StartRoaming();
         }
     }
@@ -2318,6 +2462,7 @@ public class DogRoomAgent : MonoBehaviour
         Vector3 sideDirection = transform.right * (useLeftPaw ? -1f : 1f);
         Vector3 impulseDirection = (awayFromDog + sideDirection * Mathf.Max(0f, bigBallSideImpulseBias)).normalized;
         body.AddForce(impulseDirection * Mathf.Max(0f, bigBallHitImpulse), ForceMode.Impulse);
+        PlayBallBounceAudio(GetBigBallWorldCenter(toy));
 
         Vector3 torqueAxis = Vector3.Cross(Vector3.up, impulseDirection);
         if (torqueAxis.sqrMagnitude > 0.001f)
@@ -2546,6 +2691,7 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         heldToy = toy;
+        PlayToyPickupAudio(toy.transform.position);
         return true;
     }
 
@@ -2917,6 +3063,26 @@ public class DogRoomAgent : MonoBehaviour
 #endif
 
         return false;
+    }
+
+    private void AutoAssignEditorAudioClips()
+    {
+#if UNITY_EDITOR
+        if (walkingClip == null)
+        {
+            walkingClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorWalkAudioAssetPath);
+        }
+
+        if (ballBounceClip == null)
+        {
+            ballBounceClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorBallBounceAudioAssetPath);
+        }
+
+        if (toyPickupClip == null)
+        {
+            toyPickupClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorToyPickupAudioAssetPath);
+        }
+#endif
     }
 
 #if UNITY_EDITOR
@@ -3718,6 +3884,41 @@ public class DogRoomAgent : MonoBehaviour
             && IsInsideRoomBounds(hit.position))
         {
             return true;
+        }
+
+        hit = new NavMeshHit();
+        return false;
+    }
+
+    private bool TryFindFallbackRoomNavMeshPoint(out NavMeshHit hit)
+    {
+        float searchRadius = Mathf.Max(sampleRadius, navMeshRecoverySearchRadius);
+        if (TrySampleRoomPosition(transform.position, searchRadius, out hit)
+            || TrySampleRoomPosition(homePosition, searchRadius, out hit)
+            || TrySampleRoomPosition(roomBoundsCenter, searchRadius, out hit))
+        {
+            return true;
+        }
+
+        if (restrictToRoomBounds)
+        {
+            Vector2 halfExtents = GetUsableRoomHalfExtents();
+            int gridSteps = 4;
+            for (int x = -gridSteps; x <= gridSteps; x++)
+            {
+                for (int z = -gridSteps; z <= gridSteps; z++)
+                {
+                    Vector3 candidate = roomBoundsCenter + new Vector3(
+                        halfExtents.x * x / gridSteps,
+                        0f,
+                        halfExtents.y * z / gridSteps);
+
+                    if (TrySampleRoomPosition(candidate, Mathf.Max(sampleRadius, 0.45f), out hit))
+                    {
+                        return true;
+                    }
+                }
+            }
         }
 
         hit = new NavMeshHit();

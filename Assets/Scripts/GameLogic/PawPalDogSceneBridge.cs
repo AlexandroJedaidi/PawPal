@@ -1163,6 +1163,8 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
             metadata.SetBlocksDogNavigation(true, paddedRadius);
         }
 
+        PawPalBallBounceAudio.EnsureOn(spawnedToy);
+
         NavMeshObstacle obstacle = spawnedToy.GetComponent<NavMeshObstacle>();
         if (obstacle == null)
         {
