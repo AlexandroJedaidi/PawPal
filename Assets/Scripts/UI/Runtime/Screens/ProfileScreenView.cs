@@ -1,29 +1,29 @@
 using System.Collections.Generic;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class ProfileScreenView : AppScreenViewBase
 {
-    private struct MilestonePill
+    private sealed class MilestoneLevelView
     {
-        public float X;
-        public float Y;
-        public float Width;
-        public float Height;
-        public string Text;
-        public Color32 BorderColor;
-        public Color32 TextColor;
+        public int Level;
+        public Image Circle;
+        public Image Outline;
+        public TextMeshProUGUI Label;
     }
 
-    private struct MilestoneIcon
+    private sealed class MilestoneRewardView
     {
-        public float X;
-        public float Y;
-        public float Size;
-        public float IconSize;
-        public string IconName;
-        public float IconInset;
+        public int Level;
+        public TrainerMilestoneDefinition Milestone;
+        public bool UsesIcon;
+        public bool UsesPremiumCurrencyBubble;
+        public Image Background;
+        public Image Outline;
+        public Image Icon;
+        public TextMeshProUGUI Label;
     }
 
     private struct ActivityCardData
@@ -51,6 +51,7 @@ public class ProfileScreenView : AppScreenViewBase
 
     private static readonly Color32 SupportCream = new Color32(236, 223, 200, 255);
     private static readonly Color32 ComingSoonGrey = new Color32(220, 220, 220, 255);
+    private static readonly Color32 MutedTextGrey = new Color32(163, 163, 163, 255);
     private static readonly Color32 AgilityGold = new Color32(241, 179, 28, 255);
     private static readonly Color32 CtaBlue = new Color32(50, 187, 255, 255);
     private static readonly Color32 ProgressGreen = new Color32(0, 197, 6, 255);
@@ -77,10 +78,15 @@ public class ProfileScreenView : AppScreenViewBase
     private Image trainerProgressFill;
     private TextMeshProUGUI trainerLevelLabel;
     private TextMeshProUGUI trainerXpLabel;
+    private Image milestoneProgressFill;
+    private Image milestoneProgressBlend;
     private RectTransform activitiesSection;
     private TextMeshProUGUI dailyResetLabel;
     private TextMeshProUGUI emptyActivitiesLabel;
+    private string lastActivitySignature = string.Empty;
     private readonly List<GameObject> activityCardObjects = new List<GameObject>();
+    private readonly List<MilestoneLevelView> milestoneLevelViews = new List<MilestoneLevelView>();
+    private readonly List<MilestoneRewardView> milestoneRewardViews = new List<MilestoneRewardView>();
 
     protected override bool UseScreenContainer
     {
@@ -277,35 +283,42 @@ public class ProfileScreenView : AppScreenViewBase
     private void BuildOfferwallProgress(RectTransform parent)
     {
         CreateRoundedBar(parent, "ProgressBase", UiTheme.NavShadow, 166f, 52f, 1366f, 3f);
-        CreateRoundedBar(parent, "ProgressFill", UiTheme.NavBrand, 136f, 52f, 129f, 3f);
+        milestoneProgressFill = UiFactory.CreateImage("ProgressFill", parent, UiTheme.ProgressPillSprite, UiTheme.NavBrand);
+        milestoneProgressFill.type = Image.Type.Sliced;
+        milestoneProgressFill.preserveAspect = false;
+        milestoneProgressFill.rectTransform.anchorMin = new Vector2(0f, 1f);
+        milestoneProgressFill.rectTransform.anchorMax = new Vector2(0f, 1f);
+        milestoneProgressFill.rectTransform.pivot = new Vector2(0f, 1f);
+        milestoneProgressFill.rectTransform.sizeDelta = new Vector2(0f, 3f);
+        milestoneProgressFill.rectTransform.anchoredPosition = new Vector2(136f, -52f);
 
-        Image progressBlend = UiFactory.CreateImage(
+        milestoneProgressBlend = UiFactory.CreateImage(
             "ProgressBlend",
             parent,
             BuildOfferwallBlendSprite("ProfileOfferwallBlend", 24, 3),
             Color.white);
-        progressBlend.type = Image.Type.Simple;
-        progressBlend.preserveAspect = false;
-        progressBlend.rectTransform.anchorMin = new Vector2(0f, 1f);
-        progressBlend.rectTransform.anchorMax = new Vector2(0f, 1f);
-        progressBlend.rectTransform.pivot = new Vector2(0f, 1f);
-        progressBlend.rectTransform.sizeDelta = new Vector2(24f, 3f);
-        progressBlend.rectTransform.anchoredPosition = new Vector2(143f, -52f);
+        milestoneProgressBlend.type = Image.Type.Simple;
+        milestoneProgressBlend.preserveAspect = false;
+        milestoneProgressBlend.rectTransform.anchorMin = new Vector2(0f, 1f);
+        milestoneProgressBlend.rectTransform.anchorMax = new Vector2(0f, 1f);
+        milestoneProgressBlend.rectTransform.pivot = new Vector2(0f, 1f);
+        milestoneProgressBlend.rectTransform.sizeDelta = new Vector2(24f, 3f);
+        milestoneProgressBlend.rectTransform.anchoredPosition = new Vector2(136f, -52f);
     }
 
     private void BuildOfferwallLevels(RectTransform parent)
     {
+        milestoneLevelViews.Clear();
         for (int level = 1; level <= 50; level++)
         {
             float x = 5f + (31f * (level - 1));
-            bool unlocked = level <= 5;
-            BuildOfferwallLevelNode(parent, x, 40f, level.ToString(), unlocked);
+            BuildOfferwallLevelNode(parent, x, 40f, level);
         }
     }
 
-    private void BuildOfferwallLevelNode(RectTransform parent, float x, float y, string text, bool unlocked)
+    private void BuildOfferwallLevelNode(RectTransform parent, float x, float y, int level)
     {
-        Image circle = UiFactory.CreateImage("Level_" + text, parent, UiTheme.CircleSprite, unlocked ? UiTheme.NavBrand : UiTheme.NavShadow);
+        Image circle = UiFactory.CreateImage("Level_" + level, parent, UiTheme.CircleSprite, UiTheme.NavShadow);
         circle.type = Image.Type.Simple;
         circle.preserveAspect = false;
         circle.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -319,106 +332,96 @@ public class ProfileScreenView : AppScreenViewBase
         outline.preserveAspect = false;
         UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
 
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", circle.rectTransform, text, 13, unlocked ? UiTheme.White : Color.black, FontStyles.Normal, TextAlignmentOptions.Center);
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", circle.rectTransform, level.ToString(), 13, Color.black, FontStyles.Normal, TextAlignmentOptions.Center);
         label.font = UiTheme.NavBoldFont;
         UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
+
+        MilestoneLevelView view = new MilestoneLevelView();
+        view.Level = level;
+        view.Circle = circle;
+        view.Outline = outline;
+        view.Label = label;
+        milestoneLevelViews.Add(view);
     }
 
     private void BuildOfferwallRewards(RectTransform parent)
     {
-        List<MilestoneIcon> icons = new List<MilestoneIcon>
+        milestoneRewardViews.Clear();
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        IReadOnlyList<TrainerMilestoneDefinition> milestones = runtime != null ? runtime.GetTrainerMilestones() : null;
+        if (milestones == null)
         {
-            new MilestoneIcon { X = 65f, Y = 5f, Size = 25f, IconSize = 23f, IconName = "icon_collar_brand", IconInset = 1f },
-            new MilestoneIcon { X = 220f, Y = 68f, Size = 25f, IconSize = 21f, IconName = "icon_toys_brand", IconInset = 2f },
-            new MilestoneIcon { X = 375f, Y = 5f, Size = 25f, IconSize = 23f, IconName = "icon_collar_brand", IconInset = 1f },
-            new MilestoneIcon { X = 406f, Y = 68f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 530f, Y = 68f, Size = 25f, IconSize = 17f, IconName = "icon_clothing_brand", IconInset = 4f },
-            new MilestoneIcon { X = 623f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 716f, Y = 68f, Size = 25f, IconSize = 21f, IconName = "icon_toys_brand", IconInset = 2f },
-            new MilestoneIcon { X = 809f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_clothing_brand", IconInset = 4f },
-            new MilestoneIcon { X = 871f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 964f, Y = 68f, Size = 25f, IconSize = 23f, IconName = "icon_collar_brand", IconInset = 1f },
-            new MilestoneIcon { X = 995f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1057f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_dogbed_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1119f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1181f, Y = 5f, Size = 25f, IconSize = 19f, IconName = "icon_toys_brand", IconInset = 3f },
-            new MilestoneIcon { X = 1274f, Y = 68f, Size = 25f, IconSize = 17f, IconName = "icon_clothing_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1305f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1367f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_dog_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1491f, Y = 5f, Size = 25f, IconSize = 17f, IconName = "icon_foodsupply_brand", IconInset = 4f },
-            new MilestoneIcon { X = 1522f, Y = 68f, Size = 25f, IconSize = 17f, IconName = "icon_dog_brand", IconInset = 4f }
-        };
-
-        foreach (MilestoneIcon icon in icons)
-        {
-            BuildOfferwallRewardIcon(parent, icon);
+            return;
         }
 
-        BuildBluePawReward(parent);
-
-        List<MilestonePill> pills = new List<MilestonePill>
+        for (int i = 0; i < milestones.Count; i++)
         {
-            new MilestonePill { X = 118f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 148f, Y = 70f, Width = 47f, Height = 20f, Text = "2. dog", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 26f, Y = 70f, Width = 42f, Height = 20f, Text = "Clubs", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 272f, Y = 70f, Width = 47f, Height = 20f, Text = "3. dog", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 582f, Y = 70f, Width = 47f, Height = 20f, Text = "4. dog", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 737f, Y = 7f, Width = 47f, Height = 20f, Text = "5. dog", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 176f, Y = 7f, Width = 50f, Height = 20f, Text = "Agility", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 303f, Y = 7f, Width = 44f, Height = 20f, Text = "Disc", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 492f, Y = 7f, Width = 40f, Height = 20f, Text = "Style", BorderColor = AgilityGold, TextColor = AgilityGold },
-            new MilestonePill { X = 242f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 335f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 459f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 552f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 676f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 769f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 831f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 924f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1016f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1079f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1141f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1233f, Y = 7f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1327f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1388f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark },
-            new MilestonePill { X = 1451f, Y = 70f, Width = 40f, Height = 21f, Text = "\u20B1200", BorderColor = UiTheme.NavBrandDark, TextColor = UiTheme.NavBrandDark }
-        };
+            TrainerMilestoneDefinition milestone = milestones[i];
+            if (milestone == null || milestone.Level <= 1 || milestone.Level > 50)
+            {
+                continue;
+            }
 
-        foreach (MilestonePill pill in pills)
-        {
-            BuildMilestonePill(parent, pill);
+            if (TrainerProgressionDatabase.ShouldUseIconMarker(milestone))
+            {
+                BuildOfferwallRewardIcon(parent, milestone);
+            }
+            else if (milestone.RewardKind == TrainerMilestoneRewardKind.CurrencyPremium)
+            {
+                BuildBluePawReward(parent, milestone);
+            }
+            else
+            {
+                BuildMilestonePill(parent, milestone);
+            }
         }
     }
 
-    private void BuildOfferwallRewardIcon(RectTransform parent, MilestoneIcon reward)
+    private void BuildOfferwallRewardIcon(RectTransform parent, TrainerMilestoneDefinition milestone)
     {
-        Image bubble = UiFactory.CreateImage("Reward_" + reward.IconName, parent, UiTheme.CircleSprite, UiTheme.White);
+        string iconName = TrainerProgressionDatabase.GetMilestoneIconName(milestone);
+        bool topLane = UsesTopRewardLane(milestone.Level);
+        float x = GetMilestoneMarkerX(milestone.Level) + 8f;
+        float y = topLane ? 5f : 68f;
+        Vector2 iconLayout = GetMilestoneIconLayout(iconName);
+
+        Image bubble = UiFactory.CreateImage("Reward_" + milestone.Level, parent, UiTheme.CircleSprite, UiTheme.White);
         bubble.type = Image.Type.Simple;
         bubble.preserveAspect = false;
         bubble.rectTransform.anchorMin = new Vector2(0f, 1f);
         bubble.rectTransform.anchorMax = new Vector2(0f, 1f);
         bubble.rectTransform.pivot = new Vector2(0f, 1f);
-        bubble.rectTransform.sizeDelta = new Vector2(reward.Size, reward.Size);
-        bubble.rectTransform.anchoredPosition = new Vector2(reward.X, -reward.Y);
+        bubble.rectTransform.sizeDelta = new Vector2(25f, 25f);
+        bubble.rectTransform.anchoredPosition = new Vector2(x, -y);
 
         Image outline = UiFactory.CreateImage("Outline", bubble.rectTransform, UiTheme.CircleOutlineSprite, UiTheme.NavBrand);
         outline.type = Image.Type.Simple;
         outline.preserveAspect = false;
         UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
 
-        Image icon = UiFactory.CreateImage("Icon", bubble.rectTransform, sprites.GetIcon(reward.IconName), Color.white);
+        Image icon = UiFactory.CreateImage("Icon", bubble.rectTransform, sprites.GetIcon(iconName), Color.white);
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
-        icon.rectTransform.anchorMin = new Vector2(0f, 1f);
-        icon.rectTransform.anchorMax = new Vector2(0f, 1f);
-        icon.rectTransform.pivot = new Vector2(0f, 1f);
-        icon.rectTransform.sizeDelta = new Vector2(reward.IconSize, reward.IconSize);
-        icon.rectTransform.anchoredPosition = new Vector2(reward.IconInset, -reward.IconInset);
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = iconLayout;
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+
+        MilestoneRewardView view = new MilestoneRewardView();
+        view.Level = milestone.Level;
+        view.Milestone = milestone;
+        view.UsesIcon = true;
+        view.Background = bubble;
+        view.Outline = outline;
+        view.Icon = icon;
+        milestoneRewardViews.Add(view);
     }
 
-    private void BuildBluePawReward(RectTransform parent)
+    private void BuildBluePawReward(RectTransform parent, TrainerMilestoneDefinition milestone)
     {
-        RectTransform group = CreateNode("BluePawReward", parent, 86f, 69f, 45f, 22f);
+        bool topLane = UsesTopRewardLane(milestone.Level);
+        RectTransform group = CreateNode("BluePawReward_" + milestone.Level, parent, GetMilestoneMarkerX(milestone.Level), topLane ? 7f : 70f, 45f, 22f);
 
         Image bubble = UiFactory.CreateImage("Bubble", group, UiTheme.CircleSprite, CtaBlue);
         bubble.type = Image.Type.Simple;
@@ -438,34 +441,233 @@ public class ProfileScreenView : AppScreenViewBase
         paw.rectTransform.sizeDelta = new Vector2(19f, 19f);
         paw.rectTransform.anchoredPosition = new Vector2(1.5f, -1.5f);
 
-        TextMeshProUGUI value = UiFactory.CreateLabel("Value", group, "50", 13, CtaBlue, FontStyles.Normal, TextAlignmentOptions.Left);
+        TextMeshProUGUI value = UiFactory.CreateLabel("Value", group, TrainerProgressionDatabase.GetMilestoneShortLabel(milestone), 13, CtaBlue, FontStyles.Normal, TextAlignmentOptions.Left);
         ConfigureCompactLabel(value, UiTheme.DefaultFont, 13);
         value.rectTransform.anchorMin = new Vector2(0f, 1f);
         value.rectTransform.anchorMax = new Vector2(0f, 1f);
         value.rectTransform.pivot = new Vector2(0f, 1f);
         value.rectTransform.sizeDelta = new Vector2(23f, 21f);
         value.rectTransform.anchoredPosition = new Vector2(24.5f, -0.5f);
+
+        MilestoneRewardView view = new MilestoneRewardView();
+        view.Level = milestone.Level;
+        view.Milestone = milestone;
+        view.UsesPremiumCurrencyBubble = true;
+        view.Background = bubble;
+        view.Icon = paw;
+        view.Label = value;
+        milestoneRewardViews.Add(view);
     }
 
-    private void BuildMilestonePill(RectTransform parent, MilestonePill pill)
+    private void BuildMilestonePill(RectTransform parent, TrainerMilestoneDefinition milestone)
     {
-        Image background = UiFactory.CreateImage("Pill_" + pill.Text, parent, UiTheme.RoundedTenSprite, UiTheme.White);
+        bool topLane = UsesTopRewardLane(milestone.Level);
+        string labelText = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
+        float width = GetMilestonePillWidth(labelText);
+        Image background = UiFactory.CreateImage("Pill_" + milestone.Level, parent, UiTheme.RoundedTenSprite, UiTheme.White);
         background.type = Image.Type.Sliced;
         background.preserveAspect = false;
         background.rectTransform.anchorMin = new Vector2(0f, 1f);
         background.rectTransform.anchorMax = new Vector2(0f, 1f);
         background.rectTransform.pivot = new Vector2(0f, 1f);
-        background.rectTransform.sizeDelta = new Vector2(pill.Width, pill.Height);
-        background.rectTransform.anchoredPosition = new Vector2(pill.X, -pill.Y);
+        background.rectTransform.sizeDelta = new Vector2(width, 21f);
+        background.rectTransform.anchoredPosition = new Vector2(GetMilestoneMarkerX(milestone.Level), -(topLane ? 7f : 70f));
 
-        Image outline = UiFactory.CreateImage("Outline", background.rectTransform, UiTheme.RoundedTenOutlineSprite, pill.BorderColor);
+        Image outline = UiFactory.CreateImage("Outline", background.rectTransform, UiTheme.RoundedTenOutlineSprite, GetMilestoneAccentColor(milestone));
         outline.type = Image.Type.Sliced;
         outline.preserveAspect = false;
         UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
 
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", background.rectTransform, pill.Text, 13, pill.TextColor, FontStyles.Normal, TextAlignmentOptions.Center);
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", background.rectTransform, labelText, 13, GetMilestoneAccentColor(milestone), FontStyles.Normal, TextAlignmentOptions.Center);
         ConfigureCompactLabel(label, UiTheme.DefaultFont, 13);
         UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
+
+        MilestoneRewardView view = new MilestoneRewardView();
+        view.Level = milestone.Level;
+        view.Milestone = milestone;
+        view.Background = background;
+        view.Outline = outline;
+        view.Label = label;
+        milestoneRewardViews.Add(view);
+    }
+
+    private void RefreshMilestoneRail(PawPalGameRuntime runtime, TrainerProgressionSnapshot snapshot)
+    {
+        if (milestoneProgressFill != null)
+        {
+            float fillWidth = 1366f * snapshot.AbsoluteProgress01;
+            milestoneProgressFill.rectTransform.sizeDelta = new Vector2(fillWidth, 3f);
+
+            if (milestoneProgressBlend != null)
+            {
+                float blendX = 136f + Mathf.Clamp(fillWidth - 24f, 0f, 1366f - 24f);
+                milestoneProgressBlend.rectTransform.anchoredPosition = new Vector2(blendX, -52f);
+                milestoneProgressBlend.gameObject.SetActive(fillWidth > 0.01f);
+            }
+        }
+
+        for (int i = 0; i < milestoneLevelViews.Count; i++)
+        {
+            MilestoneLevelView levelView = milestoneLevelViews[i];
+            bool unlocked = levelView != null && levelView.Level <= snapshot.Level;
+            if (levelView == null)
+            {
+                continue;
+            }
+
+            if (levelView.Circle != null)
+            {
+                levelView.Circle.color = unlocked ? UiTheme.NavBrand : UiTheme.NavShadow;
+            }
+
+            if (levelView.Outline != null)
+            {
+                levelView.Outline.color = SupportCream;
+            }
+
+            if (levelView.Label != null)
+            {
+                levelView.Label.text = levelView.Level.ToString();
+                levelView.Label.color = unlocked ? UiTheme.White : Color.black;
+            }
+        }
+
+        IReadOnlyList<TrainerMilestoneDefinition> milestones = runtime.GetTrainerMilestones();
+        for (int i = 0; i < milestoneRewardViews.Count; i++)
+        {
+            MilestoneRewardView rewardView = milestoneRewardViews[i];
+            if (rewardView == null || rewardView.Level <= 0 || rewardView.Level > milestones.Count)
+            {
+                continue;
+            }
+
+            rewardView.Milestone = milestones[rewardView.Level - 1];
+            bool reached = rewardView.Level <= snapshot.Level;
+            ApplyMilestoneRewardStyle(rewardView, reached);
+        }
+    }
+
+    private void ApplyMilestoneRewardStyle(MilestoneRewardView rewardView, bool reached)
+    {
+        TrainerMilestoneDefinition milestone = rewardView.Milestone;
+        Color accent = GetMilestoneAccentColor(milestone);
+        Color mutedText = MutedTextGrey;
+        Color mutedOutline = ComingSoonGrey;
+        Color mutedFill = new Color32(244, 242, 238, 255);
+
+        if (rewardView.UsesPremiumCurrencyBubble)
+        {
+            if (rewardView.Background != null)
+            {
+                rewardView.Background.color = reached ? CtaBlue : ComingSoonGrey;
+            }
+
+            if (rewardView.Icon != null)
+            {
+                rewardView.Icon.color = reached ? Color.white : mutedFill;
+            }
+
+            if (rewardView.Label != null)
+            {
+                rewardView.Label.text = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
+                rewardView.Label.color = reached ? CtaBlue : mutedText;
+            }
+
+            return;
+        }
+
+        if (rewardView.UsesIcon)
+        {
+            if (rewardView.Background != null)
+            {
+                rewardView.Background.color = reached ? UiTheme.White : mutedFill;
+            }
+
+            if (rewardView.Outline != null)
+            {
+                rewardView.Outline.color = reached ? UiTheme.NavBrand : mutedOutline;
+            }
+
+            if (rewardView.Icon != null)
+            {
+                rewardView.Icon.color = reached ? Color.white : mutedText;
+            }
+
+            return;
+        }
+
+        if (rewardView.Background != null)
+        {
+            rewardView.Background.color = UiTheme.White;
+        }
+
+        if (rewardView.Outline != null)
+        {
+            rewardView.Outline.color = reached ? accent : mutedOutline;
+        }
+
+        if (rewardView.Label != null)
+        {
+            rewardView.Label.text = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
+            rewardView.Label.color = reached ? accent : mutedText;
+        }
+    }
+
+    private static bool UsesTopRewardLane(int level)
+    {
+        return ((level - 2) & 1) == 1;
+    }
+
+    private static float GetMilestoneMarkerX(int level)
+    {
+        return (5f + (31f * (level - 1))) - 10f;
+    }
+
+    private static float GetMilestonePillWidth(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 40f;
+        }
+
+        return Mathf.Clamp(14f + (text.Length * 6f), 40f, 62f);
+    }
+
+    private static Color GetMilestoneAccentColor(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return UiTheme.NavBrandDark;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.Feature:
+            case TrainerMilestoneRewardKind.DogUnlock:
+                return AgilityGold;
+            default:
+                return UiTheme.NavBrandDark;
+        }
+    }
+
+    private static Vector2 GetMilestoneIconLayout(string iconName)
+    {
+        if (string.Equals(iconName, "icon_collar_brand", System.StringComparison.Ordinal))
+        {
+            return new Vector2(23f, 23f);
+        }
+
+        if (string.Equals(iconName, "icon_toys_brand", System.StringComparison.Ordinal))
+        {
+            return new Vector2(21f, 21f);
+        }
+
+        if (string.Equals(iconName, "icon_dog_brand", System.StringComparison.Ordinal))
+        {
+            return new Vector2(17f, 17f);
+        }
+
+        return new Vector2(17f, 17f);
     }
 
     private void BuildActivitiesSection(RectTransform overview)
@@ -514,7 +716,7 @@ public class ProfileScreenView : AppScreenViewBase
         emptyActivitiesLabel.rectTransform.anchoredPosition = new Vector2(49f, -128f);
         emptyActivitiesLabel.gameObject.SetActive(false);
 
-        RebuildActivityCards();
+        RebuildActivityCards(PawPalGameRuntime.Instance);
     }
 
     private void BuildActivityCard(RectTransform parent, ActivityCardData data, float y)
@@ -598,6 +800,8 @@ public class ProfileScreenView : AppScreenViewBase
             return;
         }
 
+        TrainerProgressionSnapshot snapshot = runtime.GetTrainerProgressionSnapshot();
+
         if (progressHeaderLabel != null)
         {
             progressHeaderLabel.text = "\u201C" + runtime.TrainerState.TrainerName + "\u201D - Progress";
@@ -605,12 +809,12 @@ public class ProfileScreenView : AppScreenViewBase
 
         if (trainerProgressFill != null)
         {
-            trainerProgressFill.rectTransform.sizeDelta = new Vector2(249f * runtime.GetTrainerLevelProgress01(), 11f);
+            trainerProgressFill.rectTransform.sizeDelta = new Vector2(249f * snapshot.LevelProgress01, 11f);
         }
 
         if (trainerLevelLabel != null)
         {
-            trainerLevelLabel.text = runtime.TrainerState.Level.ToString();
+            trainerLevelLabel.text = snapshot.Level.ToString();
         }
 
         if (trainerXpLabel != null)
@@ -623,15 +827,34 @@ public class ProfileScreenView : AppScreenViewBase
             dailyResetLabel.text = runtime.GetDailyResetCountdownText();
         }
 
-        RebuildActivityCards();
+        RefreshMilestoneRail(runtime, snapshot);
+        RebuildActivityCards(runtime);
     }
 
-    private void RebuildActivityCards()
+    private void RebuildActivityCards(PawPalGameRuntime runtime)
     {
         if (activitiesSection == null)
         {
             return;
         }
+
+        if (runtime == null)
+        {
+            if (emptyActivitiesLabel != null)
+            {
+                emptyActivitiesLabel.gameObject.SetActive(true);
+            }
+
+            return;
+        }
+
+        string activitySignature = BuildActivitySignature(runtime);
+        if (activitySignature == lastActivitySignature)
+        {
+            return;
+        }
+
+        lastActivitySignature = activitySignature;
 
         for (int i = 0; i < activityCardObjects.Count; i++)
         {
@@ -643,16 +866,6 @@ public class ProfileScreenView : AppScreenViewBase
 
         activityCardObjects.Clear();
 
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime == null)
-        {
-            if (emptyActivitiesLabel != null)
-            {
-                emptyActivitiesLabel.gameObject.SetActive(true);
-            }
-            return;
-        }
-
         if (emptyActivitiesLabel != null)
         {
             emptyActivitiesLabel.gameObject.SetActive(runtime.DailyTasks.Count == 0);
@@ -663,6 +876,27 @@ public class ProfileScreenView : AppScreenViewBase
         {
             BuildActivityCard(activitiesSection, BuildActivityCardData(runtime.DailyTasks[i]), yPositions[i]);
         }
+    }
+
+    private static string BuildActivitySignature(PawPalGameRuntime runtime)
+    {
+        StringBuilder builder = new StringBuilder();
+            IList<PawPalDailyTaskState> tasks = runtime.DailyTasks;
+        builder.Append(tasks.Count);
+        for (int i = 0; i < tasks.Count; i++)
+        {
+            PawPalDailyTaskState task = tasks[i];
+            builder.Append('|');
+            builder.Append(task.Id);
+            builder.Append(':');
+            builder.Append(task.Progress);
+            builder.Append('/');
+            builder.Append(task.RequiredCount);
+            builder.Append(':');
+            builder.Append(task.RewardGranted ? '1' : '0');
+        }
+
+        return builder.ToString();
     }
 
     private ActivityCardData BuildActivityCardData(PawPalDailyTaskState task)

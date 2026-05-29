@@ -34,6 +34,7 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private float zoomHoldDuration = 0.75f;
     [SerializeField] private float zoomOutDuration = 2.25f;
     [SerializeField] private float minimumZoomCooldown = 8f;
+    [SerializeField] private Vector3 zoomHeadFocusOffset = new Vector3(0f, 0.03f, 0f);
 
     private Camera attachedCamera;
     private Vector3 fixedPosition;
@@ -55,6 +56,12 @@ public class DogCycleCamera : MonoBehaviour
     private bool mouseDragActive;
     private int activeTouchFingerId = -1;
     private Vector2 lastManualPointerPosition;
+    private bool interactionFocusActive;
+    private Transform interactionFocusTarget;
+    private Transform interactionFocusSecondTarget;
+    private Vector3 interactionFocusOffset;
+    private bool zoomFocusActive;
+    private readonly Dictionary<DogRoomAgent, Transform> headTargetsByDog = new Dictionary<DogRoomAgent, Transform>();
 
     public Transform ActiveTarget
     {
@@ -103,6 +110,8 @@ public class DogCycleCamera : MonoBehaviour
             zoomRoutine = null;
         }
 
+        zoomFocusActive = false;
+
         if (attachedCamera != null && baseFieldOfView > 0f)
         {
             attachedCamera.fieldOfView = baseFieldOfView;
@@ -115,6 +124,12 @@ public class DogCycleCamera : MonoBehaviour
 
         if (dogs == null || dogs.Length == 0)
         {
+            return;
+        }
+
+        if (interactionFocusActive)
+        {
+            UpdateInteractionFocus();
             return;
         }
 
@@ -138,7 +153,7 @@ public class DogCycleCamera : MonoBehaviour
             if (switchTimer >= switchInterval)
             {
                 switchTimer = 0f;
-                SwitchToIndex(NextValidIndex(activeIndex + 1));
+                SwitchToIndex(NextValidIndex(activeIndex + 1), true);
                 TryStartZoom();
             }
         }
@@ -158,7 +173,7 @@ public class DogCycleCamera : MonoBehaviour
             transform.position = fixedPosition;
         }
 
-        Vector3 focusPoint = GetSmoothedFocusPoint(activeDog.transform.position + focusOffset);
+        Vector3 focusPoint = GetSmoothedFocusPoint(GetCameraFocusPoint(activeDog));
         Vector3 toTarget = focusPoint - transform.position;
         if (toTarget.sqrMagnitude < 0.001f)
         {
@@ -167,6 +182,104 @@ public class DogCycleCamera : MonoBehaviour
 
         Quaternion targetRotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSmooth);
+    }
+
+    public void BeginInteractionFocus(Transform target, Vector3 offset)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        BeginInteractionFocusInternal(target, null, offset);
+    }
+
+    public void BeginPairInteractionFocus(Transform firstTarget, Transform secondTarget, Vector3 offset)
+    {
+        if (firstTarget == null || secondTarget == null)
+        {
+            return;
+        }
+
+        BeginInteractionFocusInternal(firstTarget, secondTarget, offset);
+    }
+
+    private void BeginInteractionFocusInternal(Transform target, Transform secondTarget, Vector3 offset)
+    {
+        interactionFocusActive = true;
+        interactionFocusTarget = target;
+        interactionFocusSecondTarget = secondTarget;
+        interactionFocusOffset = offset;
+        manualLookHoldUntil = 0f;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        switchTimer = 0f;
+
+        if (zoomRoutine != null)
+        {
+            StopCoroutine(zoomRoutine);
+            zoomRoutine = null;
+        }
+
+        zoomFocusActive = false;
+
+        if (attachedCamera != null && baseFieldOfView > 0f)
+        {
+            attachedCamera.fieldOfView = baseFieldOfView;
+        }
+    }
+
+    public void EndInteractionFocus()
+    {
+        if (!interactionFocusActive)
+        {
+            return;
+        }
+
+        interactionFocusActive = false;
+        interactionFocusTarget = null;
+        interactionFocusSecondTarget = null;
+        switchTimer = 0f;
+        SyncToRuntimeActiveDog(true);
+    }
+
+    private void UpdateInteractionFocus()
+    {
+        if (interactionFocusTarget == null && interactionFocusSecondTarget == null)
+        {
+            EndInteractionFocus();
+            return;
+        }
+
+        if (keepInitialPosition)
+        {
+            transform.position = fixedPosition;
+        }
+
+        Vector3 focusPoint = GetInteractionFocusPoint() + interactionFocusOffset;
+        Vector3 toTarget = focusPoint - transform.position;
+        if (toTarget.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSmooth);
+    }
+
+    private Vector3 GetInteractionFocusPoint()
+    {
+        if (interactionFocusTarget != null && interactionFocusSecondTarget != null)
+        {
+            return Vector3.Lerp(interactionFocusTarget.position, interactionFocusSecondTarget.position, 0.5f);
+        }
+
+        if (interactionFocusTarget != null)
+        {
+            return interactionFocusTarget.position;
+        }
+
+        return interactionFocusSecondTarget.position;
     }
 
     private void HandleManualLookInput()
@@ -314,6 +427,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private void SwitchToIndex(int nextIndex)
     {
+        SwitchToIndex(nextIndex, false);
+    }
+
+    private void SwitchToIndex(int nextIndex, bool updateRuntimeSelection)
+    {
         if (nextIndex == activeIndex)
         {
             return;
@@ -322,13 +440,50 @@ public class DogCycleCamera : MonoBehaviour
         DogRoomAgent currentDog = GetActiveDog();
         if (!hasFocusPoint && currentDog != null)
         {
-            currentFocusPoint = currentDog.transform.position + focusOffset;
+            currentFocusPoint = GetCameraFocusPoint(currentDog);
             hasFocusPoint = true;
         }
 
         switchStartFocusPoint = currentFocusPoint;
         switchBlendTimer = 0f;
         activeIndex = nextIndex;
+
+        if (updateRuntimeSelection)
+        {
+            SelectRuntimeDogForCameraIndex(activeIndex);
+        }
+    }
+
+    private void SelectRuntimeDogForCameraIndex(int dogIndex)
+    {
+        if (runtime == null)
+        {
+            runtime = PawPalGameRuntime.Instance;
+        }
+
+        if (runtime == null)
+        {
+            return;
+        }
+
+        DogRoomAgent[] resolvedDogs = GetResolvedDogs();
+        if (resolvedDogs == null || dogIndex < 0 || dogIndex >= resolvedDogs.Length)
+        {
+            return;
+        }
+
+        DogRoomAgent dog = resolvedDogs[dogIndex];
+        if (dog == null)
+        {
+            return;
+        }
+
+        if (dog.HasExplicitDogId && runtime.SelectDogById(dog.DogId, false))
+        {
+            return;
+        }
+
+        runtime.SelectDogIndex(dogIndex, false);
     }
 
     private Vector3 GetSmoothedFocusPoint(Vector3 targetFocusPoint)
@@ -371,6 +526,7 @@ public class DogCycleCamera : MonoBehaviour
 
     private IEnumerator ZoomRoutine()
     {
+        zoomFocusActive = true;
         float lowestAllowedFov = Mathf.Clamp(minimumZoomFieldOfView, 10f, Mathf.Max(11f, baseFieldOfView - 1f));
         float requestedTargetFov = Mathf.Clamp(zoomFieldOfView, lowestAllowedFov, Mathf.Max(lowestAllowedFov, baseFieldOfView - 1f));
         float dropTargetFov = Mathf.Max(lowestAllowedFov, baseFieldOfView - Mathf.Max(0f, minimumZoomFovDrop));
@@ -380,7 +536,85 @@ public class DogCycleCamera : MonoBehaviour
         yield return new WaitForSeconds(zoomHoldDuration);
         yield return AnimateFieldOfView(attachedCamera.fieldOfView, baseFieldOfView, zoomOutDuration);
 
+        zoomFocusActive = false;
         zoomRoutine = null;
+    }
+
+    private Vector3 GetCameraFocusPoint(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return transform.position + transform.forward;
+        }
+
+        if (zoomFocusActive)
+        {
+            Transform headTarget = ResolveDogHeadTarget(dog);
+            if (headTarget != null)
+            {
+                return headTarget.position + zoomHeadFocusOffset;
+            }
+        }
+
+        return dog.transform.position + focusOffset;
+    }
+
+    private Transform ResolveDogHeadTarget(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return null;
+        }
+
+        Transform cachedTarget;
+        if (headTargetsByDog.TryGetValue(dog, out cachedTarget) && cachedTarget != null)
+        {
+            return cachedTarget;
+        }
+
+        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
+        cachedTarget = attention != null ? attention.GetOwnHeadLookTarget() : FindDogHeadTransform(dog.transform);
+        if (cachedTarget != null)
+        {
+            headTargetsByDog[dog] = cachedTarget;
+        }
+
+        return cachedTarget;
+    }
+
+    private static Transform FindDogHeadTransform(Transform root)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform candidate = children[i];
+            if (candidate != null && string.Equals(candidate.name, "head", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform candidate = children[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            string lowerName = candidate.name.ToLowerInvariant();
+            if (lowerName.Contains("head") && !lowerName.Contains("aim") && !lowerName.Contains("target") && !lowerName.Contains("helper"))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private IEnumerator AnimateFieldOfView(float fromFov, float toFov, float duration)
@@ -571,7 +805,7 @@ public class DogCycleCamera : MonoBehaviour
             DogRoomAgent currentDog = GetActiveDog();
             if (currentDog != null)
             {
-                currentFocusPoint = currentDog.transform.position + focusOffset;
+                currentFocusPoint = GetCameraFocusPoint(currentDog);
                 switchStartFocusPoint = currentFocusPoint;
                 hasFocusPoint = true;
                 switchBlendTimer = switchBlendDuration;

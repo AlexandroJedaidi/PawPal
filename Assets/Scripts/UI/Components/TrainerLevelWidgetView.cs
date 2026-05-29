@@ -24,6 +24,15 @@ public class TrainerLevelWidgetView : MonoBehaviour
     private Image starBadge;
     private TextMeshProUGUI levelLabel;
 
+    public void Initialize(UiSpriteLibrary sprites)
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        TrainerProgressionSnapshot snapshot = runtime != null ? runtime.GetTrainerProgressionSnapshot() : default(TrainerProgressionSnapshot);
+        int level = snapshot.Level > 0 ? snapshot.Level : 1;
+        float progress01 = snapshot.LevelProgress01;
+        Initialize(level, progress01, sprites);
+    }
+
     public void Initialize(int level, float progress01, UiSpriteLibrary sprites)
     {
         layoutElement = UiFactory.EnsureLayoutElement(gameObject, -1f, BaseHeight, 1f, 0f);

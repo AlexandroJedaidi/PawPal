@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
 [DisallowMultipleComponent]
@@ -38,12 +39,24 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
     };
 
     private readonly Dictionary<string, GameObject> collarInstancesByDogId = new Dictionary<string, GameObject>(StringComparer.Ordinal);
-    private readonly List<GameObject> activeSpawnedToys = new List<GameObject>();
+    private readonly List<SpawnedToyRecord> activeSpawnedToys = new List<SpawnedToyRecord>();
     private readonly HashSet<string> warningKeys = new HashSet<string>(StringComparer.Ordinal);
 
     private PawPalGameRuntime runtime;
     private DogRoomAgent currentPresentationAgent;
     private BoxCollider fallbackToyFloor;
+
+    private sealed class SpawnedToyRecord
+    {
+        public SpawnedToyRecord(GameObject instance, string itemId)
+        {
+            Instance = instance;
+            ItemId = itemId;
+        }
+
+        public GameObject Instance { get; }
+        public string ItemId { get; }
+    }
 
     private readonly struct CollarPlacement
     {
@@ -150,6 +163,14 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         HashSet<string> liveDogIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, DogRoomAgent> pair in agentsByDogId)
+        {
+            if (!RuntimeContainsDogId(pair.Key))
+            {
+                runtime.TryEnsureDogForSceneBinding(pair.Key);
+            }
+        }
+
         int fallbackIndex = 0;
         for (int i = 0; i < runtime.Dogs.Count; i++)
         {
@@ -255,10 +276,21 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
 
         GameObject spawnedToy = Instantiate(prefab);
         spawnedToy.name = prefab.name;
+        PawPalToyRuntimeMetadata metadata = spawnedToy.GetComponent<PawPalToyRuntimeMetadata>();
+        if (metadata == null)
+        {
+            metadata = spawnedToy.AddComponent<PawPalToyRuntimeMetadata>();
+        }
+
+        metadata.Initialize(definition.Id, definition.ToyInteractionMode);
         ApplyInstanceTint(spawnedToy, definition.ToyTint);
         spawnedToy.transform.rotation = Quaternion.identity;
         EnsureDynamicToyCollider(spawnedToy);
         spawnedToy.transform.position = ResolveToySpawnPosition(spawnedToy, GetToySpawnPosition());
+        if (definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll)
+        {
+            ConfigureLargeToyNavigationBlocker(spawnedToy, metadata);
+        }
 
         Rigidbody body = spawnedToy.GetComponent<Rigidbody>();
         if (body == null)
@@ -268,12 +300,68 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
 
         body.isKinematic = false;
         body.useGravity = true;
-        body.mass = 0.35f;
+        body.mass = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.65f : 0.35f;
+        body.linearDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.08f : 0f;
+        body.angularDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.16f : 0.05f;
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
         TrySetToyTag(spawnedToy);
-        activeSpawnedToys.Add(spawnedToy);
+        activeSpawnedToys.Add(new SpawnedToyRecord(spawnedToy, definition.Id));
         return true;
+    }
+
+    public bool IsToyActiveInScene(string itemId)
+    {
+        if (string.IsNullOrEmpty(itemId))
+        {
+            return false;
+        }
+
+        PruneDestroyedToys();
+        for (int i = 0; i < activeSpawnedToys.Count; i++)
+        {
+            SpawnedToyRecord record = activeSpawnedToys[i];
+            if (record != null
+                && record.Instance != null
+                && string.Equals(record.ItemId, itemId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool TryRemoveToyFromScene(string itemId)
+    {
+        if (string.IsNullOrEmpty(itemId))
+        {
+            return false;
+        }
+
+        PruneDestroyedToys();
+        bool removed = false;
+        for (int i = activeSpawnedToys.Count - 1; i >= 0; i--)
+        {
+            SpawnedToyRecord record = activeSpawnedToys[i];
+            if (record == null || record.Instance == null)
+            {
+                activeSpawnedToys.RemoveAt(i);
+                continue;
+            }
+
+            if (!string.Equals(record.ItemId, itemId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            GameObject toy = record.Instance;
+            activeSpawnedToys.RemoveAt(i);
+            Destroy(toy);
+            removed = true;
+        }
+
+        return removed;
     }
 
     private void HandleRuntimeStateChanged()
@@ -833,11 +921,11 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
                 return false;
             }
 
-            GameObject removableToy = activeSpawnedToys[removableIndex];
+            SpawnedToyRecord removableRecord = activeSpawnedToys[removableIndex];
             activeSpawnedToys.RemoveAt(removableIndex);
-            if (removableToy != null)
+            if (removableRecord != null && removableRecord.Instance != null)
             {
-                Destroy(removableToy);
+                Destroy(removableRecord.Instance);
             }
         }
 
@@ -848,13 +936,13 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
     {
         for (int i = 0; i < activeSpawnedToys.Count; i++)
         {
-            GameObject toy = activeSpawnedToys[i];
-            if (toy == null)
+            SpawnedToyRecord record = activeSpawnedToys[i];
+            if (record == null || record.Instance == null)
             {
                 return i;
             }
 
-            if (toy.GetComponentInParent<DogRoomAgent>() == null)
+            if (record.Instance.GetComponentInParent<DogRoomAgent>() == null)
             {
                 return i;
             }
@@ -867,7 +955,8 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
     {
         for (int i = activeSpawnedToys.Count - 1; i >= 0; i--)
         {
-            if (activeSpawnedToys[i] == null)
+            SpawnedToyRecord record = activeSpawnedToys[i];
+            if (record == null || record.Instance == null)
             {
                 activeSpawnedToys.RemoveAt(i);
             }
@@ -1034,6 +1123,99 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
             fallbackCollider.isTrigger = false;
             fallbackCollider.enabled = true;
         }
+    }
+
+    private static void ConfigureLargeToyNavigationBlocker(GameObject spawnedToy, PawPalToyRuntimeMetadata metadata)
+    {
+        if (spawnedToy == null)
+        {
+            return;
+        }
+
+        Bounds bounds;
+        float radius = TryGetToyBlockingBounds(spawnedToy, out bounds)
+            ? Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z))
+            : 0.35f;
+        float paddedRadius = radius + 0.18f;
+
+        if (metadata != null)
+        {
+            metadata.SetBlocksDogNavigation(true, paddedRadius);
+        }
+
+        NavMeshObstacle obstacle = spawnedToy.GetComponent<NavMeshObstacle>();
+        if (obstacle == null)
+        {
+            obstacle = spawnedToy.AddComponent<NavMeshObstacle>();
+        }
+
+        obstacle.shape = NavMeshObstacleShape.Capsule;
+        obstacle.radius = paddedRadius;
+        obstacle.height = TryGetToyBlockingBounds(spawnedToy, out bounds)
+            ? Mathf.Max(0.2f, bounds.size.y)
+            : Mathf.Max(0.2f, paddedRadius * 2f);
+        obstacle.center = Vector3.zero;
+        obstacle.carving = true;
+        obstacle.carveOnlyStationary = false;
+        obstacle.carvingMoveThreshold = 0.08f;
+        obstacle.carvingTimeToStationary = 0.15f;
+    }
+
+    private static bool TryGetToyBlockingBounds(GameObject spawnedToy, out Bounds bounds)
+    {
+        bounds = spawnedToy != null ? new Bounds(spawnedToy.transform.position, Vector3.zero) : new Bounds();
+        if (spawnedToy == null)
+        {
+            return false;
+        }
+
+        bool hasBounds = false;
+        Collider[] colliders = spawnedToy.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider == null || !collider.enabled || collider.isTrigger)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(collider.bounds);
+            }
+        }
+
+        if (hasBounds)
+        {
+            return true;
+        }
+
+        Renderer[] renderers = spawnedToy.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     private BoxCollider EnsureFallbackToyFloor(Vector3 nearPosition)

@@ -150,6 +150,7 @@ public class MapScreenView : AppScreenViewBase
     private RectTransform socialAddFriendRoot;
     private RectTransform socialEnterClubRoot;
     private TextMeshProUGUI competitionDogNameLabel;
+    private readonly List<TrainerLevelWidgetView> trainerLevelWidgets = new List<TrainerLevelWidgetView>();
 
     private MapMode currentMode;
 
@@ -619,7 +620,8 @@ public class MapScreenView : AppScreenViewBase
     {
         RectTransform trainerRect = CreateNode("TrainerLevel", parent, x, y, 175f, 76f);
         TrainerLevelWidgetView trainer = trainerRect.gameObject.AddComponent<TrainerLevelWidgetView>();
-        trainer.Initialize(5, 97f / 138f, sprites);
+        trainer.Initialize(sprites);
+        trainerLevelWidgets.Add(trainer);
     }
 
     private void CreateLocationHotspot(RectTransform parent, string name, float x, float y, float width, float height, string labelText, string iconName, float iconSize, UnityEngine.Events.UnityAction onClick)
@@ -874,13 +876,25 @@ public class MapScreenView : AppScreenViewBase
     private void RefreshRuntimeState()
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime == null || competitionDogNameLabel == null)
+        if (runtime == null)
         {
             return;
         }
 
-        PawPalDogState activeDog = runtime.ActiveDog;
-        competitionDogNameLabel.text = activeDog == null || string.IsNullOrEmpty(activeDog.DisplayName) ? "Dog" : activeDog.DisplayName;
+        for (int i = 0; i < trainerLevelWidgets.Count; i++)
+        {
+            TrainerLevelWidgetView trainerWidget = trainerLevelWidgets[i];
+            if (trainerWidget != null)
+            {
+                trainerWidget.SetState(runtime.TrainerState.Level, runtime.GetTrainerLevelProgress01());
+            }
+        }
+
+        if (competitionDogNameLabel != null)
+        {
+            PawPalDogState activeDog = runtime.ActiveDog;
+            competitionDogNameLabel.text = activeDog == null || string.IsNullOrEmpty(activeDog.DisplayName) ? "Dog" : activeDog.DisplayName;
+        }
     }
 
     private void SelectPreviousDog()

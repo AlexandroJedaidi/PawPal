@@ -119,6 +119,63 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1001 &68997571
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 817326786814452118, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_Name
+      value: Big_ball_1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0.35444295
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.18860924
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 1.079465
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
 --- !u!1 &79543698
 GameObject:
   m_ObjectHideFlags: 0
@@ -2648,12 +2705,16 @@ MonoBehaviour:
   roomBoundsPadding: 0.25
   outsideRoomRepathDistance: 0.05
   calmWalkSpeed: 0.38
+  trotSpeed: 0.65
+  runSpeed: 1.15
   acceleration: 4.5
   angularSpeed: 420
   stoppingDistance: 0.15
   turnSpeed: 6
   animatorSpeedScale: 1
   walkAnimatorSpeed: 0.5
+  trotAnimatorSpeed: 0.78
+  runAnimatorSpeed: 1
   arrivalSlowdownDistance: 0.65
   animatorSpeedDampTime: 0.16
   animatorDirectionDampTime: 0.12
@@ -2663,8 +2724,13 @@ MonoBehaviour:
   preMoveTurnAngle: 8
   preMovePauseDuration: 0.12
   locomotionStateName: Locomotion
+  runStateName: RunForward
   locomotionCrossFadeDuration: 0.12
   locomotionLeadInDuration: 0.2
+  personalSpaceRadius: 0.72
+  destinationReservationRadius: 0.8
+  personalSpaceYieldDistance: 0.58
+  agentRadiusFromPersonalSpace: 0.36
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
   tailWagIdleIndex: 1
@@ -2676,6 +2742,28 @@ MonoBehaviour:
   locomotionSettleDuration: 0.3
   sitEndRecoveryDuration: 1.15
   disableLegacyDogControllers: 1
+  standingIdleStateNames:
+  - Idle1
+  - Idle2
+  - Idle3
+  - Idle4
+  useImportedStandingIdleClipsInEditor: 1
+  useImportedIdleFiveSequence: 1
+  importedIdleFiveLoopDuration: 1.6
+  scratchStateName: Scratching
+  tailWagStateName: TailWag
+  barkStateName: Bark
+  pickupStateName: Pickup
+  putDownStateName: PutDown
+  attackLeftStateName: Attack_L
+  attackRightStateName: Attack_R
+  oneShotCrossFadeDuration: 0.08
+  animatorStateEntryTimeout: 0.45
+  oneShotAnimationMaxDuration: 3
+  eatDrinkStartStateName: EatDrinkStart
+  eatLoopStateName: EatLoop
+  drinkLoopStateName: DrinkLoop
+  eatDrinkEndStateName: EatDrinkEnd
   ambientIdleChanceAfterRoam: 0.7
   minAmbientIdleDuration: 1.4
   maxAmbientIdleDuration: 2.4
@@ -2686,10 +2774,18 @@ MonoBehaviour:
   minAmbientSleepDuration: 8
   maxAmbientSleepDuration: 13
   minimumSecondsBetweenAmbientSleeps: 18
+  minimumSecondsBetweenAmbientLieDowns: 150
+  initialAmbientLieDownDelayRange: {x: 60, y: 140}
   sitToLieDelay: 0.85
   restCrossFadeDuration: 0.18
   wakePauseDuration: 0.45
+  useImportedRestClipsInEditor: 1
+  lieStartStateName: LieBellyStart
   lieLoopStateName: CatSimple_Lie_side_loop_1
+  lieSleepStartStateName: LieSleepStart
+  lieSleepLoopStateName: LieSleepLoop
+  lieSleepEndStateName: LieSleepEnd
+  lieEndStateName: LieBellyEnd
   sitEndStateName: Sit end
   dogId: miso
   collarAnchor: {fileID: 0}
@@ -2711,9 +2807,32 @@ MonoBehaviour:
   minToyCarryDuration: 2
   maxToyCarryDuration: 4
   carryToyToNewSpot: 1
+  toyPlayBurstChance: 0.45
+  minToyPlayRuns: 1
+  maxToyPlayRuns: 2
+  toyPlayRunDistance: 1.85
+  minToyPlayRunDistance: 1.05
+  toyPlayRunTimeout: 3.5
+  toyChasePartnerChance: 0.65
+  toyChaseFollowDistance: 0.85
   putDownReleaseDelay: 0.45
   putDownAnimationDuration: 0.9
   toyDropOffset: {x: 0, y: 0.04, z: 0.45}
+  useImportedAttackClipsInEditor: 1
+  minBigBallHitRepeats: 1
+  maxBigBallHitRepeats: 2
+  bigBallApproachPadding: 0.22
+  bigBallPawSideOffset: 0.12
+  bigBallHitPlanarTolerance: 0.35
+  bigBallAttackHitDelay: 0.36
+  bigBallAttackFallbackDuration: 1.05
+  bigBallHitImpulse: 1.35
+  bigBallSideImpulseBias: 0.18
+  bigBallHitTorque: 0.65
+  bigBallPostHitWait: 0.45
+  bigBallChaseChance: 0.75
+  bigBallChaseTimeout: 2.5
+  bigBallChaseFollowDistance: 0.55
 --- !u!114 &3200000005
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2737,12 +2856,16 @@ MonoBehaviour:
   roomBoundsPadding: 0.25
   outsideRoomRepathDistance: 0.05
   calmWalkSpeed: 0.38
+  trotSpeed: 0.65
+  runSpeed: 1.15
   acceleration: 4.5
   angularSpeed: 420
   stoppingDistance: 0.15
   turnSpeed: 6
   animatorSpeedScale: 1
   walkAnimatorSpeed: 0.5
+  trotAnimatorSpeed: 0.78
+  runAnimatorSpeed: 1
   arrivalSlowdownDistance: 0.65
   animatorSpeedDampTime: 0.16
   animatorDirectionDampTime: 0.12
@@ -2752,8 +2875,13 @@ MonoBehaviour:
   preMoveTurnAngle: 8
   preMovePauseDuration: 0.12
   locomotionStateName: Locomotion
+  runStateName: RunForward
   locomotionCrossFadeDuration: 0.12
   locomotionLeadInDuration: 0.2
+  personalSpaceRadius: 0.72
+  destinationReservationRadius: 0.8
+  personalSpaceYieldDistance: 0.58
+  agentRadiusFromPersonalSpace: 0.36
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
   tailWagIdleIndex: 1
@@ -2765,6 +2893,28 @@ MonoBehaviour:
   locomotionSettleDuration: 0.3
   sitEndRecoveryDuration: 1.15
   disableLegacyDogControllers: 1
+  standingIdleStateNames:
+  - Idle1
+  - Idle2
+  - Idle3
+  - Idle4
+  useImportedStandingIdleClipsInEditor: 1
+  useImportedIdleFiveSequence: 1
+  importedIdleFiveLoopDuration: 1.6
+  scratchStateName: Scratching
+  tailWagStateName: TailWag
+  barkStateName: Bark
+  pickupStateName: Pickup
+  putDownStateName: PutDown
+  attackLeftStateName: Attack_L
+  attackRightStateName: Attack_R
+  oneShotCrossFadeDuration: 0.08
+  animatorStateEntryTimeout: 0.45
+  oneShotAnimationMaxDuration: 3
+  eatDrinkStartStateName: EatDrinkStart
+  eatLoopStateName: EatLoop
+  drinkLoopStateName: DrinkLoop
+  eatDrinkEndStateName: EatDrinkEnd
   ambientIdleChanceAfterRoam: 0.7
   minAmbientIdleDuration: 1.4
   maxAmbientIdleDuration: 2.4
@@ -2775,10 +2925,18 @@ MonoBehaviour:
   minAmbientSleepDuration: 8
   maxAmbientSleepDuration: 13
   minimumSecondsBetweenAmbientSleeps: 18
+  minimumSecondsBetweenAmbientLieDowns: 150
+  initialAmbientLieDownDelayRange: {x: 60, y: 140}
   sitToLieDelay: 0.85
   restCrossFadeDuration: 0.18
   wakePauseDuration: 0.45
+  useImportedRestClipsInEditor: 1
+  lieStartStateName: LieBellyStart
   lieLoopStateName: CatSimple_Lie_side_loop_1
+  lieSleepStartStateName: LieSleepStart
+  lieSleepLoopStateName: LieSleepLoop
+  lieSleepEndStateName: LieSleepEnd
+  lieEndStateName: LieBellyEnd
   sitEndStateName: Sit end
   dogId: pepper
   collarAnchor: {fileID: 0}
@@ -2800,9 +2958,32 @@ MonoBehaviour:
   minToyCarryDuration: 2
   maxToyCarryDuration: 4
   carryToyToNewSpot: 1
+  toyPlayBurstChance: 0.45
+  minToyPlayRuns: 1
+  maxToyPlayRuns: 2
+  toyPlayRunDistance: 1.85
+  minToyPlayRunDistance: 1.05
+  toyPlayRunTimeout: 3.5
+  toyChasePartnerChance: 0.65
+  toyChaseFollowDistance: 0.85
   putDownReleaseDelay: 0.45
   putDownAnimationDuration: 0.9
   toyDropOffset: {x: 0, y: 0.04, z: 0.45}
+  useImportedAttackClipsInEditor: 1
+  minBigBallHitRepeats: 1
+  maxBigBallHitRepeats: 2
+  bigBallApproachPadding: 0.22
+  bigBallPawSideOffset: 0.12
+  bigBallHitPlanarTolerance: 0.35
+  bigBallAttackHitDelay: 0.36
+  bigBallAttackFallbackDuration: 1.05
+  bigBallHitImpulse: 1.35
+  bigBallSideImpulseBias: 0.18
+  bigBallHitTorque: 0.65
+  bigBallPostHitWait: 0.45
+  bigBallChaseChance: 0.75
+  bigBallChaseTimeout: 2.5
+  bigBallChaseFollowDistance: 0.55
 --- !u!1 &3200000010
 GameObject:
   m_ObjectHideFlags: 0
@@ -2851,9 +3032,12 @@ MonoBehaviour:
   dogB: {fileID: 3200000004}
   minDelayBetweenInteractions: 5
   maxDelayBetweenInteractions: 10
+  initialInteractionDelayRange: {x: 60, y: 140}
   meetDistance: 0.85
+  minimumDogSpacing: 1.05
   approachTimeout: 5
   faceDuration: 0.75
+  preAnimationHeadLookSettleDuration: 0.25
   pairCooldownSeconds: 7
   interactionRepeatBlockCount: 1
   playfulOffsetRadius: 0.9
@@ -2865,12 +3049,19 @@ MonoBehaviour:
   buildRuntimeNavMeshIfMissing: 1
   runtimeNavMeshCenter: {x: 0, y: 0, z: -0.75}
   runtimeNavMeshSize: {x: 7, y: 0.12, z: 6}
+  focusCameraDuringSocialInteractions: 1
+  socialCameraFocusOffset: {x: 0, y: 0.35, z: 0}
   labradorBarkClip: {fileID: 0}
   corgiBarkClip: {fileID: 0}
   backgroundMusicClip: {fileID: 0}
+  ambientCarClip: {fileID: 0}
   backgroundMusicVolume: 0.5
+  ambientCarVolume: 0.35
+  ambientCarIntervalSeconds: 60
   barkVolume: 1
   barkSpacing: 0.18
+  barkAudioRepeatCount: 3
+  barkAudioRepeatGap: 0.04
 --- !u!114 &3200000020
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2907,6 +3098,7 @@ MonoBehaviour:
   zoomHoldDuration: 0.75
   zoomOutDuration: 2.25
   minimumZoomCooldown: 8
+  zoomHeadFocusOffset: {x: 0, y: 0.03, z: 0}
 --- !u!114 &3200000021
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2927,11 +3119,14 @@ MonoBehaviour:
   maxLookDuration: 2.5
   maxNeckYaw: 55
   maxNeckPitch: 30
+  safeHorizontalLookAngle: 30
+  yawOnlyLook: 1
   blendSpeed: 4
   bodyTurnSpeed: 120
   bodyAssistVelocityLimit: 0.15
   disableProximityLock: 1
   useBoneFallback: 1
+  allowBoneFallbackWithoutRig: 0
   headTransform: {fileID: 0}
   neckTransform: {fileID: 0}
   fallbackHeadWeight: 0.65
@@ -2943,7 +3138,23 @@ MonoBehaviour:
   maxNearbyDogLookDuration: 1.6
   maxNearbyDogNeckYaw: 40
   maxNearbyDogNeckPitch: 22
+  holdNearbyDogLookWhileClose: 1
+  allowNearbyDogPitch: 1
+  nearbyDogScanInterval: 0.15
+  nearbyDogHeadLookOffset: {x: 0, y: 0, z: 0}
   nearbyDogLookOffset: {x: 0, y: 0.35, z: 0}
+  holdSocialDogHeadLook: 1
+  socialDogLookRadius: 2.5
+  socialDogMaxNeckYaw: 70
+  socialDogMaxNeckPitch: 50
+  socialDogLookWeight: 1
+  allowSocialBoneFallbackWithoutRig: 1
+  forceSocialBoneFallback: 1
+  assistSocialBodyTurn: 1
+  allowSocialLookDuringOneShotAnimations: 0
+  socialBodyTurnYawThreshold: 12
+  socialBodyTurnSpeed: 220
+  socialBodyTurnVelocityLimit: 0.12
 --- !u!114 &3200000022
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2964,11 +3175,14 @@ MonoBehaviour:
   maxLookDuration: 2.5
   maxNeckYaw: 55
   maxNeckPitch: 30
+  safeHorizontalLookAngle: 30
+  yawOnlyLook: 1
   blendSpeed: 4
   bodyTurnSpeed: 120
   bodyAssistVelocityLimit: 0.15
   disableProximityLock: 1
   useBoneFallback: 1
+  allowBoneFallbackWithoutRig: 0
   headTransform: {fileID: 0}
   neckTransform: {fileID: 0}
   fallbackHeadWeight: 0.65
@@ -2980,7 +3194,23 @@ MonoBehaviour:
   maxNearbyDogLookDuration: 1.6
   maxNearbyDogNeckYaw: 40
   maxNearbyDogNeckPitch: 22
+  holdNearbyDogLookWhileClose: 1
+  allowNearbyDogPitch: 1
+  nearbyDogScanInterval: 0.15
+  nearbyDogHeadLookOffset: {x: 0, y: 0, z: 0}
   nearbyDogLookOffset: {x: 0, y: 0.35, z: 0}
+  holdSocialDogHeadLook: 1
+  socialDogLookRadius: 2.5
+  socialDogMaxNeckYaw: 70
+  socialDogMaxNeckPitch: 50
+  socialDogLookWeight: 1
+  allowSocialBoneFallbackWithoutRig: 1
+  forceSocialBoneFallback: 1
+  assistSocialBodyTurn: 1
+  allowSocialLookDuringOneShotAnimations: 0
+  socialBodyTurnYawThreshold: 12
+  socialBodyTurnSpeed: 220
+  socialBodyTurnVelocityLimit: 0.12
 --- !u!114 &3200000023
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3784,3 +4014,4 @@ SceneRoots:
   - {fileID: 4300000101}
   - {fileID: 610933838}
   - {fileID: 1938843949}
+  - {fileID: 68997571}

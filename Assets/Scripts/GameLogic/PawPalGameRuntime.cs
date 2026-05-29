@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.AI;
 
 public enum PawPalDogNeed
 {
@@ -48,6 +49,12 @@ public enum PawPalItemCategory
     Collars,
     Clothing,
     Furniture
+}
+
+public enum PawPalToyInteractionMode
+{
+    CarryInMouth,
+    PawHitRoll
 }
 
 [Serializable]
@@ -193,12 +200,386 @@ public sealed class PawPalCatalogItemDefinition
     public string InventorySpritePath;
     public InventoryCardTheme InventoryCardTheme;
     public string RoomPrefabResourcePath;
+    public PawPalToyInteractionMode ToyInteractionMode = PawPalToyInteractionMode.CarryInMouth;
     public Color ToyTint = Color.white;
     public string CollarPrefabResourcePath;
     public Color CollarTint = Color.white;
     public Vector3 CollarLocalPosition;
     public Quaternion CollarLocalRotation = Quaternion.identity;
     public Vector3 CollarLocalScale = Vector3.one;
+}
+
+[DisallowMultipleComponent]
+public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
+{
+    private static readonly List<PawPalToyRuntimeMetadata> NavigationBlockers = new List<PawPalToyRuntimeMetadata>();
+    private static float nextSceneLargeToyScanTime;
+
+    [SerializeField] private string itemId;
+    [SerializeField] private PawPalToyInteractionMode interactionMode = PawPalToyInteractionMode.CarryInMouth;
+    [SerializeField] private bool blocksDogNavigation;
+    [SerializeField] private float dogNavigationBlockRadius = 0.45f;
+    [SerializeField] private Vector3 dogNavigationBlockCenterLocal = Vector3.zero;
+
+    public string ItemId => itemId;
+    public PawPalToyInteractionMode InteractionMode => interactionMode;
+    public bool BlocksDogNavigation => blocksDogNavigation;
+    public float DogNavigationBlockRadius => Mathf.Max(0.05f, dogNavigationBlockRadius);
+    public Vector3 DogNavigationBlockWorldCenter => transform.TransformPoint(dogNavigationBlockCenterLocal);
+
+    public static bool TryGetDogNavigationBlockRadius(Transform toy, out float radius)
+    {
+        radius = 0f;
+        if (toy == null)
+        {
+            return false;
+        }
+
+        PawPalToyRuntimeMetadata metadata = toy.GetComponentInParent<PawPalToyRuntimeMetadata>();
+        if (metadata == null || !metadata.BlocksDogNavigation)
+        {
+            return false;
+        }
+
+        radius = metadata.DogNavigationBlockRadius;
+        return true;
+    }
+
+    public static bool TryGetDogNavigationBlockCenter(Transform toy, out Vector3 center)
+    {
+        center = toy != null ? toy.position : Vector3.zero;
+        if (toy == null)
+        {
+            return false;
+        }
+
+        PawPalToyRuntimeMetadata metadata = toy.GetComponentInParent<PawPalToyRuntimeMetadata>();
+        if (metadata == null || !metadata.BlocksDogNavigation)
+        {
+            return false;
+        }
+
+        center = metadata.DogNavigationBlockWorldCenter;
+        return true;
+    }
+
+    public static void AutoRegisterSceneLargeToys(bool force = false)
+    {
+        if (Application.isPlaying && !force && Time.time < nextSceneLargeToyScanTime)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            nextSceneLargeToyScanTime = Time.time + 1f;
+        }
+
+        Transform[] sceneTransforms = FindObjectsByType<Transform>(FindObjectsSortMode.None);
+        for (int i = 0; i < sceneTransforms.Length; i++)
+        {
+            Transform candidate = sceneTransforms[i];
+            if (candidate == null || !candidate.gameObject.activeInHierarchy || !IsPawHitRollToyName(candidate.name))
+            {
+                continue;
+            }
+
+            if (candidate.GetComponentInChildren<Renderer>(true) == null)
+            {
+                continue;
+            }
+
+            PawPalToyRuntimeMetadata metadata = candidate.GetComponent<PawPalToyRuntimeMetadata>();
+            if (metadata == null)
+            {
+                metadata = candidate.gameObject.AddComponent<PawPalToyRuntimeMetadata>();
+            }
+
+            metadata.Initialize(string.Empty, PawPalToyInteractionMode.PawHitRoll);
+            metadata.ConfigureLargeToyPhysicsAndNavigation();
+        }
+    }
+
+    public static bool IsPawHitRollToyName(string objectName)
+    {
+        if (string.IsNullOrEmpty(objectName))
+        {
+            return false;
+        }
+
+        string lowerName = objectName.ToLowerInvariant();
+        return lowerName.Contains("big_ball") || lowerName.Contains("big ball");
+    }
+
+    public void Initialize(string catalogItemId, PawPalToyInteractionMode toyInteractionMode)
+    {
+        itemId = catalogItemId;
+        interactionMode = toyInteractionMode;
+        SetBlocksDogNavigation(toyInteractionMode == PawPalToyInteractionMode.PawHitRoll, dogNavigationBlockRadius);
+    }
+
+    public void SetBlocksDogNavigation(bool blocksNavigation, float radius)
+    {
+        blocksDogNavigation = blocksNavigation;
+        dogNavigationBlockRadius = Mathf.Max(0.05f, radius);
+        RefreshNavigationBlockerRegistration();
+    }
+
+    public void ConfigureLargeToyPhysicsAndNavigation()
+    {
+        Bounds bounds;
+        float radius = TryGetToyBlockingBounds(gameObject, out bounds)
+            ? Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z))
+            : 0.35f;
+        float paddedRadius = radius + 0.28f;
+        dogNavigationBlockCenterLocal = transform.InverseTransformPoint(bounds.center);
+        SetBlocksDogNavigation(true, paddedRadius);
+        EnsureLargeToyCollider(bounds, radius);
+
+        Rigidbody body = GetComponent<Rigidbody>();
+        if (body == null)
+        {
+            body = gameObject.AddComponent<Rigidbody>();
+        }
+
+        body.isKinematic = false;
+        body.useGravity = true;
+        body.mass = Mathf.Max(0.65f, body.mass);
+        body.linearDamping = Mathf.Max(0.08f, body.linearDamping);
+        body.angularDamping = Mathf.Max(0.16f, body.angularDamping);
+        body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+        NavMeshObstacle obstacle = GetComponent<NavMeshObstacle>();
+        if (obstacle == null)
+        {
+            obstacle = gameObject.AddComponent<NavMeshObstacle>();
+        }
+
+        obstacle.shape = NavMeshObstacleShape.Capsule;
+        obstacle.radius = paddedRadius;
+        obstacle.height = Mathf.Max(0.2f, bounds.size.y);
+        obstacle.center = dogNavigationBlockCenterLocal;
+        obstacle.carving = true;
+        obstacle.carveOnlyStationary = false;
+        obstacle.carvingMoveThreshold = 0.08f;
+        obstacle.carvingTimeToStationary = 0.15f;
+    }
+
+    private void EnsureLargeToyCollider(Bounds bounds, float radius)
+    {
+        Collider[] colliders = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider != null && collider.enabled && !collider.isTrigger && IsUsableLargeToyCollider(collider, bounds, radius))
+            {
+                return;
+            }
+        }
+
+        SphereCollider fallbackCollider = GetComponent<SphereCollider>();
+        if (fallbackCollider == null)
+        {
+            fallbackCollider = gameObject.AddComponent<SphereCollider>();
+        }
+
+        fallbackCollider.isTrigger = false;
+        fallbackCollider.enabled = true;
+        fallbackCollider.center = transform.InverseTransformPoint(bounds.center);
+        fallbackCollider.radius = Mathf.Max(0.18f, radius);
+    }
+
+    private static bool IsUsableLargeToyCollider(Collider collider, Bounds visualBounds, float visualRadius)
+    {
+        if (collider == null)
+        {
+            return false;
+        }
+
+        Bounds colliderBounds = collider.bounds;
+        Vector3 centerDelta = colliderBounds.center - visualBounds.center;
+        centerDelta.y = 0f;
+        float allowedCenterOffset = Mathf.Max(0.12f, visualRadius * 0.75f);
+        if (centerDelta.sqrMagnitude > allowedCenterOffset * allowedCenterOffset)
+        {
+            return false;
+        }
+
+        float colliderPlanarRadius = Mathf.Max(colliderBounds.extents.x, colliderBounds.extents.z);
+        return colliderPlanarRadius >= Mathf.Max(0.08f, visualRadius * 0.55f);
+    }
+
+    public static bool IsDogNavigationPathBlocked(Vector3[] pathCorners, Transform ignoredRoot, float extraPadding)
+    {
+        if (pathCorners == null || pathCorners.Length < 2 || NavigationBlockers.Count == 0)
+        {
+            return false;
+        }
+
+        for (int cornerIndex = 1; cornerIndex < pathCorners.Length; cornerIndex++)
+        {
+            Vector3 start = pathCorners[cornerIndex - 1];
+            Vector3 end = pathCorners[cornerIndex];
+            for (int blockerIndex = NavigationBlockers.Count - 1; blockerIndex >= 0; blockerIndex--)
+            {
+                PawPalToyRuntimeMetadata blocker = NavigationBlockers[blockerIndex];
+                if (blocker == null)
+                {
+                    NavigationBlockers.RemoveAt(blockerIndex);
+                    continue;
+                }
+
+                if (!blocker.IsBlockingDogNavigation(ignoredRoot))
+                {
+                    continue;
+                }
+
+                float blockRadius = blocker.DogNavigationBlockRadius + Mathf.Max(0f, extraPadding);
+                if (DistanceToPlanarSegment(blocker.DogNavigationBlockWorldCenter, start, end) < blockRadius)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsDogNavigationPointBlocked(Vector3 point, Transform ignoredRoot, float extraPadding)
+    {
+        for (int blockerIndex = NavigationBlockers.Count - 1; blockerIndex >= 0; blockerIndex--)
+        {
+            PawPalToyRuntimeMetadata blocker = NavigationBlockers[blockerIndex];
+            if (blocker == null)
+            {
+                NavigationBlockers.RemoveAt(blockerIndex);
+                continue;
+            }
+
+            if (!blocker.IsBlockingDogNavigation(ignoredRoot))
+            {
+                continue;
+            }
+
+            Vector3 delta = blocker.DogNavigationBlockWorldCenter - point;
+            delta.y = 0f;
+            float blockRadius = blocker.DogNavigationBlockRadius + Mathf.Max(0f, extraPadding);
+            if (delta.sqrMagnitude < blockRadius * blockRadius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void OnEnable()
+    {
+        RefreshNavigationBlockerRegistration();
+    }
+
+    private void OnDisable()
+    {
+        NavigationBlockers.Remove(this);
+    }
+
+    private void RefreshNavigationBlockerRegistration()
+    {
+        bool shouldRegister = isActiveAndEnabled && blocksDogNavigation;
+        bool isRegistered = NavigationBlockers.Contains(this);
+        if (shouldRegister && !isRegistered)
+        {
+            NavigationBlockers.Add(this);
+        }
+        else if (!shouldRegister && isRegistered)
+        {
+            NavigationBlockers.Remove(this);
+        }
+    }
+
+    private bool IsBlockingDogNavigation(Transform ignoredRoot)
+    {
+        if (!blocksDogNavigation || !isActiveAndEnabled || !gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        return ignoredRoot == null
+            || (transform != ignoredRoot && !transform.IsChildOf(ignoredRoot) && !ignoredRoot.IsChildOf(transform));
+    }
+
+    private static bool TryGetToyBlockingBounds(GameObject toy, out Bounds bounds)
+    {
+        bounds = toy != null ? new Bounds(toy.transform.position, Vector3.zero) : new Bounds();
+        if (toy == null)
+        {
+            return false;
+        }
+
+        bool hasBounds = false;
+        Renderer[] renderers = toy.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (hasBounds)
+        {
+            return true;
+        }
+
+        Collider[] colliders = toy.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider == null || !collider.enabled || collider.isTrigger)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(collider.bounds);
+            }
+        }
+
+        return hasBounds;
+    }
+
+    private static float DistanceToPlanarSegment(Vector3 point, Vector3 start, Vector3 end)
+    {
+        point.y = 0f;
+        start.y = 0f;
+        end.y = 0f;
+
+        Vector3 segment = end - start;
+        if (segment.sqrMagnitude < 0.001f)
+        {
+            return Vector3.Distance(point, start);
+        }
+
+        float t = Mathf.Clamp01(Vector3.Dot(point - start, segment) / segment.sqrMagnitude);
+        return Vector3.Distance(point, start + segment * t);
+    }
 }
 
 [Serializable]
@@ -239,6 +620,8 @@ public sealed class PawPalSaveData
     public List<PawPalDailyTaskState> DailyTasks = new List<PawPalDailyTaskState>();
     public int ActiveDogIndex;
     public long NextDailyResetUtcTicks;
+    public int LastProcessedTrainerMilestoneLevel;
+    public List<int> PendingUnsupportedTrainerMilestoneLevels = new List<int>();
 }
 
 [DisallowMultipleComponent]
@@ -252,19 +635,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private const float EnergyDrainPerHour = 0.025f;
     private const string SaveFileName = "pawpal_profile_v1.json";
     private const string StarterDogId = "pepper";
-    private const string SecondaryStarterDogId = "miso";
     private const string StarterCollarItemId = "collar_ocean_band";
     private const string BasicFoodItemId = "food_basic";
     private const string PremiumFoodItemId = "food_premium";
-
-    private static readonly int[] TrainerLevelRequirements =
-    {
-        60, 120, 180, 240, 300, 360, 425, 484, 542, 602,
-        662, 722, 780, 834, 884, 928, 975, 1014, 1054, 1086,
-        1119, 1152, 1187, 1222, 1259, 1297, 1336, 1376, 1417, 1445,
-        1474, 1504, 1534, 1565, 1596, 1620, 1644, 1669, 1694, 1719,
-        1736, 1754, 1771, 1789, 1807, 1816, 1825, 1834, 1843, 1852
-    };
 
     private static readonly Quaternion DefaultCollarRotation = new Quaternion(-0.000001496502f, 0.97860277f, 0.2057589f, 7.7398e-10f);
     private static readonly Vector3 DefaultCollarPosition = new Vector3(0f, 0.0171f, 0f);
@@ -282,13 +655,18 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private readonly Dictionary<string, PawPalCatalogItemDefinition> catalogById = new Dictionary<string, PawPalCatalogItemDefinition>(StringComparer.Ordinal);
     private readonly Dictionary<string, PawPalOwnedItemState> ownedItemById = new Dictionary<string, PawPalOwnedItemState>(StringComparer.Ordinal);
     private readonly Dictionary<string, PawPalDogEquipmentState> dogEquipmentByDogId = new Dictionary<string, PawPalDogEquipmentState>(StringComparer.Ordinal);
+    private readonly Dictionary<PawPalPlayerActionType, TrainerActionRewardDefinition> trainerActionRewardsByType = new Dictionary<PawPalPlayerActionType, TrainerActionRewardDefinition>();
+    private readonly Dictionary<int, TrainerMilestoneDefinition> trainerMilestonesByLevel = new Dictionary<int, TrainerMilestoneDefinition>();
+    private readonly List<int> pendingUnsupportedTrainerMilestoneLevels = new List<int>();
 
     [SerializeField] private float secondsPerGameHour = DefaultSecondsPerGameHour;
 
     private PawPalTrainerState trainerState;
     private PawPalDogSceneBridge sceneBridge;
+    private TrainerProgressionConfig trainerProgressionConfig;
     private int activeDogIndex;
     private int inventoryRevision;
+    private int lastProcessedTrainerMilestoneLevel;
     private int shopRevision;
     private DateTime nextDailyResetUtc;
 
@@ -401,6 +779,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         instance = this;
         DontDestroyOnLoad(gameObject);
 
+        LoadTrainerProgressionData();
         InitializeDefaults();
         LoadProfile();
         EnsureBridge();
@@ -539,6 +918,44 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         CommitState(true, false, false);
     }
 
+    public bool SelectDogIndex(int dogIndex, bool saveProfile)
+    {
+        if (dogs.Count == 0 || dogIndex < 0 || dogIndex >= dogs.Count)
+        {
+            return false;
+        }
+
+        if (activeDogIndex == dogIndex)
+        {
+            return false;
+        }
+
+        activeDogIndex = dogIndex;
+        CommitState(saveProfile, false, false);
+        return true;
+    }
+
+    public bool SelectDogById(string dogId, bool saveProfile)
+    {
+        if (string.IsNullOrEmpty(dogId))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog == null || !string.Equals(dog.Id, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return SelectDogIndex(i, saveProfile);
+        }
+
+        return false;
+    }
+
     public bool TryFeedActiveDog()
     {
         PawPalDogState dog = ActiveDog;
@@ -547,16 +964,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return false;
         }
 
-        PawPalCatalogItemDefinition foodItem = null;
-        if (GetItemQuantity(BasicFoodItemId) > 0)
-        {
-            foodItem = GetCatalogItem(BasicFoodItemId);
-        }
-        else if (GetItemQuantity(PremiumFoodItemId) > 0)
-        {
-            foodItem = GetCatalogItem(PremiumFoodItemId);
-        }
-
+        PawPalCatalogItemDefinition foodItem = GetAvailableFoodItem();
         if (foodItem == null)
         {
             return false;
@@ -564,7 +972,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         ConsumeItemQuantity(foodItem.Id, 1);
         ApplyFoodToActiveDog(foodItem);
-        ApplyActionRewards(PawPalPlayerActionType.FeedDog, 5, 0, 1);
+        ApplyActionRewards(PawPalPlayerActionType.FeedDog);
         CommitState(true, true, true);
         return true;
     }
@@ -572,6 +980,55 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     public void FeedActiveDog()
     {
         TryFeedActiveDog();
+    }
+
+    public bool HasFoodItemForActiveDog()
+    {
+        return ActiveDog != null && GetAvailableFoodItem() != null;
+    }
+
+    public bool TryStartFoodNeedInteraction()
+    {
+        PawPalCatalogItemDefinition foodItem = GetAvailableFoodItem();
+        if (ActiveDog == null || foodItem == null)
+        {
+            return false;
+        }
+
+        DogNeedInteractionDirector director = ResolveNeedInteractionDirector();
+        if (director == null)
+        {
+            Debug.LogWarning("PawPalGameRuntime could not find a DogNeedInteractionDirector for food interaction.");
+            return false;
+        }
+
+        string dogId = ActiveDog.Id;
+        string foodItemId = foodItem.Id;
+        return director.TryStartInteraction(PawPalDogNeed.Food, delegate
+        {
+            CompleteFoodNeedInteraction(dogId, foodItemId);
+        });
+    }
+
+    public bool TryStartWaterNeedInteraction()
+    {
+        if (ActiveDog == null)
+        {
+            return false;
+        }
+
+        DogNeedInteractionDirector director = ResolveNeedInteractionDirector();
+        if (director == null)
+        {
+            Debug.LogWarning("PawPalGameRuntime could not find a DogNeedInteractionDirector for water interaction.");
+            return false;
+        }
+
+        string dogId = ActiveDog.Id;
+        return director.TryStartInteraction(PawPalDogNeed.Water, delegate
+        {
+            CompleteWaterNeedInteraction(dogId);
+        });
     }
 
     public void GiveWaterToActiveDog()
@@ -582,9 +1039,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        dog.ModifyNeed(PawPalDogNeed.Water, 0.4f);
-        dog.Energy01 = Mathf.Clamp01(dog.Energy01 + 0.04f);
-        ApplyActionRewards(PawPalPlayerActionType.GiveWater, 5, 0, 1);
+        ApplyWaterToDog(dog);
+        ApplyActionRewards(PawPalPlayerActionType.GiveWater);
         CommitState(true, false, true);
     }
 
@@ -597,7 +1053,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         dog.ModifyNeed(PawPalDogNeed.Hygiene, 0.45f);
-        ApplyActionRewards(PawPalPlayerActionType.CleanDog, 5, 0, 1);
+        ApplyActionRewards(PawPalPlayerActionType.CleanDog);
         CommitState(true, false, true);
     }
 
@@ -617,7 +1073,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             dog.ModifyStat(PawPalDogStatType.Speed, 1);
         }
 
-        ApplyActionRewards(PawPalPlayerActionType.PlayWithToy, 10, 0, 2);
+        ApplyActionRewards(PawPalPlayerActionType.PlayWithToy);
         CommitState(true, false, true);
     }
 
@@ -640,7 +1096,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         trainerState.WalksCompleted++;
-        ApplyActionRewards(PawPalPlayerActionType.WalkDog, 15, 0, 3);
+        ApplyActionRewards(PawPalPlayerActionType.WalkDog);
         CommitState(true, false, true);
     }
 
@@ -659,7 +1115,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             dog.ModifyStat(PawPalDogStatType.Focus, 1);
         }
 
-        ApplyActionRewards(PawPalPlayerActionType.TrainTrick, 10, 0, 2);
+        ApplyActionRewards(PawPalPlayerActionType.TrainTrick);
         CommitState(true, false, true);
     }
 
@@ -737,6 +1193,24 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return true;
     }
 
+    public bool TryUnequipCollar(string dogId, string itemId)
+    {
+        if (string.IsNullOrEmpty(dogId) || string.IsNullOrEmpty(itemId))
+        {
+            return false;
+        }
+
+        PawPalDogEquipmentState equipmentState = GetDogEquipmentState(dogId);
+        if (equipmentState == null || equipmentState.EquippedCollarItemId != itemId)
+        {
+            return false;
+        }
+
+        equipmentState.EquippedCollarItemId = string.Empty;
+        CommitState(true, true, false);
+        return true;
+    }
+
     public bool TrySpawnToy(string itemId)
     {
         PawPalCatalogItemDefinition item = GetCatalogItem(itemId);
@@ -754,10 +1228,66 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         bool spawned = sceneBridge.TrySpawnToy(item);
         if (spawned)
         {
+            inventoryRevision++;
             NotifyStateChanged();
         }
 
         return spawned;
+    }
+
+    public bool IsToyActiveInScene(string itemId)
+    {
+        if (string.IsNullOrEmpty(itemId))
+        {
+            return false;
+        }
+
+        EnsureBridge();
+        return sceneBridge != null && sceneBridge.IsToyActiveInScene(itemId);
+    }
+
+    public bool TryRemoveToyFromScene(string itemId)
+    {
+        if (string.IsNullOrEmpty(itemId))
+        {
+            return false;
+        }
+
+        EnsureBridge();
+        if (sceneBridge == null || !sceneBridge.TryRemoveToyFromScene(itemId))
+        {
+            return false;
+        }
+
+        inventoryRevision++;
+        NotifyStateChanged();
+        return true;
+    }
+
+    public bool TryEnsureDogForSceneBinding(string dogId)
+    {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return false;
+        }
+
+        if (HasDog(dogId))
+        {
+            return true;
+        }
+
+        PawPalDogState dogState = BuildKnownDogState(dogId);
+        if (dogState == null)
+        {
+            return false;
+        }
+
+        dogs.Add(dogState);
+        EnsureDogEquipmentState(dogState.Id);
+        BackfillIdenticalDogNeedsIfNeeded();
+        activeDogIndex = Mathf.Clamp(activeDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
+        CommitState(false, false, true);
+        return true;
     }
 
     public void SaveProfile()
@@ -818,21 +1348,55 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public float GetTrainerLevelProgress01()
     {
-        int level = Mathf.Clamp(trainerState.Level, 1, TrainerLevelRequirements.Length);
-        int required = TrainerLevelRequirements[level - 1];
-        if (required <= 0)
-        {
-            return 0f;
-        }
-
-        return Mathf.Clamp01((float)trainerState.CurrentLevelExperience / required);
+        return GetTrainerProgressionSnapshot().LevelProgress01;
     }
 
     public string GetTrainerExperienceText()
     {
-        int level = Mathf.Clamp(trainerState.Level, 1, TrainerLevelRequirements.Length);
-        int required = TrainerLevelRequirements[level - 1];
-        return trainerState.CurrentLevelExperience + " / " + required + " XP";
+        TrainerProgressionSnapshot snapshot = GetTrainerProgressionSnapshot();
+        return snapshot.CurrentLevelExperience + " / " + snapshot.RequiredExperience + " XP";
+    }
+
+    public TrainerProgressionSnapshot GetTrainerProgressionSnapshot()
+    {
+        TrainerProgressionSnapshot snapshot = new TrainerProgressionSnapshot();
+        int maxLevel = GetMaxTrainerLevel();
+        if (maxLevel <= 0)
+        {
+            snapshot.Level = 1;
+            snapshot.RequiredExperience = 1;
+            return snapshot;
+        }
+
+        int level = Mathf.Clamp(trainerState.Level, 1, maxLevel);
+        TrainerMilestoneDefinition milestone = GetTrainerMilestoneDefinition(level);
+        int requiredExperience = milestone != null ? Mathf.Max(1, milestone.RequiredExperience) : 1;
+
+        snapshot.Level = level;
+        snapshot.RequiredExperience = requiredExperience;
+        snapshot.CurrentMilestoneLevel = level;
+
+        if (level >= maxLevel)
+        {
+            snapshot.CurrentLevelExperience = requiredExperience;
+            snapshot.LevelProgress01 = 1f;
+            snapshot.AbsoluteProgress01 = 1f;
+            return snapshot;
+        }
+
+        snapshot.CurrentLevelExperience = Mathf.Clamp(trainerState.CurrentLevelExperience, 0, requiredExperience);
+        snapshot.LevelProgress01 = requiredExperience <= 0
+            ? 0f
+            : Mathf.Clamp01((float)snapshot.CurrentLevelExperience / requiredExperience);
+        snapshot.AbsoluteProgress01 = Mathf.Clamp01(((level - 1f) + snapshot.LevelProgress01) / Mathf.Max(1f, maxLevel - 1f));
+        return snapshot;
+    }
+
+    public IReadOnlyList<TrainerMilestoneDefinition> GetTrainerMilestones()
+    {
+        return trainerProgressionConfig != null
+            ? trainerProgressionConfig.Milestones
+            : TrainerProgressionDatabase.Load().Milestones;
     }
 
     public string GetDailyResetCountdownText()
@@ -849,6 +1413,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     private void InitializeDefaults()
     {
+        LoadTrainerProgressionData();
         trainerState = new PawPalTrainerState();
         dogs.Clear();
         catalogItems.Clear();
@@ -862,7 +1427,6 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         dogEquipmentByDogId.Clear();
 
         dogs.Add(BuildStarterDog());
-        AddDefaultRosterDogs();
         BuildCatalog();
         ValidateCatalogDefinitions();
         BuildPointPackages();
@@ -870,9 +1434,72 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         EnsureDogEquipmentState(StarterDogId).EquippedCollarItemId = StarterCollarItemId;
         nextDailyResetUtc = DateTime.UtcNow.Date.AddDays(1d);
         GenerateDailyTasks();
+        InitializeTrainerMilestoneStateForSeededProfile();
         inventoryRevision = 1;
         shopRevision = 1;
         activeDogIndex = 0;
+    }
+
+    private void LoadTrainerProgressionData()
+    {
+        trainerProgressionConfig = TrainerProgressionDatabase.Load();
+        trainerActionRewardsByType.Clear();
+        trainerMilestonesByLevel.Clear();
+
+        IList<TrainerActionRewardDefinition> actionRewards = trainerProgressionConfig != null
+            ? trainerProgressionConfig.ActionRewards
+            : null;
+        if (actionRewards != null)
+        {
+            for (int i = 0; i < actionRewards.Count; i++)
+            {
+                TrainerActionRewardDefinition reward = actionRewards[i];
+                if (reward == null || string.IsNullOrEmpty(reward.ActionType))
+                {
+                    continue;
+                }
+
+                PawPalPlayerActionType actionType;
+                if (!Enum.TryParse(reward.ActionType, true, out actionType))
+                {
+                    continue;
+                }
+
+                trainerActionRewardsByType[actionType] = reward;
+            }
+        }
+
+        IList<TrainerMilestoneDefinition> milestones = trainerProgressionConfig != null
+            ? trainerProgressionConfig.Milestones
+            : null;
+        if (milestones != null)
+        {
+            for (int i = 0; i < milestones.Count; i++)
+            {
+                TrainerMilestoneDefinition milestone = milestones[i];
+                if (milestone == null || milestone.Level <= 0)
+                {
+                    continue;
+                }
+
+                trainerMilestonesByLevel[milestone.Level] = milestone;
+            }
+        }
+    }
+
+    private void InitializeTrainerMilestoneStateForSeededProfile()
+    {
+        pendingUnsupportedTrainerMilestoneLevels.Clear();
+        lastProcessedTrainerMilestoneLevel = Mathf.Clamp(trainerState.Level, 1, GetMaxTrainerLevel());
+
+        for (int level = 2; level <= lastProcessedTrainerMilestoneLevel; level++)
+        {
+            TrainerMilestoneDefinition milestone = GetTrainerMilestoneDefinition(level);
+            if (ShouldTrackPendingUnsupportedMilestone(milestone) && !CanApplyMilestoneReward(milestone))
+            {
+                pendingUnsupportedTrainerMilestoneLevels.Add(level);
+            }
+        }
     }
 
     private PawPalDogState BuildStarterDog()
@@ -927,6 +1554,26 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Speed = 4,
             Focus = 4
         };
+    }
+
+    private PawPalDogState BuildKnownDogState(string dogId)
+    {
+        if (string.Equals(dogId, StarterDogId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildStarterDog();
+        }
+
+        if (string.Equals(dogId, "miso", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildMisoDog();
+        }
+
+        if (string.Equals(dogId, "suki", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildSukiDog();
+        }
+
+        return null;
     }
 
     private void BuildCatalog()
@@ -1018,6 +1665,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
             InventoryCardTheme = InventoryCardTheme.Ball,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
+            ToyInteractionMode = PawPalToyInteractionMode.PawHitRoll,
             ToyTint = new Color(0.82f, 0.84f, 0.24f, 1f)
         });
 
@@ -1048,6 +1696,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
             InventoryCardTheme = InventoryCardTheme.Ball,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
+            ToyInteractionMode = PawPalToyInteractionMode.PawHitRoll,
             ToyTint = new Color(0.93f, 0.83f, 0.36f, 1f)
         });
 
@@ -1251,6 +1900,16 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
+        ApplyFoodToDog(dog, foodItem);
+    }
+
+    private void ApplyFoodToDog(PawPalDogState dog, PawPalCatalogItemDefinition foodItem)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
         if (foodItem != null && foodItem.Id == PremiumFoodItemId)
         {
             dog.ModifyNeed(PawPalDogNeed.Food, 0.45f);
@@ -1263,13 +1922,127 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
     }
 
-    private void ApplyActionRewards(PawPalPlayerActionType actionType, int experience, int basicCurrency, int clubExperience)
+    private PawPalCatalogItemDefinition GetAvailableFoodItem()
     {
-        AddTrainerExperience(experience);
-        trainerState.BasicCurrency += basicCurrency;
-        trainerState.TotalBasicCurrencyEarned += basicCurrency;
-        trainerState.ClubExperience += clubExperience;
+        if (GetItemQuantity(BasicFoodItemId) > 0)
+        {
+            return GetCatalogItem(BasicFoodItemId);
+        }
+
+        if (GetItemQuantity(PremiumFoodItemId) > 0)
+        {
+            return GetCatalogItem(PremiumFoodItemId);
+        }
+
+        return null;
+    }
+
+    private void CompleteFoodNeedInteraction(string dogId, string foodItemId)
+    {
+        PawPalDogState dog = FindDogState(dogId);
+        if (dog == null || string.IsNullOrEmpty(foodItemId) || GetItemQuantity(foodItemId) <= 0)
+        {
+            return;
+        }
+
+        PawPalCatalogItemDefinition foodItem = GetCatalogItem(foodItemId);
+        if (foodItem == null)
+        {
+            return;
+        }
+
+        ConsumeItemQuantity(foodItem.Id, 1);
+        ApplyFoodToDog(dog, foodItem);
+        ApplyActionRewards(PawPalPlayerActionType.FeedDog);
+        CommitState(true, true, true);
+    }
+
+    private void CompleteWaterNeedInteraction(string dogId)
+    {
+        PawPalDogState dog = FindDogState(dogId);
+        if (dog == null)
+        {
+            return;
+        }
+
+        ApplyWaterToDog(dog);
+        ApplyActionRewards(PawPalPlayerActionType.GiveWater);
+        CommitState(true, false, true);
+    }
+
+    private void ApplyWaterToDog(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        dog.ModifyNeed(PawPalDogNeed.Water, 0.4f);
+        dog.Energy01 = Mathf.Clamp01(dog.Energy01 + 0.04f);
+    }
+
+    private PawPalDogState FindDogState(string dogId)
+    {
+        if (string.IsNullOrEmpty(dogId))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog != null && string.Equals(dog.Id, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                return dog;
+            }
+        }
+
+        return null;
+    }
+
+    private DogNeedInteractionDirector ResolveNeedInteractionDirector()
+    {
+        if (DogNeedInteractionDirector.Instance != null)
+        {
+            return DogNeedInteractionDirector.Instance;
+        }
+
+        DogNeedInteractionDirector director = FindFirstObjectByType<DogNeedInteractionDirector>();
+        if (director != null)
+        {
+            return director;
+        }
+
+        GameObject directorObject = new GameObject("DogNeedInteractionDirector");
+        return directorObject.AddComponent<DogNeedInteractionDirector>();
+    }
+
+    private void ApplyActionRewards(PawPalPlayerActionType actionType)
+    {
+        TrainerActionRewardDefinition reward = GetActionRewardDefinition(actionType);
+        if (reward != null)
+        {
+            AddTrainerExperience(reward.Experience);
+            if (reward.BasicCurrency > 0)
+            {
+                trainerState.BasicCurrency += reward.BasicCurrency;
+                trainerState.TotalBasicCurrencyEarned += reward.BasicCurrency;
+            }
+
+            if (reward.ClubExperience > 0)
+            {
+                trainerState.ClubExperience += reward.ClubExperience;
+            }
+        }
+
         RecordActionProgress(actionType);
+    }
+
+    private TrainerActionRewardDefinition GetActionRewardDefinition(PawPalPlayerActionType actionType)
+    {
+        TrainerActionRewardDefinition reward;
+        trainerActionRewardsByType.TryGetValue(actionType, out reward);
+        return reward;
     }
 
     private void AddTrainerExperience(int amount)
@@ -1279,11 +2052,27 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
+        int maxLevel = GetMaxTrainerLevel();
+        if (maxLevel <= 0)
+        {
+            return;
+        }
+
+        if (trainerState.Level >= maxLevel)
+        {
+            trainerState.Level = maxLevel;
+            trainerState.CurrentLevelExperience = 0;
+            return;
+        }
+
         trainerState.CurrentLevelExperience += amount;
 
-        while (trainerState.Level <= TrainerLevelRequirements.Length)
+        while (trainerState.Level < maxLevel)
         {
-            int requirement = TrainerLevelRequirements[Mathf.Clamp(trainerState.Level - 1, 0, TrainerLevelRequirements.Length - 1)];
+            TrainerMilestoneDefinition currentLevelMilestone = GetTrainerMilestoneDefinition(trainerState.Level);
+            int requirement = currentLevelMilestone != null
+                ? Mathf.Max(1, currentLevelMilestone.RequiredExperience)
+                : 1;
             if (trainerState.CurrentLevelExperience < requirement)
             {
                 break;
@@ -1291,37 +2080,13 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
             trainerState.CurrentLevelExperience -= requirement;
             trainerState.Level++;
-            ApplyLevelReward(trainerState.Level);
-
-            if (trainerState.Level > TrainerLevelRequirements.Length)
-            {
-                trainerState.Level = TrainerLevelRequirements.Length;
-                trainerState.CurrentLevelExperience = 0;
-                break;
-            }
+            ProcessTrainerMilestone(trainerState.Level, true);
         }
-    }
 
-    private void ApplyLevelReward(int level)
-    {
-        switch (level)
+        if (trainerState.Level >= maxLevel)
         {
-            case 4:
-                trainerState.PremiumCurrency += 50;
-                break;
-            case 5:
-                trainerState.BasicCurrency += 200;
-                trainerState.TotalBasicCurrencyEarned += 200;
-                break;
-            case 6:
-                UnlockDog("miso");
-                break;
-            case 10:
-                UnlockDog("suki");
-                break;
-            case 15:
-                trainerState.PremiumCurrency += 100;
-                break;
+            trainerState.Level = maxLevel;
+            trainerState.CurrentLevelExperience = 0;
         }
     }
 
@@ -1332,15 +2097,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        if (dogId == "miso")
+        PawPalDogState dogState = BuildKnownDogState(dogId);
+        if (dogState != null)
         {
-            dogs.Add(BuildMisoDog());
-            EnsureDogEquipmentState("miso");
-        }
-        else if (dogId == "suki")
-        {
-            dogs.Add(BuildSukiDog());
-            EnsureDogEquipmentState("suki");
+            dogs.Add(dogState);
+            EnsureDogEquipmentState(dogState.Id);
         }
     }
 
@@ -1355,6 +2116,243 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         return false;
+    }
+
+    private void ProcessTrainerMilestone(int level, bool grantReward)
+    {
+        TrainerMilestoneDefinition milestone = GetTrainerMilestoneDefinition(level);
+        if (milestone == null)
+        {
+            lastProcessedTrainerMilestoneLevel = Mathf.Max(lastProcessedTrainerMilestoneLevel, level);
+            return;
+        }
+
+        bool rewardApplied = milestone.RewardKind == TrainerMilestoneRewardKind.None;
+        if (grantReward && !rewardApplied)
+        {
+            rewardApplied = TryApplyMilestoneReward(milestone);
+        }
+
+        if (ShouldTrackPendingUnsupportedMilestone(milestone) && !rewardApplied)
+        {
+            AddPendingUnsupportedTrainerMilestone(level);
+        }
+        else
+        {
+            RemovePendingUnsupportedTrainerMilestone(level);
+        }
+
+        lastProcessedTrainerMilestoneLevel = Mathf.Max(lastProcessedTrainerMilestoneLevel, level);
+    }
+
+    private bool TryApplyMilestoneReward(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return false;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.None:
+                return true;
+            case TrainerMilestoneRewardKind.CurrencyBasic:
+                trainerState.BasicCurrency += milestone.CurrencyAmount;
+                trainerState.TotalBasicCurrencyEarned += milestone.CurrencyAmount;
+                return true;
+            case TrainerMilestoneRewardKind.CurrencyPremium:
+                trainerState.PremiumCurrency += milestone.CurrencyAmount;
+                return true;
+            case TrainerMilestoneRewardKind.PremiumFood:
+                if (GetCatalogItem(PremiumFoodItemId) == null)
+                {
+                    return false;
+                }
+
+                AddItemQuantity(PremiumFoodItemId, Mathf.Max(1, milestone.Quantity));
+                return true;
+            case TrainerMilestoneRewardKind.DogUnlock:
+                if (string.IsNullOrEmpty(milestone.DogId))
+                {
+                    return false;
+                }
+
+                UnlockDog(milestone.DogId);
+                return HasDog(milestone.DogId);
+            case TrainerMilestoneRewardKind.CatalogItemReward:
+            {
+                string rewardItemId = FindMilestoneRewardItemId(milestone);
+                if (string.IsNullOrEmpty(rewardItemId))
+                {
+                    return false;
+                }
+
+                AddItemQuantity(rewardItemId, Mathf.Max(1, milestone.Quantity));
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    private bool CanApplyMilestoneReward(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return false;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.None:
+            case TrainerMilestoneRewardKind.CurrencyBasic:
+            case TrainerMilestoneRewardKind.CurrencyPremium:
+                return true;
+            case TrainerMilestoneRewardKind.PremiumFood:
+                return GetCatalogItem(PremiumFoodItemId) != null;
+            case TrainerMilestoneRewardKind.DogUnlock:
+                return !string.IsNullOrEmpty(milestone.DogId);
+            case TrainerMilestoneRewardKind.CatalogItemReward:
+                return !string.IsNullOrEmpty(FindMilestoneRewardItemId(milestone));
+            default:
+                return false;
+        }
+    }
+
+    private string FindMilestoneRewardItemId(TrainerMilestoneDefinition milestone)
+    {
+        PawPalCatalogItemDefinition preferredCandidate = null;
+        PawPalCatalogItemDefinition fallbackCandidate = null;
+
+        for (int i = 0; i < catalogItems.Count; i++)
+        {
+            PawPalCatalogItemDefinition item = catalogItems[i];
+            if (item == null || item.Category != milestone.CatalogCategory)
+            {
+                continue;
+            }
+
+            if (!ItemMatchesMilestoneQuality(item, milestone))
+            {
+                continue;
+            }
+
+            if (item.Category != PawPalItemCategory.Dogs && !item.AppearsInInventory)
+            {
+                continue;
+            }
+
+            if (!item.CanPurchaseMultiple && IsItemOwned(item.Id))
+            {
+                fallbackCandidate = fallbackCandidate ?? item;
+                continue;
+            }
+
+            if (!IsItemOwned(item.Id))
+            {
+                return item.Id;
+            }
+
+            preferredCandidate = preferredCandidate ?? item;
+        }
+
+        PawPalCatalogItemDefinition selected = preferredCandidate ?? fallbackCandidate;
+        if (selected == null)
+        {
+            return string.Empty;
+        }
+
+        if (!selected.CanPurchaseMultiple && IsItemOwned(selected.Id))
+        {
+            return string.Empty;
+        }
+
+        return selected.Id;
+    }
+
+    private bool ItemMatchesMilestoneQuality(PawPalCatalogItemDefinition item, TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null || milestone.ItemQuality == TrainerMilestoneItemQuality.None)
+        {
+            return true;
+        }
+
+        int threshold = GetMilestoneQualityThreshold(milestone.CatalogCategory);
+        if (threshold <= 0)
+        {
+            return false;
+        }
+
+        if (milestone.ItemQuality == TrainerMilestoneItemQuality.Basic)
+        {
+            return item.Price <= threshold;
+        }
+
+        return item.Price > threshold;
+    }
+
+    private int GetMilestoneQualityThreshold(PawPalItemCategory category)
+    {
+        switch (category)
+        {
+            case PawPalItemCategory.Collars:
+                return 50;
+            case PawPalItemCategory.Toys:
+                return 150;
+            case PawPalItemCategory.Clothing:
+                return 100;
+            case PawPalItemCategory.Furniture:
+                return 350;
+            default:
+                return 0;
+        }
+    }
+
+    private bool ShouldTrackPendingUnsupportedMilestone(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null || milestone.RewardKind == TrainerMilestoneRewardKind.None)
+        {
+            return false;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.Feature:
+            case TrainerMilestoneRewardKind.Unsupported:
+                return true;
+            case TrainerMilestoneRewardKind.DogUnlock:
+                return string.IsNullOrEmpty(milestone.DogId);
+            case TrainerMilestoneRewardKind.PremiumFood:
+            case TrainerMilestoneRewardKind.CatalogItemReward:
+                return !CanApplyMilestoneReward(milestone);
+            default:
+                return false;
+        }
+    }
+
+    private void AddPendingUnsupportedTrainerMilestone(int level)
+    {
+        if (!pendingUnsupportedTrainerMilestoneLevels.Contains(level))
+        {
+            pendingUnsupportedTrainerMilestoneLevels.Add(level);
+        }
+    }
+
+    private void RemovePendingUnsupportedTrainerMilestone(int level)
+    {
+        pendingUnsupportedTrainerMilestoneLevels.Remove(level);
+    }
+
+    private TrainerMilestoneDefinition GetTrainerMilestoneDefinition(int level)
+    {
+        TrainerMilestoneDefinition milestone;
+        trainerMilestonesByLevel.TryGetValue(level, out milestone);
+        return milestone;
+    }
+
+    private int GetMaxTrainerLevel()
+    {
+        return trainerMilestonesByLevel.Count;
     }
 
     private void RecordActionProgress(PawPalPlayerActionType actionType)
@@ -1402,10 +2400,21 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         actionProgress.Clear();
         PopulateDailyTasks();
 
-        AddTrainerExperience(15);
-        trainerState.BasicCurrency += 50;
-        trainerState.TotalBasicCurrencyEarned += 50;
-        trainerState.ClubExperience += 3;
+        TrainerActionRewardDefinition dailyLoginReward = GetActionRewardDefinition(PawPalPlayerActionType.DailyLogin);
+        if (dailyLoginReward != null)
+        {
+            AddTrainerExperience(dailyLoginReward.Experience);
+            if (dailyLoginReward.BasicCurrency > 0)
+            {
+                trainerState.BasicCurrency += dailyLoginReward.BasicCurrency;
+                trainerState.TotalBasicCurrencyEarned += dailyLoginReward.BasicCurrency;
+            }
+
+            if (dailyLoginReward.ClubExperience > 0)
+            {
+                trainerState.ClubExperience += dailyLoginReward.ClubExperience;
+            }
+        }
     }
 
     private void EnsureDailyTasksPresent(bool persistState)
@@ -1527,6 +2536,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         saveData.TrainerState = CloneTrainerState(trainerState);
         saveData.ActiveDogIndex = activeDogIndex;
         saveData.NextDailyResetUtcTicks = nextDailyResetUtc.Ticks;
+        saveData.LastProcessedTrainerMilestoneLevel = lastProcessedTrainerMilestoneLevel;
 
         for (int i = 0; i < dogs.Count; i++)
         {
@@ -1559,6 +2569,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             saveData.DailyTasks.Add(CloneDailyTaskState(dailyTasks[i]));
         }
 
+        for (int i = 0; i < pendingUnsupportedTrainerMilestoneLevels.Count; i++)
+        {
+            saveData.PendingUnsupportedTrainerMilestoneLevels.Add(pendingUnsupportedTrainerMilestoneLevels[i]);
+        }
+
         return saveData;
     }
 
@@ -1577,7 +2592,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             dogs.Add(BuildStarterDog());
         }
 
-        AddDefaultRosterDogs();
+        bool backfilledDogNeeds = BackfillIdenticalDogNeedsIfNeeded();
 
         ownedItems.Clear();
         ownedItemById.Clear();
@@ -1626,11 +2641,96 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             ? new DateTime(saveData.NextDailyResetUtcTicks, DateTimeKind.Utc)
             : DateTime.UtcNow.Date.AddDays(1d);
 
+        RestoreTrainerMilestoneState(saveData);
         EnsureDailyTasksPresent(false);
 
         activeDogIndex = Mathf.Clamp(saveData.ActiveDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
         inventoryRevision++;
         shopRevision++;
+
+        if (backfilledDogNeeds)
+        {
+            SaveProfile();
+        }
+    }
+
+    private void RestoreTrainerMilestoneState(PawPalSaveData saveData)
+    {
+        pendingUnsupportedTrainerMilestoneLevels.Clear();
+        if (saveData != null && saveData.PendingUnsupportedTrainerMilestoneLevels != null)
+        {
+            for (int i = 0; i < saveData.PendingUnsupportedTrainerMilestoneLevels.Count; i++)
+            {
+                AddPendingUnsupportedTrainerMilestone(saveData.PendingUnsupportedTrainerMilestoneLevels[i]);
+            }
+        }
+
+        int maxLevel = GetMaxTrainerLevel();
+        int currentLevel = Mathf.Clamp(trainerState.Level, 1, maxLevel);
+        trainerState.Level = currentLevel;
+        if (trainerState.Level >= maxLevel)
+        {
+            trainerState.CurrentLevelExperience = 0;
+        }
+
+        if (saveData != null && (saveData.LastProcessedTrainerMilestoneLevel > 0 || pendingUnsupportedTrainerMilestoneLevels.Count > 0))
+        {
+            lastProcessedTrainerMilestoneLevel = Mathf.Clamp(saveData.LastProcessedTrainerMilestoneLevel, 0, currentLevel);
+            for (int level = lastProcessedTrainerMilestoneLevel + 1; level <= currentLevel; level++)
+            {
+                ProcessTrainerMilestone(level, true);
+            }
+
+            PrunePendingUnsupportedMilestones(currentLevel);
+            return;
+        }
+
+        MigrateLegacyTrainerMilestones(currentLevel);
+    }
+
+    private void MigrateLegacyTrainerMilestones(int currentLevel)
+    {
+        pendingUnsupportedTrainerMilestoneLevels.Clear();
+        lastProcessedTrainerMilestoneLevel = 1;
+
+        for (int level = 2; level <= currentLevel; level++)
+        {
+            ProcessTrainerMilestone(level, !WasLegacyMilestoneAlreadyGranted(level));
+        }
+    }
+
+    private void PrunePendingUnsupportedMilestones(int currentLevel)
+    {
+        for (int i = pendingUnsupportedTrainerMilestoneLevels.Count - 1; i >= 0; i--)
+        {
+            int level = pendingUnsupportedTrainerMilestoneLevels[i];
+            if (level <= 0 || level > currentLevel)
+            {
+                pendingUnsupportedTrainerMilestoneLevels.RemoveAt(i);
+                continue;
+            }
+
+            TrainerMilestoneDefinition milestone = GetTrainerMilestoneDefinition(level);
+            if (!ShouldTrackPendingUnsupportedMilestone(milestone))
+            {
+                pendingUnsupportedTrainerMilestoneLevels.RemoveAt(i);
+            }
+        }
+    }
+
+    private bool WasLegacyMilestoneAlreadyGranted(int level)
+    {
+        switch (level)
+        {
+            case 4:
+            case 5:
+            case 6:
+            case 10:
+            case 15:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void BackfillMissingOwnedItems()
@@ -1652,19 +2752,6 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
             ownedItems.Add(state);
             ownedItemById[item.Id] = state;
-        }
-    }
-
-    private void AddDefaultRosterDogs()
-    {
-        if (!HasDog(SecondaryStarterDogId))
-        {
-            dogs.Add(BuildMisoDog());
-        }
-
-        for (int i = 0; i < dogs.Count; i++)
-        {
-            EnsureDogEquipmentState(dogs[i].Id);
         }
     }
 
@@ -1705,6 +2792,101 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Speed = source.Speed,
             Focus = source.Focus
         };
+    }
+
+    private bool BackfillIdenticalDogNeedsIfNeeded()
+    {
+        if (dogs.Count < 2)
+        {
+            return false;
+        }
+
+        bool changed = false;
+        for (int i = 1; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog == null)
+            {
+                continue;
+            }
+
+            for (int previousIndex = 0; previousIndex < i; previousIndex++)
+            {
+                PawPalDogState previousDog = dogs[previousIndex];
+                if (previousDog == null || !HasIdenticalNeedProfile(dog, previousDog))
+                {
+                    continue;
+                }
+
+                ApplyDeterministicNeedBackfill(dog, i);
+                changed = true;
+                break;
+            }
+        }
+
+        return changed;
+    }
+
+    private static bool HasIdenticalNeedProfile(PawPalDogState firstDog, PawPalDogState secondDog)
+    {
+        return firstDog.Food01 == secondDog.Food01
+            && firstDog.Water01 == secondDog.Water01
+            && firstDog.Hygiene01 == secondDog.Hygiene01
+            && firstDog.Activity01 == secondDog.Activity01
+            && firstDog.Energy01 == secondDog.Energy01;
+    }
+
+    private static void ApplyDeterministicNeedBackfill(PawPalDogState dog, int dogIndex)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        if (string.Equals(dog.Id, "pepper", StringComparison.OrdinalIgnoreCase))
+        {
+            SetDogNeeds(dog, 0.82f, 0.76f, 0.7f, 0.67f, 0.74f);
+            return;
+        }
+
+        if (string.Equals(dog.Id, "miso", StringComparison.OrdinalIgnoreCase))
+        {
+            SetDogNeeds(dog, 0.64f, 0.88f, 0.78f, 0.92f, 0.81f);
+            return;
+        }
+
+        if (string.Equals(dog.Id, "suki", StringComparison.OrdinalIgnoreCase))
+        {
+            SetDogNeeds(dog, 0.93f, 0.58f, 0.86f, 0.74f, 0.89f);
+            return;
+        }
+
+        int seed = Mathf.Max(1, dogIndex + 1) * 37;
+        string key = !string.IsNullOrEmpty(dog.Id) ? dog.Id : dog.DisplayName;
+        if (!string.IsNullOrEmpty(key))
+        {
+            for (int i = 0; i < key.Length; i++)
+            {
+                seed += key[i] * (i + 1);
+            }
+        }
+
+        SetDogNeeds(
+            dog,
+            0.58f + (seed % 23) * 0.01f,
+            0.62f + (seed % 19) * 0.01f,
+            0.66f + (seed % 17) * 0.01f,
+            0.7f + (seed % 13) * 0.01f,
+            0.72f + (seed % 11) * 0.01f);
+    }
+
+    private static void SetDogNeeds(PawPalDogState dog, float food, float water, float hygiene, float activity, float energy)
+    {
+        dog.Food01 = Mathf.Clamp01(food);
+        dog.Water01 = Mathf.Clamp01(water);
+        dog.Hygiene01 = Mathf.Clamp01(hygiene);
+        dog.Activity01 = Mathf.Clamp01(activity);
+        dog.Energy01 = Mathf.Clamp01(energy);
     }
 
     private static PawPalDailyTaskState CloneDailyTaskState(PawPalDailyTaskState source)

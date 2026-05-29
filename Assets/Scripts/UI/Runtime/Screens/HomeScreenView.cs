@@ -1,4 +1,7 @@
+using System.Collections;
+using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class HomeScreenView : AppScreenViewBase
 {
@@ -31,6 +34,9 @@ public class HomeScreenView : AppScreenViewBase
     private DogDetailsWidgetView dogDetails;
     private InventoryNameBarView inventoryNameBar;
     private InventoryPanelView inventoryPanel;
+    private RectTransform needPopup;
+    private TextMeshProUGUI needPopupLabel;
+    private Coroutine needPopupRoutine;
     private HomeDetailMode detailMode;
 
     protected override bool UseScreenContainer
@@ -71,7 +77,7 @@ public class HomeScreenView : AppScreenViewBase
         exactFrame.anchoredPosition = Vector2.zero;
 
         trainerLevel = CreateNode<TrainerLevelWidgetView>("TrainerLevel", 109f, 0f, 175f, 76f);
-        trainerLevel.Initialize(5, 97f / 138f, sprites);
+        trainerLevel.Initialize(sprites);
 
         addons = CreateNode<HomeAddonsView>("Addons", 107f, BaseAddonsY, 180f, 38f);
         addons.Initialize(sprites, ToggleInventoryPanel);
@@ -92,6 +98,7 @@ public class HomeScreenView : AppScreenViewBase
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
 
+        BuildNeedPopup();
         ApplyDetailMode();
         RefreshRuntimeState();
     }
@@ -247,10 +254,16 @@ public class HomeScreenView : AppScreenViewBase
         switch (need)
         {
             case PawPalDogNeed.Food:
-                runtime.TryFeedActiveDog();
+                if (!runtime.HasFoodItemForActiveDog())
+                {
+                    ShowNeedPopup("Your dog needs food items.");
+                    return;
+                }
+
+                runtime.TryStartFoodNeedInteraction();
                 break;
             case PawPalDogNeed.Water:
-                runtime.GiveWaterToActiveDog();
+                runtime.TryStartWaterNeedInteraction();
                 break;
             case PawPalDogNeed.Hygiene:
                 runtime.CleanActiveDog();
@@ -277,7 +290,14 @@ public class HomeScreenView : AppScreenViewBase
             return;
         }
 
-        runtime.TryEquipCollar(runtime.ActiveDog.Id, itemId);
+        string activeDogId = runtime.ActiveDog.Id;
+        if (runtime.GetEquippedCollarItemId(activeDogId) == itemId)
+        {
+            runtime.TryUnequipCollar(activeDogId, itemId);
+            return;
+        }
+
+        runtime.TryEquipCollar(activeDogId, itemId);
     }
 
     private void HandleInventoryToyTapped(string itemId)
@@ -288,6 +308,70 @@ public class HomeScreenView : AppScreenViewBase
             return;
         }
 
+        if (runtime.IsToyActiveInScene(itemId))
+        {
+            runtime.TryRemoveToyFromScene(itemId);
+            return;
+        }
+
         runtime.TrySpawnToy(itemId);
+    }
+
+    private void BuildNeedPopup()
+    {
+        needPopup = UiFactory.CreateRect("NeedPopup", exactFrame);
+        needPopup.anchorMin = new Vector2(0.5f, 1f);
+        needPopup.anchorMax = new Vector2(0.5f, 1f);
+        needPopup.pivot = new Vector2(0.5f, 0.5f);
+        needPopup.sizeDelta = new Vector2(254f, 52f);
+        needPopup.anchoredPosition = new Vector2(0f, -604f);
+
+        Image background = needPopup.gameObject.AddComponent<Image>();
+        background.sprite = UiTheme.RoundedTenSprite;
+        background.type = Image.Type.Sliced;
+        background.preserveAspect = false;
+        background.color = UiTheme.NavBackgroundCream;
+        background.raycastTarget = false;
+
+        Outline outline = needPopup.gameObject.AddComponent<Outline>();
+        outline.effectColor = UiTheme.NavBrand;
+        outline.effectDistance = new Vector2(1f, -1f);
+        outline.useGraphicAlpha = true;
+
+        needPopupLabel = UiFactory.CreateLabel("Message", needPopup, string.Empty, 15, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
+        needPopupLabel.font = UiTheme.NavExtraBoldFont;
+        needPopupLabel.textWrappingMode = TextWrappingModes.Normal;
+        needPopupLabel.overflowMode = TextOverflowModes.Ellipsis;
+        UiFactory.Stretch(needPopupLabel.rectTransform, 12f, 8f, 12f, 8f);
+
+        needPopup.gameObject.SetActive(false);
+    }
+
+    private void ShowNeedPopup(string message)
+    {
+        if (needPopup == null || needPopupLabel == null)
+        {
+            return;
+        }
+
+        if (needPopupRoutine != null)
+        {
+            StopCoroutine(needPopupRoutine);
+        }
+
+        needPopupLabel.text = message;
+        needPopup.gameObject.SetActive(true);
+        needPopupRoutine = StartCoroutine(HideNeedPopupAfterDelay(2f));
+    }
+
+    private IEnumerator HideNeedPopupAfterDelay(float delay)
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0.1f, delay));
+        if (needPopup != null)
+        {
+            needPopup.gameObject.SetActive(false);
+        }
+
+        needPopupRoutine = null;
     }
 }

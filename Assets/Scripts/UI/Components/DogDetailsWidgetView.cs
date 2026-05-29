@@ -11,6 +11,8 @@ public class DogDetailsWidgetView : MonoBehaviour
     private static readonly Color32 NeedBlue = new Color32(34, 144, 214, 255);
     private static readonly Color32 NeedBluePale = new Color32(207, 234, 248, 255);
     private static readonly Color32 NeedBluePaleLight = new Color32(220, 241, 251, 255);
+    private static readonly Color32 NeedWarning = new Color32(232, 125, 103, 255);
+    private static readonly Color32 NeedWarningPale = new Color32(250, 214, 203, 255);
     private static readonly Color32 HandleWhite = new Color32(248, 248, 248, 255);
     private static readonly Color32 SupportCream = new Color32(236, 223, 200, 255);
     private static readonly Color32 EnergyLabelBlack = new Color32(0, 0, 0, 255);
@@ -30,6 +32,7 @@ public class DogDetailsWidgetView : MonoBehaviour
     private TextMeshProUGUI speedValueLabel;
     private TextMeshProUGUI focusValueLabel;
     private readonly Dictionary<PawPalDogNeed, Image> needCircles = new Dictionary<PawPalDogNeed, Image>();
+    private readonly Dictionary<PawPalDogNeed, Image> needFills = new Dictionary<PawPalDogNeed, Image>();
     private readonly Dictionary<PawPalDogNeed, Image> needIcons = new Dictionary<PawPalDogNeed, Image>();
     private Action toggleRequested;
     private Action previousDogRequested;
@@ -386,6 +389,21 @@ public class DogDetailsWidgetView : MonoBehaviour
         circle.rectTransform.anchoredPosition = new Vector2(0f, 0f);
         needCircles[need] = circle;
 
+        Image fill = UiFactory.CreateImage("Fill", group, UiTheme.CircleSprite, circleColor);
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Radial360;
+        fill.fillOrigin = (int)Image.Origin360.Top;
+        fill.fillClockwise = true;
+        fill.fillAmount = 1f;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        fill.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        fill.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        fill.rectTransform.pivot = new Vector2(0.5f, 1f);
+        fill.rectTransform.sizeDelta = new Vector2(31.804f, 31.804f);
+        fill.rectTransform.anchoredPosition = new Vector2(0f, 0f);
+        needFills[need] = fill;
+
         Image icon = UiFactory.CreateImage("Icon", group, sprites.GetWhiteIcon(iconName), UiTheme.White);
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
@@ -473,12 +491,23 @@ public class DogDetailsWidgetView : MonoBehaviour
         Color32 fullColor = need == PawPalDogNeed.Food ? NeedBlueLight : NeedBlue;
         Color32 emptyColor = need == PawPalDogNeed.Food ? NeedBluePaleLight : NeedBluePale;
         float clamped = Mathf.Clamp01(value01);
-        circle.color = Color.Lerp(emptyColor, fullColor, clamped);
+        float healthyBlend = Mathf.InverseLerp(0.25f, 0.7f, clamped);
+        Color lowColor = Color.Lerp(NeedWarningPale, NeedWarning, Mathf.Clamp01(1f - clamped));
+        Color healthyColor = Color.Lerp(emptyColor, fullColor, clamped);
+        Color fillColor = Color.Lerp(lowColor, healthyColor, healthyBlend);
+        circle.color = Color.Lerp(NeedWarningPale, emptyColor, healthyBlend);
+
+        Image fill;
+        if (needFills.TryGetValue(need, out fill) && fill != null)
+        {
+            fill.fillAmount = clamped;
+            fill.color = fillColor;
+        }
 
         Image icon;
         if (needIcons.TryGetValue(need, out icon) && icon != null)
         {
-            float iconAlpha = Mathf.Lerp(0.5f, 1f, clamped);
+            float iconAlpha = Mathf.Lerp(0.45f, 1f, clamped);
             icon.color = new Color(1f, 1f, 1f, iconAlpha);
         }
     }

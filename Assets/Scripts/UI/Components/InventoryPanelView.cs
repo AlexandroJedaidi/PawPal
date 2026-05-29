@@ -199,7 +199,8 @@ public class InventoryPanelView : MonoBehaviour
         UiFactory.Stretch(card.rectTransform, 0f, 0f, 0f, 0f);
 
         bool equipped = item.Category == PawPalItemCategory.Collars && runtime.ActiveDog != null && runtime.GetEquippedCollarItemId(runtime.ActiveDog.Id) == item.Id;
-        if (equipped)
+        bool activeToy = item.Category == PawPalItemCategory.Toys && runtime.IsToyActiveInScene(item.Id);
+        if (equipped || activeToy)
         {
             Image selectedBorder = UiFactory.CreateImage("SelectedBorder", group, UiTheme.InventoryCardOutlineSprite, UiTheme.NavBrand);
             selectedBorder.type = Image.Type.Sliced;
@@ -239,7 +240,11 @@ public class InventoryPanelView : MonoBehaviour
         }
         else if (equipped)
         {
-            BuildUsedBadge(group);
+            BuildStatusBadge(group, "E");
+        }
+        else if (activeToy)
+        {
+            BuildStatusBadge(group, "A");
         }
 
         if (item.Category == PawPalItemCategory.Toys && onToyTapped != null)
@@ -307,9 +312,9 @@ public class InventoryPanelView : MonoBehaviour
         }
     }
 
-    private void BuildUsedBadge(RectTransform group)
+    private void BuildStatusBadge(RectTransform group, string text)
     {
-        Image usedCircle = UiFactory.CreateImage("UsedCircle", group, UiTheme.CircleSprite, new Color32(50, 187, 255, 255));
+        Image usedCircle = UiFactory.CreateImage("StatusCircle", group, UiTheme.CircleSprite, new Color32(50, 187, 255, 255));
         usedCircle.type = Image.Type.Simple;
         usedCircle.preserveAspect = false;
         usedCircle.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -318,7 +323,7 @@ public class InventoryPanelView : MonoBehaviour
         usedCircle.rectTransform.sizeDelta = new Vector2(19f, 19f);
         usedCircle.rectTransform.anchoredPosition = new Vector2(73.211f, -72f);
 
-        TextMeshProUGUI usedText = UiFactory.CreateLabel("UsedText", group, "E", 12, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+        TextMeshProUGUI usedText = UiFactory.CreateLabel("StatusText", group, text, 12, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
         usedText.font = UiTheme.NavExtraBoldFont;
         usedText.rectTransform.anchorMin = new Vector2(0f, 1f);
         usedText.rectTransform.anchorMax = new Vector2(0f, 1f);

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Animations.Rigging;
@@ -21,11 +22,14 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float maxLookDuration = 2.5f;
     [SerializeField] private float maxNeckYaw = 55f;
     [SerializeField] private float maxNeckPitch = 30f;
+    [SerializeField] private float safeHorizontalLookAngle = 30f;
+    [SerializeField] private bool yawOnlyLook = true;
     [SerializeField] private float blendSpeed = 4f;
     [SerializeField] private float bodyTurnSpeed = 120f;
     [SerializeField] private float bodyAssistVelocityLimit = 0.15f;
     [SerializeField] private bool disableProximityLock = true;
     [SerializeField] private bool useBoneFallback = true;
+    [SerializeField] private bool allowBoneFallbackWithoutRig = false;
     [SerializeField] private Transform headTransform;
     [SerializeField] private Transform neckTransform;
     [SerializeField, Range(0f, 1f)] private float fallbackHeadWeight = 0.65f;
@@ -39,7 +43,25 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float maxNearbyDogLookDuration = 1.6f;
     [SerializeField] private float maxNearbyDogNeckYaw = 40f;
     [SerializeField] private float maxNearbyDogNeckPitch = 22f;
+    [SerializeField] private bool holdNearbyDogLookWhileClose = true;
+    [SerializeField] private bool allowNearbyDogPitch = true;
+    [SerializeField] private float nearbyDogScanInterval = 0.15f;
+    [SerializeField] private Vector3 nearbyDogHeadLookOffset = Vector3.zero;
     [SerializeField] private Vector3 nearbyDogLookOffset = new Vector3(0f, 0.35f, 0f);
+
+    [Header("Social Dog Look")]
+    [SerializeField] private bool holdSocialDogHeadLook = true;
+    [SerializeField] private float socialDogLookRadius = 2.5f;
+    [SerializeField] private float socialDogMaxNeckYaw = 70f;
+    [SerializeField] private float socialDogMaxNeckPitch = 50f;
+    [SerializeField, Range(0f, 1f)] private float socialDogLookWeight = 1f;
+    [SerializeField] private bool allowSocialBoneFallbackWithoutRig = true;
+    [SerializeField] private bool forceSocialBoneFallback = true;
+    [SerializeField] private bool assistSocialBodyTurn = true;
+    [SerializeField] private bool allowSocialLookDuringOneShotAnimations = false;
+    [SerializeField] private float socialBodyTurnYawThreshold = 12f;
+    [SerializeField] private float socialBodyTurnSpeed = 220f;
+    [SerializeField] private float socialBodyTurnVelocityLimit = 0.12f;
 
     private MultiAimConstraint aimConstraint;
     private RigBuilder rigBuilder;
@@ -52,6 +74,13 @@ public class DogCameraAttention : MonoBehaviour
     private float currentWeight;
     private AttentionTargetType activeTargetType;
     private Transform activeLookTarget;
+    private bool proximityLookOverrideActive;
+    private Transform proximityLookTarget;
+    private bool socialLookOverrideActive;
+    private Transform socialLookTarget;
+    private Transform socialHeadLookTarget;
+    private float nextNearbyDogScanTime;
+    private readonly Dictionary<Transform, Transform> cachedHeadTargetsByDog = new Dictionary<Transform, Transform>();
 
     private void Awake()
     {
@@ -115,6 +144,60 @@ public class DogCameraAttention : MonoBehaviour
 
         targetWeight = 0f;
         currentWeight = 0f;
+        proximityLookOverrideActive = false;
+        proximityLookTarget = null;
+        socialLookOverrideActive = false;
+        socialLookTarget = null;
+        socialHeadLookTarget = null;
+        activeTargetType = AttentionTargetType.None;
+        activeLookTarget = null;
+    }
+
+    public void BeginSocialDogLook(Transform otherDog)
+    {
+        BeginSocialDogLook(otherDog, null);
+    }
+
+    public void BeginSocialDogLook(Transform otherDog, Transform otherDogHead)
+    {
+        if (!holdSocialDogHeadLook || otherDog == null || otherDog == transform)
+        {
+            return;
+        }
+
+        socialLookTarget = otherDog;
+        socialHeadLookTarget = otherDogHead != null ? otherDogHead : GetDogHeadLookTarget(otherDog);
+        socialLookOverrideActive = true;
+        proximityLookOverrideActive = false;
+        proximityLookTarget = null;
+        activeTargetType = AttentionTargetType.NearbyDog;
+        activeLookTarget = socialLookTarget;
+        targetWeight = socialDogLookWeight;
+    }
+
+    public void EndSocialDogLook(Transform otherDog)
+    {
+        if (otherDog != null && socialLookTarget != otherDog)
+        {
+            return;
+        }
+
+        ClearSocialDogLookOverride();
+    }
+
+    public Transform GetOwnHeadLookTarget()
+    {
+        if (headTransform != null)
+        {
+            return headTransform;
+        }
+
+        if (constrainedHead != null)
+        {
+            return constrainedHead;
+        }
+
+        return GetDogHeadLookTarget(transform);
     }
 
     private void LateUpdate()
@@ -122,6 +205,11 @@ public class DogCameraAttention : MonoBehaviour
         if (cameraTransform == null && Camera.main != null)
         {
             cameraTransform = Camera.main.transform;
+        }
+
+        if (!UpdateSocialDogLookOverride())
+        {
+            UpdateProximityDogLookOverride();
         }
 
         float desiredWeight = CanLookAtActiveTarget() ? targetWeight : 0f;
@@ -142,6 +230,11 @@ public class DogCameraAttention : MonoBehaviour
         while (true)
         {
             yield return new WaitForSeconds(Random.Range(minTimeBetweenLooks, maxTimeBetweenLooks));
+
+            while (proximityLookOverrideActive || socialLookOverrideActive)
+            {
+                yield return null;
+            }
 
             float lookDuration;
             while (!TryChooseLookTarget(out lookDuration))
@@ -208,13 +301,17 @@ public class DogCameraAttention : MonoBehaviour
         {
             AssistBodyTurn(toTarget);
         }
+        else if (IsSocialLookActiveForCurrentTarget())
+        {
+            AssistSocialBodyTurn(lookPoint);
+        }
 
         if (lookProxy != null)
         {
             lookProxy.position = GetClampedLookPoint(reference.position, toTarget, GetActiveMaxYaw(), GetActiveMaxPitch());
         }
 
-        if (aimConstraint == null)
+        if (ShouldApplyBoneFallbackLook())
         {
             ApplyBoneFallbackLook(currentWeight, lookPoint);
         }
@@ -230,7 +327,7 @@ public class DogCameraAttention : MonoBehaviour
         float pitch = Mathf.Atan2(localDirection.y, flatDistance) * Mathf.Rad2Deg;
 
         yaw = Mathf.Clamp(yaw, -maxYaw, maxYaw);
-        pitch = Mathf.Clamp(pitch, -maxPitch, maxPitch);
+        pitch = IsPitchEnabledForActiveTarget() ? Mathf.Clamp(pitch, -maxPitch, maxPitch) : 0f;
 
         float yawRadians = yaw * Mathf.Deg2Rad;
         float pitchRadians = pitch * Mathf.Deg2Rad;
@@ -247,6 +344,11 @@ public class DogCameraAttention : MonoBehaviour
     private void AssistBodyTurn(Vector3 toCamera)
     {
         if (currentWeight <= 0f || !CanBodyAssist())
+        {
+            return;
+        }
+
+        if (yawOnlyLook)
         {
             return;
         }
@@ -287,19 +389,25 @@ public class DogCameraAttention : MonoBehaviour
 
     private bool CanLookAtCamera()
     {
-        return roomAgent == null || (!roomAgent.IsMoving && !roomAgent.IsPreparingToMove && !roomAgent.IsSocialBusy);
+        return roomAgent == null
+            || (!roomAgent.IsMoving
+                && !roomAgent.IsPreparingToMove
+                && !roomAgent.IsSocialBusy
+                && !roomAgent.IsResting
+                && !roomAgent.IsSleeping
+                && !roomAgent.IsPlayingOneShotAnimation);
     }
 
     private bool CanLookAtActiveTarget()
     {
         if (activeTargetType == AttentionTargetType.Camera)
         {
-            return activeLookTarget != null && CanLookAtCamera();
+            return activeLookTarget != null && CanLookAtCamera() && IsTargetWithinSafeYaw(activeLookTarget.position);
         }
 
         if (activeTargetType == AttentionTargetType.NearbyDog)
         {
-            return activeLookTarget != null && CanLookAtNearbyDog(activeLookTarget);
+            return activeLookTarget != null && CanLookAtNearbyDog(activeLookTarget, socialLookOverrideActive && activeLookTarget == socialLookTarget);
         }
 
         return false;
@@ -314,7 +422,7 @@ public class DogCameraAttention : MonoBehaviour
             return true;
         }
 
-        if (cameraTransform != null && CanLookAtCamera())
+        if (cameraTransform != null && CanLookAtCamera() && IsTargetWithinSafeYaw(cameraTransform.position))
         {
             activeTargetType = AttentionTargetType.Camera;
             activeLookTarget = cameraTransform;
@@ -349,7 +457,7 @@ public class DogCameraAttention : MonoBehaviour
                 continue;
             }
 
-            if (!CanLookAtNearbyDog(candidate.transform))
+            if (!CanLookAtNearbyDog(candidate.transform, false))
             {
                 continue;
             }
@@ -367,17 +475,28 @@ public class DogCameraAttention : MonoBehaviour
 
     private bool CanLookAtNearbyDog(Transform otherDog)
     {
-        if (!lookAtNearbyDogs || otherDog == null)
+        return CanLookAtNearbyDog(otherDog, false);
+    }
+
+    private bool CanLookAtNearbyDog(Transform otherDog, bool socialOverride)
+    {
+        if (otherDog == null || (!lookAtNearbyDogs && !socialOverride))
         {
             return false;
         }
 
-        if (roomAgent != null && (roomAgent.IsMoving || roomAgent.IsPreparingToMove))
+        if (roomAgent != null
+            && (!socialOverride
+                && (roomAgent.IsMoving
+                    || roomAgent.IsPreparingToMove)
+                || roomAgent.IsResting
+                || roomAgent.IsSleeping
+                || (roomAgent.IsPlayingOneShotAnimation && (!socialOverride || !allowSocialLookDuringOneShotAnimations))))
         {
             return false;
         }
 
-        if (agent != null && agent.enabled)
+        if (!socialOverride && agent != null && agent.enabled)
         {
             Vector3 velocity = agent.velocity;
             velocity.y = 0f;
@@ -388,7 +507,7 @@ public class DogCameraAttention : MonoBehaviour
         }
 
         Transform reference = constrainedHead != null ? constrainedHead : headTransform != null ? headTransform : transform;
-        Vector3 toDog = GetNearbyDogLookPoint(otherDog) - reference.position;
+        Vector3 toDog = GetNearbyDogLookPoint(otherDog, socialOverride) - reference.position;
         if (toDog.sqrMagnitude < 0.001f)
         {
             return false;
@@ -396,17 +515,22 @@ public class DogCameraAttention : MonoBehaviour
 
         Vector3 flatToDog = toDog;
         flatToDog.y = 0f;
-        if (flatToDog.magnitude > nearbyDogLookRadius)
+        if (flatToDog.magnitude > GetNearbyDogLookRadius(socialOverride))
         {
             return false;
+        }
+
+        if (socialOverride)
+        {
+            return true;
         }
 
         Vector3 localDirection = transform.InverseTransformDirection(toDog.normalized);
         float yaw = Mathf.Atan2(localDirection.x, localDirection.z) * Mathf.Rad2Deg;
         float flatDistance = new Vector2(localDirection.x, localDirection.z).magnitude;
         float pitch = Mathf.Atan2(localDirection.y, flatDistance) * Mathf.Rad2Deg;
-
-        return Mathf.Abs(yaw) <= maxNearbyDogNeckYaw && Mathf.Abs(pitch) <= maxNearbyDogNeckPitch;
+        return Mathf.Abs(yaw) <= GetNearbyDogMaxYaw(false)
+            && (!CanUsePitchForNearbyDog() || Mathf.Abs(pitch) <= GetNearbyDogMaxPitch(false));
     }
 
     private bool TryGetActiveLookPoint(out Vector3 lookPoint)
@@ -419,7 +543,7 @@ public class DogCameraAttention : MonoBehaviour
 
         if (activeTargetType == AttentionTargetType.NearbyDog && activeLookTarget != null)
         {
-            lookPoint = GetNearbyDogLookPoint(activeLookTarget);
+            lookPoint = GetNearbyDogLookPoint(activeLookTarget, IsSocialLookActiveForCurrentTarget());
             return true;
         }
 
@@ -429,6 +553,22 @@ public class DogCameraAttention : MonoBehaviour
 
     private Vector3 GetNearbyDogLookPoint(Transform otherDog)
     {
+        return GetNearbyDogLookPoint(otherDog, false);
+    }
+
+    private Vector3 GetNearbyDogLookPoint(Transform otherDog, bool socialOverride)
+    {
+        if (socialOverride && socialHeadLookTarget != null)
+        {
+            return socialHeadLookTarget.position + nearbyDogHeadLookOffset;
+        }
+
+        Transform headTarget = GetDogHeadLookTarget(otherDog);
+        if (headTarget != null)
+        {
+            return headTarget.position + nearbyDogHeadLookOffset;
+        }
+
         return otherDog.position + nearbyDogLookOffset;
     }
 
@@ -436,25 +576,177 @@ public class DogCameraAttention : MonoBehaviour
     {
         if (activeTargetType == AttentionTargetType.NearbyDog)
         {
-            return Mathf.Min(maxNeckYaw, maxNearbyDogNeckYaw);
+            return GetNearbyDogMaxYaw(IsSocialLookActiveForCurrentTarget());
         }
 
-        return maxNeckYaw;
+        return Mathf.Min(maxNeckYaw, safeHorizontalLookAngle);
     }
 
     private float GetActiveMaxPitch()
     {
+        if (!IsPitchEnabledForActiveTarget())
+        {
+            return 0f;
+        }
+
         if (activeTargetType == AttentionTargetType.NearbyDog)
         {
-            return Mathf.Min(maxNeckPitch, maxNearbyDogNeckPitch);
+            return GetNearbyDogMaxPitch(IsSocialLookActiveForCurrentTarget());
         }
 
         return maxNeckPitch;
     }
 
+    private void UpdateProximityDogLookOverride()
+    {
+        if (!lookAtNearbyDogs || !holdNearbyDogLookWhileClose)
+        {
+            ClearProximityDogLookOverride();
+            return;
+        }
+
+        if (Time.time >= nextNearbyDogScanTime)
+        {
+            nextNearbyDogScanTime = Time.time + Mathf.Max(0.02f, nearbyDogScanInterval);
+            Transform nearbyDog;
+            proximityLookTarget = TryFindNearbyDog(out nearbyDog) ? nearbyDog : null;
+        }
+
+        if (proximityLookTarget != null && CanLookAtNearbyDog(proximityLookTarget, false))
+        {
+            proximityLookOverrideActive = true;
+            activeTargetType = AttentionTargetType.NearbyDog;
+            activeLookTarget = proximityLookTarget;
+            targetWeight = 1f;
+            return;
+        }
+
+        ClearProximityDogLookOverride();
+    }
+
+    private bool UpdateSocialDogLookOverride()
+    {
+        if (!holdSocialDogHeadLook || socialLookTarget == null)
+        {
+            ClearSocialDogLookOverride();
+            return false;
+        }
+
+        if (CanLookAtNearbyDog(socialLookTarget, true))
+        {
+            socialLookOverrideActive = true;
+            activeTargetType = AttentionTargetType.NearbyDog;
+            activeLookTarget = socialLookTarget;
+            targetWeight = socialDogLookWeight;
+            return true;
+        }
+
+        targetWeight = 0f;
+        return true;
+    }
+
+    private void ClearSocialDogLookOverride()
+    {
+        if (!socialLookOverrideActive && socialLookTarget == null)
+        {
+            return;
+        }
+
+        socialLookOverrideActive = false;
+        socialLookTarget = null;
+        socialHeadLookTarget = null;
+        targetWeight = 0f;
+        activeTargetType = AttentionTargetType.None;
+        activeLookTarget = null;
+    }
+
+    private void ClearProximityDogLookOverride()
+    {
+        if (!proximityLookOverrideActive)
+        {
+            return;
+        }
+
+        proximityLookOverrideActive = false;
+        proximityLookTarget = null;
+        targetWeight = 0f;
+        activeTargetType = AttentionTargetType.None;
+        activeLookTarget = null;
+    }
+
+    private bool IsPitchEnabledForActiveTarget()
+    {
+        if (activeTargetType == AttentionTargetType.NearbyDog)
+        {
+            return CanUsePitchForNearbyDog();
+        }
+
+        return !yawOnlyLook;
+    }
+
+    private bool CanUsePitchForNearbyDog()
+    {
+        return allowNearbyDogPitch;
+    }
+
+    private float GetNearbyDogMaxYaw()
+    {
+        return GetNearbyDogMaxYaw(false);
+    }
+
+    private float GetNearbyDogMaxYaw(bool socialOverride)
+    {
+        if (socialOverride)
+        {
+            return Mathf.Max(maxNearbyDogNeckYaw, socialDogMaxNeckYaw);
+        }
+
+        return Mathf.Min(Mathf.Min(maxNeckYaw, maxNearbyDogNeckYaw), safeHorizontalLookAngle);
+    }
+
+    private float GetNearbyDogMaxPitch()
+    {
+        return GetNearbyDogMaxPitch(false);
+    }
+
+    private float GetNearbyDogMaxPitch(bool socialOverride)
+    {
+        if (socialOverride)
+        {
+            return Mathf.Max(maxNearbyDogNeckPitch, socialDogMaxNeckPitch);
+        }
+
+        return Mathf.Min(maxNeckPitch, maxNearbyDogNeckPitch);
+    }
+
+    private float GetNearbyDogLookRadius(bool socialOverride)
+    {
+        return socialOverride ? Mathf.Max(nearbyDogLookRadius, socialDogLookRadius) : nearbyDogLookRadius;
+    }
+
+    private bool IsSocialLookActiveForCurrentTarget()
+    {
+        return socialLookOverrideActive && activeLookTarget != null && activeLookTarget == socialLookTarget;
+    }
+
+    private bool CanApplyBoneFallbackLook()
+    {
+        return allowBoneFallbackWithoutRig || (allowSocialBoneFallbackWithoutRig && IsSocialLookActiveForCurrentTarget());
+    }
+
+    private bool ShouldApplyBoneFallbackLook()
+    {
+        if (!CanApplyBoneFallbackLook())
+        {
+            return false;
+        }
+
+        return aimConstraint == null || (forceSocialBoneFallback && IsSocialLookActiveForCurrentTarget());
+    }
+
     private void ApplyBoneFallbackLook(float weight, Vector3 targetPoint)
     {
-        if (!useBoneFallback || weight <= 0f || headTransform == null)
+        if (!useBoneFallback || !CanApplyBoneFallbackLook() || weight <= 0f || headTransform == null)
         {
             return;
         }
@@ -478,6 +770,60 @@ public class DogCameraAttention : MonoBehaviour
         ApplyBoneLookRotation(headTransform, safeDirection, weight * fallbackHeadWeight);
     }
 
+    private void AssistSocialBodyTurn(Vector3 targetPoint)
+    {
+        if (!assistSocialBodyTurn || !CanAssistSocialBodyTurn())
+        {
+            return;
+        }
+
+        Vector3 flatDirection = targetPoint - transform.position;
+        flatDirection.y = 0f;
+        if (flatDirection.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        float yaw = Vector3.SignedAngle(transform.forward, flatDirection.normalized, Vector3.up);
+        if (Mathf.Abs(yaw) <= Mathf.Max(0f, socialBodyTurnYawThreshold))
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized, Vector3.up);
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, socialBodyTurnSpeed * Time.deltaTime);
+    }
+
+    private bool CanAssistSocialBodyTurn()
+    {
+        if (roomAgent != null && (roomAgent.IsMoving || roomAgent.IsPreparingToMove))
+        {
+            return false;
+        }
+
+        if (agent == null || !agent.enabled)
+        {
+            return true;
+        }
+
+        Vector3 velocity = agent.velocity;
+        velocity.y = 0f;
+        return velocity.magnitude <= socialBodyTurnVelocityLimit;
+    }
+
+    private bool IsTargetWithinSafeYaw(Vector3 targetPoint)
+    {
+        Vector3 toTarget = targetPoint - transform.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude < 0.001f)
+        {
+            return false;
+        }
+
+        float yaw = Vector3.SignedAngle(transform.forward, toTarget.normalized, Vector3.up);
+        return Mathf.Abs(yaw) <= GetActiveMaxYaw();
+    }
+
     private void ApplyBoneLookRotation(Transform bone, Vector3 safeDirection, float weight)
     {
         if (bone == null || weight <= 0f || safeDirection.sqrMagnitude < 0.001f)
@@ -485,14 +831,69 @@ public class DogCameraAttention : MonoBehaviour
             return;
         }
 
-        Quaternion delta = Quaternion.FromToRotation(bone.forward, safeDirection);
+        Vector3 currentAimAxis = GetBestBoneAimAxis(bone);
+        Quaternion delta = Quaternion.FromToRotation(currentAimAxis, safeDirection);
         Quaternion targetRotation = delta * bone.rotation;
         bone.rotation = Quaternion.Slerp(bone.rotation, targetRotation, Mathf.Clamp01(weight));
     }
 
+    private Vector3 GetBestBoneAimAxis(Transform bone)
+    {
+        Vector3 dogForward = transform.forward;
+        dogForward.y = 0f;
+        if (dogForward.sqrMagnitude < 0.001f)
+        {
+            dogForward = Vector3.forward;
+        }
+
+        dogForward.Normalize();
+
+        Vector3 bestAxis = bone.forward;
+        float bestDot = Vector3.Dot(FlattenAxis(bestAxis), dogForward);
+        TestBoneAimAxis(bone.forward, dogForward, ref bestAxis, ref bestDot);
+        TestBoneAimAxis(-bone.forward, dogForward, ref bestAxis, ref bestDot);
+        TestBoneAimAxis(bone.up, dogForward, ref bestAxis, ref bestDot);
+        TestBoneAimAxis(-bone.up, dogForward, ref bestAxis, ref bestDot);
+        TestBoneAimAxis(bone.right, dogForward, ref bestAxis, ref bestDot);
+        TestBoneAimAxis(-bone.right, dogForward, ref bestAxis, ref bestDot);
+        return bestAxis.normalized;
+    }
+
+    private static void TestBoneAimAxis(Vector3 candidateAxis, Vector3 dogForward, ref Vector3 bestAxis, ref float bestDot)
+    {
+        Vector3 flatCandidate = FlattenAxis(candidateAxis);
+        float dot = Vector3.Dot(flatCandidate, dogForward);
+        if (dot > bestDot)
+        {
+            bestAxis = candidateAxis;
+            bestDot = dot;
+        }
+    }
+
+    private static Vector3 FlattenAxis(Vector3 axis)
+    {
+        axis.y = 0f;
+        if (axis.sqrMagnitude < 0.001f)
+        {
+            return Vector3.zero;
+        }
+
+        return axis.normalized;
+    }
+
     private Transform FindBone(string namePart)
     {
-        Transform[] children = GetComponentsInChildren<Transform>(true);
+        return FindBone(transform, namePart);
+    }
+
+    private Transform FindBone(Transform root, string namePart)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
         for (int i = 0; i < children.Length; i++)
         {
             if (IsBoneNameMatch(children[i].name, namePart, true))
@@ -510,6 +911,24 @@ public class DogCameraAttention : MonoBehaviour
         }
 
         return null;
+    }
+
+    private Transform GetDogHeadLookTarget(Transform dogRoot)
+    {
+        if (dogRoot == null)
+        {
+            return null;
+        }
+
+        Transform cachedHead;
+        if (cachedHeadTargetsByDog.TryGetValue(dogRoot, out cachedHead) && cachedHead != null)
+        {
+            return cachedHead;
+        }
+
+        cachedHead = FindBone(dogRoot, "head");
+        cachedHeadTargetsByDog[dogRoot] = cachedHead;
+        return cachedHead;
     }
 
     private bool IsBoneNameMatch(string candidateName, string namePart, bool exact)
