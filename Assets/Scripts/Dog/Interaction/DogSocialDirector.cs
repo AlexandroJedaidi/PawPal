@@ -157,6 +157,8 @@ public class DogSocialDirector : MonoBehaviour
 
     private void OnEnable()
     {
+        PawPalAudioSettings.MusicVolumeChanged += HandleAudioSettingsChanged;
+        PawPalAudioSettings.SoundEffectsVolumeChanged += HandleAudioSettingsChanged;
         AutoAssignDavidTestAudio();
         EnsureActiveAudioListener();
         RefreshAgents();
@@ -198,6 +200,9 @@ public class DogSocialDirector : MonoBehaviour
         {
             ambientCarSource.Stop();
         }
+
+        PawPalAudioSettings.MusicVolumeChanged -= HandleAudioSettingsChanged;
+        PawPalAudioSettings.SoundEffectsVolumeChanged -= HandleAudioSettingsChanged;
     }
 
     private void RefreshAgents()
@@ -1072,12 +1077,18 @@ public class DogSocialDirector : MonoBehaviour
             return;
         }
 
+        float effectiveSourceVolume = PawPalAudioSettings.ApplySoundEffectsVolume(barkVolume);
+        if (effectiveSourceVolume <= 0f)
+        {
+            return;
+        }
+
         GameObject barkAudioObject = new GameObject(agent.name + "_BarkAudio");
         barkAudioObject.transform.SetParent(agent.transform, false);
         barkAudioObject.transform.localPosition = Vector3.zero;
 
         AudioSource barkSource = barkAudioObject.AddComponent<AudioSource>();
-        barkSource.volume = barkVolume;
+        barkSource.volume = effectiveSourceVolume;
         barkSource.spatialBlend = 0f;
         barkSource.loop = false;
         barkSource.playOnAwake = false;
@@ -1222,7 +1233,7 @@ public class DogSocialDirector : MonoBehaviour
         backgroundMusicSource.playOnAwake = false;
         backgroundMusicSource.loop = true;
         backgroundMusicSource.spatialBlend = 0f;
-        backgroundMusicSource.volume = Mathf.Clamp01(backgroundMusicVolume);
+        backgroundMusicSource.volume = PawPalAudioSettings.ApplyMusicVolume(backgroundMusicVolume);
     }
 
     private void EnsureAmbientCarPlayback()
@@ -1254,7 +1265,10 @@ public class DogSocialDirector : MonoBehaviour
         {
             yield return new WaitForSeconds(Mathf.Max(1f, ambientCarIntervalSeconds));
             ConfigureAmbientCarSource();
-            ambientCarSource.PlayOneShot(ambientCarClip, Mathf.Clamp01(ambientCarVolume * AmbientCarVolumeMultiplier));
+            if (ambientCarSource.volume > 0f)
+            {
+                ambientCarSource.PlayOneShot(ambientCarClip, Mathf.Clamp01(ambientCarVolume * AmbientCarVolumeMultiplier));
+            }
         }
 
         ambientCarRoutine = null;
@@ -1270,7 +1284,13 @@ public class DogSocialDirector : MonoBehaviour
         ambientCarSource.playOnAwake = false;
         ambientCarSource.loop = false;
         ambientCarSource.spatialBlend = 0f;
-        ambientCarSource.volume = Mathf.Clamp01(ambientCarVolume);
+        ambientCarSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(ambientCarVolume);
+    }
+
+    private void HandleAudioSettingsChanged()
+    {
+        ConfigureBackgroundMusicSource();
+        ConfigureAmbientCarSource();
     }
 
     private void AutoAssignDavidTestAudio()

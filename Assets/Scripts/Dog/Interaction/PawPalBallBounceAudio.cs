@@ -72,8 +72,14 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
             return;
         }
 
+        float effectiveVolume = PawPalAudioSettings.ApplySoundEffectsVolume(volume);
+        if (effectiveVolume <= 0f)
+        {
+            return;
+        }
+
         nextAllowedSoundTime = Time.time + Mathf.Max(0f, minSecondsBetweenSounds);
-        source.PlayOneShot(bounceClip, Mathf.Clamp01(volume));
+        source.PlayOneShot(bounceClip, effectiveVolume);
     }
 
     private float GetImpactSpeed(Collision collision)

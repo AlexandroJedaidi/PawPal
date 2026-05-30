@@ -77,6 +77,7 @@ public static class DogAnimatorControllerExpander
         new StateSpec("Idle2", "Idle_2", true),
         new StateSpec("Idle3", "Idle_3", true),
         new StateSpec("Idle4", "Idle_4", true),
+        new StateSpec("Idle7", "Idle_7", true),
         new StateSpec("LieBellyStart", "Lie_belly_start", false),
         new StateSpec("LieBellyLoop", "Lie_belly_loop_1", true),
         new StateSpec("LieSleepStart", "Lie_belly_sleep_start", false),

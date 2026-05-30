@@ -9,6 +9,8 @@ public class InventoryPanelView : MonoBehaviour
 {
     private static readonly Color32 CtaBlue = new Color32(50, 187, 255, 255);
     private static readonly Color32 QuantityBlue = new Color32(62, 132, 215, 255);
+    private static readonly Vector2 StandardItemImageSize = new Vector2(76f, 76f);
+    private static readonly Vector2 StandardItemImagePosition = new Vector2(8f, 16f);
 
     private ScrollRect scrollRect;
     private UiSpriteLibrary spriteLibrary;
@@ -212,9 +214,8 @@ public class InventoryPanelView : MonoBehaviour
         imageRect.anchorMin = new Vector2(0f, 1f);
         imageRect.anchorMax = new Vector2(0f, 1f);
         imageRect.pivot = new Vector2(0f, 1f);
-        imageRect.sizeDelta = GetImageSize(item);
-        Vector2 imagePos = GetImagePosition(item.InventoryCardTheme);
-        imageRect.anchoredPosition = new Vector2(imagePos.x, -imagePos.y);
+        imageRect.sizeDelta = StandardItemImageSize;
+        imageRect.anchoredPosition = new Vector2(StandardItemImagePosition.x, -StandardItemImagePosition.y);
 
         Image itemImage = UiFactory.CreateImage("Image", imageRect, spriteLibrary.GetResourceSprite(item.InventorySpritePath), Color.white);
         itemImage.type = Image.Type.Simple;
@@ -379,45 +380,4 @@ public class InventoryPanelView : MonoBehaviour
         return new Vector2(column == 0 ? 6f : 111f, row * 104f);
     }
 
-    private static Vector2 GetImageSize(PawPalCatalogItemDefinition item)
-    {
-        switch (item.InventoryCardTheme)
-        {
-            case InventoryCardTheme.Bone:
-                return item.Category == PawPalItemCategory.Food ? new Vector2(58f, 58f) : new Vector2(90f, 48f);
-            case InventoryCardTheme.Ball:
-                return new Vector2(66f, 67f);
-            case InventoryCardTheme.Roll:
-                return item.Category == PawPalItemCategory.Food ? new Vector2(58f, 58f) : new Vector2(58f, 57f);
-            case InventoryCardTheme.Band:
-                return new Vector2(72f, 47f);
-            case InventoryCardTheme.Loop:
-                return new Vector2(77f, 43f);
-            case InventoryCardTheme.Charm:
-                return new Vector2(77f, 52f);
-            default:
-                return new Vector2(23.333f, 23.333f);
-        }
-    }
-
-    private static Vector2 GetImagePosition(InventoryCardTheme theme)
-    {
-        switch (theme)
-        {
-            case InventoryCardTheme.Bone:
-                return new Vector2(0.422f, 28f);
-            case InventoryCardTheme.Ball:
-                return new Vector2(13f, 18f);
-            case InventoryCardTheme.Roll:
-                return new Vector2(17f, 23f);
-            case InventoryCardTheme.Band:
-                return new Vector2(10.06f, 25f);
-            case InventoryCardTheme.Loop:
-                return new Vector2(8.77f, 30.25f);
-            case InventoryCardTheme.Charm:
-                return new Vector2(8.77f, 25f);
-            default:
-                return new Vector2(34.96f, 39.83f);
-        }
-    }
 }

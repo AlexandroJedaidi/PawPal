@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,15 +19,23 @@ public class AppShellController : MonoBehaviour
     private SafeAreaFitter safeAreaFitter;
     private AdaptiveLayoutRoot adaptiveLayout;
     private BottomNav bottomNav;
+    private PawPalPhotoModeController photoModeController;
+    private PawPalPhotoModeView photoModeView;
     private Vector2Int lastScreenSize;
     private Rect lastSafeArea;
     private Vector2 lastRootSize;
     private Vector2 lastSafeAreaRootSize;
     private int pendingLayoutFrames;
+    private bool photoModeActive;
+    private Coroutine failedPhotoModeToastRoutine;
 
     public UiLayoutBucket CurrentBucket { get; private set; }
     public float BottomNavHeight { get; private set; }
     public AppScreenId CurrentScreen { get; private set; }
+    public bool IsPhotoModeActive
+    {
+        get { return photoModeActive; }
+    }
 
     private void Awake()
     {
@@ -61,6 +70,11 @@ public class AppShellController : MonoBehaviour
 
     public void ShowScreen(AppScreenId screenId)
     {
+        if (photoModeActive)
+        {
+            return;
+        }
+
         CurrentScreen = screenId;
 
         foreach (KeyValuePair<AppScreenId, AppScreenViewBase> pair in screens)
@@ -72,6 +86,37 @@ public class AppShellController : MonoBehaviour
         {
             bottomNav.SetSelected(screenId);
         }
+    }
+
+    public void EnterPhotoMode()
+    {
+        EnsurePhotoModeController();
+        if (modalLayer != null)
+        {
+            modalLayer.gameObject.SetActive(true);
+        }
+
+        if (failedPhotoModeToastRoutine != null)
+        {
+            StopCoroutine(failedPhotoModeToastRoutine);
+            failedPhotoModeToastRoutine = null;
+        }
+
+        if (photoModeController == null || !photoModeController.TryEnterPhotoMode())
+        {
+            photoModeActive = false;
+            SetPhotoModeChromeVisible(false);
+            if (modalLayer != null)
+            {
+                modalLayer.gameObject.SetActive(true);
+            }
+
+            failedPhotoModeToastRoutine = StartCoroutine(HideFailedPhotoModeToastRoutine());
+            return;
+        }
+
+        photoModeActive = true;
+        SetPhotoModeChromeVisible(true);
     }
 
     private void BuildShell()
@@ -114,6 +159,7 @@ public class AppShellController : MonoBehaviour
         modalLayer = UiFactory.CreateRect("ModalLayer", safeAreaRoot);
         UiFactory.Stretch(modalLayer, 0f, 0f, 0f, 0f);
         modalLayer.gameObject.SetActive(false);
+        EnsurePhotoModeController();
 
         RectTransform navRect = UiFactory.CreateRect("BottomNav", safeAreaRoot);
         bottomNav = navRect.gameObject.AddComponent<BottomNav>();
@@ -192,11 +238,20 @@ public class AppShellController : MonoBehaviour
         {
             bottomNav.ApplyLayout(bucket);
             BottomNavHeight = bottomNav.CurrentHeight;
+            bottomNav.gameObject.SetActive(!photoModeActive);
         }
 
         if (screenLayer != null)
         {
-            UiFactory.Stretch(screenLayer, 0f, BottomNavHeight, 0f, 0f);
+            screenLayer.gameObject.SetActive(!photoModeActive);
+            UiFactory.Stretch(screenLayer, 0f, photoModeActive ? 0f : BottomNavHeight, 0f, 0f);
+        }
+
+        if (modalLayer != null)
+        {
+            UiFactory.Stretch(modalLayer, 0f, 0f, 0f, 0f);
+            bool modalVisible = photoModeActive || (photoModeView != null && photoModeView.gameObject.activeSelf);
+            modalLayer.gameObject.SetActive(modalVisible);
         }
 
         foreach (KeyValuePair<AppScreenId, AppScreenViewBase> pair in screens)
@@ -211,5 +266,73 @@ public class AppShellController : MonoBehaviour
         lastSafeArea = Screen.safeArea;
         lastRootSize = rootRect != null ? rootRect.rect.size : Vector2.zero;
         lastSafeAreaRootSize = safeAreaRoot != null ? safeAreaRoot.rect.size : Vector2.zero;
+    }
+
+    private void EnsurePhotoModeController()
+    {
+        if (photoModeController != null || modalLayer == null)
+        {
+            return;
+        }
+
+        RectTransform photoRoot = UiFactory.CreateRect("PhotoMode", modalLayer);
+        UiFactory.Stretch(photoRoot, 0f, 0f, 0f, 0f);
+        photoModeView = photoRoot.gameObject.AddComponent<PawPalPhotoModeView>();
+        photoModeView.Initialize(spriteLibrary);
+        photoModeController = photoRoot.gameObject.AddComponent<PawPalPhotoModeController>();
+        photoModeController.Initialize(this, photoModeView);
+        photoModeController.PhotoModeExited += HandlePhotoModeExited;
+        photoModeView.HideAll();
+    }
+
+    private void HandlePhotoModeExited()
+    {
+        photoModeActive = false;
+        SetPhotoModeChromeVisible(false);
+    }
+
+    private void SetPhotoModeChromeVisible(bool activePhotoMode)
+    {
+        photoModeActive = activePhotoMode;
+
+        if (bottomNav != null)
+        {
+            bottomNav.gameObject.SetActive(!photoModeActive);
+        }
+
+        if (screenLayer != null)
+        {
+            screenLayer.gameObject.SetActive(!photoModeActive);
+        }
+
+        if (modalLayer != null)
+        {
+            bool modalVisible = photoModeActive || (photoModeView != null && photoModeView.gameObject.activeSelf);
+            modalLayer.gameObject.SetActive(modalVisible);
+        }
+
+        pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
+        ApplyCurrentLayout(CurrentBucket);
+    }
+
+    private IEnumerator HideFailedPhotoModeToastRoutine()
+    {
+        yield return new WaitForSecondsRealtime(2.1f);
+        failedPhotoModeToastRoutine = null;
+
+        if (photoModeActive)
+        {
+            yield break;
+        }
+
+        if (photoModeView != null)
+        {
+            photoModeView.HideAll();
+        }
+
+        if (modalLayer != null)
+        {
+            modalLayer.gameObject.SetActive(false);
+        }
     }
 }

@@ -15,13 +15,13 @@ public class HomeAddonsView : MonoBehaviour
     private Image inventoryBorder;
     private Image inventoryIcon;
 
-    public void Initialize(UiSpriteLibrary spriteLibrary, Action onInventoryTapped)
+    public void Initialize(UiSpriteLibrary spriteLibrary, Action onMicTapped, Action onInventoryTapped, Action onCameraTapped)
     {
         sprites = spriteLibrary;
         RectTransform root = GetComponent<RectTransform>();
         root.sizeDelta = new Vector2(BaseWidth, BaseHeight);
 
-        CreateAddonButton(root, sprites, "MicButton", "UI/Figma/HomeMain/icon_mic", 0f, 29f, MicIconOffset, null, false);
+        CreateAddonButton(root, sprites, "MicButton", "UI/Figma/HomeMain/icon_mic", 0f, 29f, MicIconOffset, onMicTapped, false);
         inventoryBackground = CreateAddonButton(root, sprites, "InventoryButton", "UI/Figma/HomeMain/icon_inventory", 71f, 29f, Vector2.zero, onInventoryTapped, true);
         inventoryIcon = inventoryBackground.transform.Find("Icon").GetComponent<Image>();
         inventoryBorder = UiFactory.CreateImage("SelectedBorder", inventoryBackground.rectTransform, UiTheme.CircleOutlineSprite, UiTheme.NavBrandDark);
@@ -29,7 +29,7 @@ public class HomeAddonsView : MonoBehaviour
         inventoryBorder.preserveAspect = false;
         inventoryBorder.raycastTarget = false;
         UiFactory.Stretch(inventoryBorder.rectTransform, 0f, 0f, 0f, 0f);
-        CreateAddonButton(root, sprites, "CamButton", "UI/Figma/HomeMain/icon_cam", 142f, 24f, Vector2.zero, null, false);
+        CreateAddonButton(root, sprites, "CamButton", "UI/Figma/HomeMain/icon_cam", 142f, 24f, Vector2.zero, onCameraTapped, false);
         SetInventorySelected(false);
     }
 

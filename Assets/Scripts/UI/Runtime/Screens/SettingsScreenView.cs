@@ -26,6 +26,17 @@ public class SettingsScreenView : AppScreenViewBase
         public RectTransform Knob;
     }
 
+    private sealed class VolumeControlVisual
+    {
+        public TextMeshProUGUI PercentLabel;
+        public Button MinusButton;
+        public Button PlusButton;
+        public Image MinusFill;
+        public Image PlusFill;
+        public TextMeshProUGUI MinusLabel;
+        public TextMeshProUGUI PlusLabel;
+    }
+
     private struct NotificationToggleData
     {
         public string Key;
@@ -100,16 +111,29 @@ public class SettingsScreenView : AppScreenViewBase
     private TMP_InputField feedbackInput;
     private ScrollRect languagesScrollRect;
     private ScrollRect screenScrollRect;
-    private ToggleVisual soundToggle;
+    private VolumeControlVisual musicVolumeControl;
+    private VolumeControlVisual soundEffectsVolumeControl;
 
     private SettingsPage currentPage = SettingsPage.Main;
     private SettingsModal currentModal = SettingsModal.None;
-    private bool soundEffectsOn = true;
     private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
     {
         get { return false; }
+    }
+
+    private void OnEnable()
+    {
+        PawPalAudioSettings.MusicVolumeChanged += RefreshAudioVolumeControls;
+        PawPalAudioSettings.SoundEffectsVolumeChanged += RefreshAudioVolumeControls;
+        RefreshAudioVolumeControls();
+    }
+
+    private void OnDisable()
+    {
+        PawPalAudioSettings.MusicVolumeChanged -= RefreshAudioVolumeControls;
+        PawPalAudioSettings.SoundEffectsVolumeChanged -= RefreshAudioVolumeControls;
     }
 
     protected override void BuildContent()
@@ -221,24 +245,45 @@ public class SettingsScreenView : AppScreenViewBase
         BuildHeader(parent, "icon_settings_notfilled", "Settings");
         BuildFooter(parent);
 
-        RectTransform settingsCardTop = BuildCard(parent, "Frame_Settings1", 57f, 126f, 280f, 169f);
-        soundToggle = BuildToggleRow(
+        RectTransform settingsCardTop = BuildCard(parent, "Frame_Settings1", 57f, 126f, 280f, 224f);
+        musicVolumeControl = BuildVolumeRow(
             settingsCardTop,
-            "Frame_Audio",
-            15.5f,
+            "Frame_Music",
+            13.5f,
             "icon_audio",
-            "Sound effects",
-            172f,
+            "Music",
             delegate
             {
-                soundEffectsOn = !soundEffectsOn;
+                PawPalAudioSettings.AdjustMusicVolume(-PawPalAudioSettings.VolumeStep);
+                RefreshViewState();
+            },
+            delegate
+            {
+                PawPalAudioSettings.AdjustMusicVolume(PawPalAudioSettings.VolumeStep);
                 RefreshViewState();
             });
-        BuildDivider(settingsCardTop, 57.5f);
+        BuildDivider(settingsCardTop, 58.5f);
+        soundEffectsVolumeControl = BuildVolumeRow(
+            settingsCardTop,
+            "Frame_Audio",
+            72.5f,
+            "icon_audio",
+            "Sound effects",
+            delegate
+            {
+                PawPalAudioSettings.AdjustSoundEffectsVolume(-PawPalAudioSettings.VolumeStep);
+                RefreshViewState();
+            },
+            delegate
+            {
+                PawPalAudioSettings.AdjustSoundEffectsVolume(PawPalAudioSettings.VolumeStep);
+                RefreshViewState();
+            });
+        BuildDivider(settingsCardTop, 117.5f);
         BuildActionRow(
             settingsCardTop,
             "Frame_Notifications",
-            73.5f,
+            133.5f,
             "icon_notification",
             "Notifications",
             delegate
@@ -247,11 +292,11 @@ public class SettingsScreenView : AppScreenViewBase
                 currentModal = SettingsModal.None;
                 RefreshViewState();
             });
-        BuildDivider(settingsCardTop, 113.5f);
+        BuildDivider(settingsCardTop, 173.5f);
         BuildActionRow(
             settingsCardTop,
             "Frame_Language",
-            129.5f,
+            189.5f,
             "icon_language",
             "Language",
             delegate
@@ -261,7 +306,7 @@ public class SettingsScreenView : AppScreenViewBase
                 RefreshViewState();
             });
 
-        RectTransform settingsCardBottom = BuildCard(parent, "Frame_Settings2", 57f, 344f, 280f, 163f);
+        RectTransform settingsCardBottom = BuildCard(parent, "Frame_Settings2", 57f, 399f, 280f, 163f);
         BuildActionRow(
             settingsCardBottom,
             "Frame_Feedback",
@@ -589,6 +634,59 @@ public class SettingsScreenView : AppScreenViewBase
         return card;
     }
 
+    private VolumeControlVisual BuildVolumeRow(RectTransform parent, string name, float y, string iconName, string labelText, UnityEngine.Events.UnityAction onDecrease, UnityEngine.Events.UnityAction onIncrease)
+    {
+        RectTransform row = CreateNode(name, parent, 0f, y, 280f, 34f);
+
+        Image icon = UiFactory.CreateImage("Icon", row, sprites.GetIcon(iconName), TitleColor);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.rectTransform.anchorMin = new Vector2(0f, 1f);
+        icon.rectTransform.anchorMax = new Vector2(0f, 1f);
+        icon.rectTransform.pivot = new Vector2(0f, 1f);
+        icon.rectTransform.sizeDelta = new Vector2(24f, 24f);
+        icon.rectTransform.anchoredPosition = new Vector2(5f, -5f);
+
+        TextMeshProUGUI label = CreateText(row, "Label", labelText, 16, BodyBlack, UiTheme.NavMediumFont, TextAlignmentOptions.Left);
+        label.rectTransform.anchorMin = new Vector2(0f, 1f);
+        label.rectTransform.anchorMax = new Vector2(0f, 1f);
+        label.rectTransform.pivot = new Vector2(0f, 1f);
+        label.rectTransform.sizeDelta = new Vector2(112f, 18f);
+        label.rectTransform.anchoredPosition = new Vector2(39f, -8f);
+
+        VolumeControlVisual visual = new VolumeControlVisual();
+        visual.MinusButton = CreateVolumeStepButton(row, "Decrease", "-", 154f, 3f, onDecrease, out visual.MinusFill, out visual.MinusLabel);
+
+        TextMeshProUGUI percent = CreateText(row, "Percent", "100%", 15, BodyBlack, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
+        percent.rectTransform.anchorMin = new Vector2(0f, 1f);
+        percent.rectTransform.anchorMax = new Vector2(0f, 1f);
+        percent.rectTransform.pivot = new Vector2(0f, 1f);
+        percent.rectTransform.sizeDelta = new Vector2(49f, 18f);
+        percent.rectTransform.anchoredPosition = new Vector2(185f, -8f);
+        visual.PercentLabel = percent;
+
+        visual.PlusButton = CreateVolumeStepButton(row, "Increase", "+", 240f, 3f, onIncrease, out visual.PlusFill, out visual.PlusLabel);
+        return visual;
+    }
+
+    private Button CreateVolumeStepButton(RectTransform parent, string name, string labelText, float x, float y, UnityEngine.Events.UnityAction onClick, out Image fill, out TextMeshProUGUI label)
+    {
+        RectTransform buttonRect = CreateNode(name, parent, x, y, 28f, 28f);
+
+        fill = buttonRect.gameObject.AddComponent<Image>();
+        fill.sprite = UiTheme.RoundedTenSprite;
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.color = TitleColor;
+
+        Button button = UiFactory.AddButton(buttonRect.gameObject, onClick);
+
+        label = CreateText(buttonRect, "Label", labelText, 18, UiTheme.White, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 1f);
+        label.raycastTarget = false;
+        return button;
+    }
+
     private ToggleVisual BuildToggleRow(RectTransform parent, string name, float y, string iconName, string labelText, float labelWidth, UnityEngine.Events.UnityAction onClick)
     {
         RectTransform row = CreateNode(name, parent, 0f, y, 280f, 26f);
@@ -770,10 +868,7 @@ public class SettingsScreenView : AppScreenViewBase
             languagesPage.gameObject.SetActive(currentPage == SettingsPage.Languages);
         }
 
-        if (soundToggle != null)
-        {
-            ApplyToggleState(soundToggle, soundEffectsOn);
-        }
+        RefreshAudioVolumeControls();
 
         foreach (KeyValuePair<string, ToggleVisual> pair in notificationToggleVisuals)
         {
@@ -807,6 +902,50 @@ public class SettingsScreenView : AppScreenViewBase
         {
             Canvas.ForceUpdateCanvases();
             languagesScrollRect.verticalNormalizedPosition = 1f;
+        }
+    }
+
+    private void RefreshAudioVolumeControls()
+    {
+        ApplyVolumeControlState(musicVolumeControl, PawPalAudioSettings.MusicVolume);
+        ApplyVolumeControlState(soundEffectsVolumeControl, PawPalAudioSettings.SoundEffectsVolume);
+    }
+
+    private void ApplyVolumeControlState(VolumeControlVisual control, float volume)
+    {
+        if (control == null)
+        {
+            return;
+        }
+
+        float clampedVolume = Mathf.Clamp01(volume);
+        int percent = PawPalAudioSettings.ToPercent(clampedVolume);
+        if (control.PercentLabel != null)
+        {
+            control.PercentLabel.text = percent + "%";
+        }
+
+        bool canDecrease = percent > 0;
+        bool canIncrease = percent < 100;
+        ApplyVolumeStepButtonState(control.MinusButton, control.MinusFill, control.MinusLabel, canDecrease);
+        ApplyVolumeStepButtonState(control.PlusButton, control.PlusFill, control.PlusLabel, canIncrease);
+    }
+
+    private void ApplyVolumeStepButtonState(Button button, Image fill, TextMeshProUGUI label, bool enabled)
+    {
+        if (button != null)
+        {
+            button.interactable = enabled;
+        }
+
+        if (fill != null)
+        {
+            fill.color = enabled ? TitleColor : DisabledFill;
+        }
+
+        if (label != null)
+        {
+            label.color = enabled ? UiTheme.White : DisabledBorder;
         }
     }
 

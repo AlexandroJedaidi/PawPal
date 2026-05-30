@@ -11,8 +11,6 @@ public class DogDetailsWidgetView : MonoBehaviour
     private static readonly Color32 NeedBlue = new Color32(34, 144, 214, 255);
     private static readonly Color32 NeedBluePale = new Color32(207, 234, 248, 255);
     private static readonly Color32 NeedBluePaleLight = new Color32(220, 241, 251, 255);
-    private static readonly Color32 NeedWarning = new Color32(232, 125, 103, 255);
-    private static readonly Color32 NeedWarningPale = new Color32(250, 214, 203, 255);
     private static readonly Color32 HandleWhite = new Color32(248, 248, 248, 255);
     private static readonly Color32 SupportCream = new Color32(236, 223, 200, 255);
     private static readonly Color32 EnergyLabelBlack = new Color32(0, 0, 0, 255);
@@ -491,11 +489,8 @@ public class DogDetailsWidgetView : MonoBehaviour
         Color32 fullColor = need == PawPalDogNeed.Food ? NeedBlueLight : NeedBlue;
         Color32 emptyColor = need == PawPalDogNeed.Food ? NeedBluePaleLight : NeedBluePale;
         float clamped = Mathf.Clamp01(value01);
-        float healthyBlend = Mathf.InverseLerp(0.25f, 0.7f, clamped);
-        Color lowColor = Color.Lerp(NeedWarningPale, NeedWarning, Mathf.Clamp01(1f - clamped));
-        Color healthyColor = Color.Lerp(emptyColor, fullColor, clamped);
-        Color fillColor = Color.Lerp(lowColor, healthyColor, healthyBlend);
-        circle.color = Color.Lerp(NeedWarningPale, emptyColor, healthyBlend);
+        Color fillColor = Color.Lerp(emptyColor, fullColor, Mathf.Lerp(0.2f, 1f, clamped));
+        circle.color = emptyColor;
 
         Image fill;
         if (needFills.TryGetValue(need, out fill) && fill != null)
@@ -507,8 +502,7 @@ public class DogDetailsWidgetView : MonoBehaviour
         Image icon;
         if (needIcons.TryGetValue(need, out icon) && icon != null)
         {
-            float iconAlpha = Mathf.Lerp(0.45f, 1f, clamped);
-            icon.color = new Color(1f, 1f, 1f, iconAlpha);
+            icon.color = UiTheme.White;
         }
     }
 

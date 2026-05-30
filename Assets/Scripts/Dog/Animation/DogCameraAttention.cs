@@ -79,6 +79,8 @@ public class DogCameraAttention : MonoBehaviour
     private bool socialLookOverrideActive;
     private Transform socialLookTarget;
     private Transform socialHeadLookTarget;
+    private bool cameraLookOverrideActive;
+    private float cameraLookOverrideUntil;
     private float nextNearbyDogScanTime;
     private readonly Dictionary<Transform, Transform> cachedHeadTargetsByDog = new Dictionary<Transform, Transform>();
 
@@ -149,6 +151,8 @@ public class DogCameraAttention : MonoBehaviour
         socialLookOverrideActive = false;
         socialLookTarget = null;
         socialHeadLookTarget = null;
+        cameraLookOverrideActive = false;
+        cameraLookOverrideUntil = 0f;
         activeTargetType = AttentionTargetType.None;
         activeLookTarget = null;
     }
@@ -185,6 +189,34 @@ public class DogCameraAttention : MonoBehaviour
         ClearSocialDogLookOverride();
     }
 
+    public void RequestCameraAttention(float duration)
+    {
+        if (cameraTransform == null && Camera.main != null)
+        {
+            cameraTransform = Camera.main.transform;
+        }
+
+        if (cameraTransform == null)
+        {
+            return;
+        }
+
+        if (attentionRoutine != null)
+        {
+            StopCoroutine(attentionRoutine);
+            attentionRoutine = null;
+        }
+
+        cameraLookOverrideActive = true;
+        cameraLookOverrideUntil = Time.time + Mathf.Max(0.1f, duration);
+        proximityLookOverrideActive = false;
+        proximityLookTarget = null;
+        activeTargetType = AttentionTargetType.Camera;
+        activeLookTarget = cameraTransform;
+        targetWeight = 1f;
+        attentionRoutine = StartCoroutine(AttentionRoutine());
+    }
+
     public Transform GetOwnHeadLookTarget()
     {
         if (headTransform != null)
@@ -207,7 +239,7 @@ public class DogCameraAttention : MonoBehaviour
             cameraTransform = Camera.main.transform;
         }
 
-        if (!UpdateSocialDogLookOverride())
+        if (!UpdateCameraLookOverride() && !UpdateSocialDogLookOverride())
         {
             UpdateProximityDogLookOverride();
         }
@@ -231,7 +263,7 @@ public class DogCameraAttention : MonoBehaviour
         {
             yield return new WaitForSeconds(Random.Range(minTimeBetweenLooks, maxTimeBetweenLooks));
 
-            while (proximityLookOverrideActive || socialLookOverrideActive)
+            while (proximityLookOverrideActive || socialLookOverrideActive || cameraLookOverrideActive)
             {
                 yield return null;
             }
@@ -402,7 +434,9 @@ public class DogCameraAttention : MonoBehaviour
     {
         if (activeTargetType == AttentionTargetType.Camera)
         {
-            return activeLookTarget != null && CanLookAtCamera() && IsTargetWithinSafeYaw(activeLookTarget.position);
+            return activeLookTarget != null
+                && CanLookAtCamera()
+                && (cameraLookOverrideActive || IsTargetWithinSafeYaw(activeLookTarget.position));
         }
 
         if (activeTargetType == AttentionTargetType.NearbyDog)
@@ -574,6 +608,11 @@ public class DogCameraAttention : MonoBehaviour
 
     private float GetActiveMaxYaw()
     {
+        if (activeTargetType == AttentionTargetType.Camera && cameraLookOverrideActive)
+        {
+            return maxNeckYaw;
+        }
+
         if (activeTargetType == AttentionTargetType.NearbyDog)
         {
             return GetNearbyDogMaxYaw(IsSocialLookActiveForCurrentTarget());
@@ -622,6 +661,29 @@ public class DogCameraAttention : MonoBehaviour
         }
 
         ClearProximityDogLookOverride();
+    }
+
+    private bool UpdateCameraLookOverride()
+    {
+        if (!cameraLookOverrideActive)
+        {
+            return false;
+        }
+
+        if (Time.time <= cameraLookOverrideUntil && cameraTransform != null)
+        {
+            activeTargetType = AttentionTargetType.Camera;
+            activeLookTarget = cameraTransform;
+            targetWeight = 1f;
+            return true;
+        }
+
+        cameraLookOverrideActive = false;
+        cameraLookOverrideUntil = 0f;
+        targetWeight = 0f;
+        activeTargetType = AttentionTargetType.None;
+        activeLookTarget = null;
+        return false;
     }
 
     private bool UpdateSocialDogLookOverride()

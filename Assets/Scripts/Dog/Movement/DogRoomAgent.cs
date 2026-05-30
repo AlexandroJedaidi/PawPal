@@ -185,6 +185,9 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float maxToyPickupApproachDistance = 0.12f;
     [SerializeField] private float maxToyPickupPlanarDistance = 0.25f;
     [SerializeField] private float toyApproachTimeout = 6f;
+    [SerializeField] private float fetchToyRepathInterval = 0.18f;
+    [SerializeField] private float fetchToyRepathDistance = 0.18f;
+    [SerializeField] private float fetchToyPickupReachMultiplier = 0.85f;
     [SerializeField] private float toyFaceDuration = 0.45f;
     [SerializeField] private float pickupAttachDelay = 0.55f;
     [SerializeField] private float pickupAnimationDuration = 1.15f;
@@ -287,6 +290,8 @@ public class DogRoomAgent : MonoBehaviour
     private int sitEndStateHash;
     private bool isResting;
     private bool isSleeping;
+    private bool needsStandBeforeMovement;
+    private bool needsSleepWakeBeforeMovement;
     private bool isPlayingOneShotAnimation;
     private bool isToyRoutineActive;
     private Coroutine fetchRoutine;
@@ -428,11 +433,19 @@ public class DogRoomAgent : MonoBehaviour
 
     public void PauseForSocial()
     {
+        PauseForSocial(true);
+    }
+
+    public void PauseForSocial(bool dropHeldToyImmediately)
+    {
         socialPaused = true;
         IsBusy = true;
         ClearRestState();
-        DropHeldToyImmediately();
-        ReleaseClaimedToy();
+        if (dropHeldToyImmediately)
+        {
+            DropHeldToyImmediately();
+            ReleaseClaimedToy();
+        }
 
         if (roamRoutine != null)
         {
@@ -570,13 +583,13 @@ public class DogRoomAgent : MonoBehaviour
     public IEnumerator PlayBowlUse(bool useDrinkLoop, float loopDuration)
     {
         IsBusy = true;
-        isPlayingOneShotAnimation = true;
         ClearRestState();
-        DropHeldToyImmediately();
-        ReleaseClaimedToy();
         StopAgent();
+        yield return StandBeforeMovementIfNeeded();
+        yield return PutDownHeldToyBeforeMovementIfNeeded();
         yield return WaitForLocomotionToSettle();
 
+        isPlayingOneShotAnimation = true;
         animator.SetBool(MoveHash, false);
         SetNeutralIdle();
 
@@ -870,6 +883,8 @@ public class DogRoomAgent : MonoBehaviour
     {
         isResting = true;
         isSleeping = restFlavor == DogRestFlavor.Sleep;
+        needsStandBeforeMovement = false;
+        needsSleepWakeBeforeMovement = false;
         isPlayingOneShotAnimation = true;
         StopAgent();
         yield return WaitForLocomotionToSettle();
@@ -882,6 +897,8 @@ public class DogRoomAgent : MonoBehaviour
 
         if (allowLieLoop && lieLoopStateHash != 0)
         {
+            needsStandBeforeMovement = true;
+            needsSleepWakeBeforeMovement = restFlavor == DogRestFlavor.Sleep;
             if (lieStartStateHash != 0)
             {
                 yield return PlayStateForDuration(lieStartStateHash, lieStartStateName, sitToLieDelay, restCrossFadeDuration, false);
@@ -948,6 +965,8 @@ public class DogRoomAgent : MonoBehaviour
             if (allowLieLoop
                 && TryGetImportedRestClip("Lie_belly_loop_1", out lieLoopClip))
             {
+                needsStandBeforeMovement = true;
+                needsSleepWakeBeforeMovement = restFlavor == DogRestFlavor.Sleep;
                 if (TryGetImportedRestClip("Lie_belly_start", out lieStartClip))
                 {
                     yield return PlayDirectClip(lieStartClip, Mathf.Max(sitToLieDelay, lieStartClip.length * 0.95f), false);
@@ -1003,6 +1022,8 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         SetNeutralIdle();
+        needsStandBeforeMovement = false;
+        needsSleepWakeBeforeMovement = false;
         isPlayingOneShotAnimation = false;
         ClearRestState();
     }
@@ -1182,6 +1203,8 @@ public class DogRoomAgent : MonoBehaviour
         StopAgent();
         animator.SetBool(MoveHash, false);
 
+        yield return StandBeforeMovementIfNeeded();
+        yield return PutDownHeldToyBeforeMovementIfNeeded();
         yield return WaitForLocomotionToSettle();
 
         float remainingLock = movementLockedUntil - Time.time;
@@ -1449,7 +1472,7 @@ public class DogRoomAgent : MonoBehaviour
 
         if (shouldPlayWalking)
         {
-            walkingAudioSource.volume = Mathf.Clamp01(walkingVolume);
+            walkingAudioSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(walkingVolume);
             if (!walkingAudioSource.isPlaying)
             {
                 walkingAudioSource.Play();
@@ -1483,7 +1506,7 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         walkingAudioSource.clip = walkingClip;
-        walkingAudioSource.volume = Mathf.Clamp01(walkingVolume);
+        walkingAudioSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(walkingVolume);
     }
 
     private void StopWalkingAudio()
@@ -1512,7 +1535,8 @@ public class DogRoomAgent : MonoBehaviour
 
     private void PlaySpatialOneShot(AudioClip clip, Vector3 position, float volume)
     {
-        if (clip == null || volume <= 0f)
+        float effectiveVolume = PawPalAudioSettings.ApplySoundEffectsVolume(volume);
+        if (clip == null || effectiveVolume <= 0f)
         {
             return;
         }
@@ -1528,7 +1552,7 @@ public class DogRoomAgent : MonoBehaviour
         source.rolloffMode = AudioRolloffMode.Linear;
         source.minDistance = 0.25f;
         source.maxDistance = 6f;
-        source.PlayOneShot(clip, Mathf.Clamp01(volume));
+        source.PlayOneShot(clip, effectiveVolume);
         Destroy(audioObject, Mathf.Max(0.1f, clip.length + 0.15f));
     }
 
@@ -1993,11 +2017,7 @@ public class DogRoomAgent : MonoBehaviour
         EndActiveFetchCameraFocus();
         activeFetchCameraFocusId = BeginDogCameraFocus(toyTransform, DogCameraFocusPriority.Fetch);
 
-        Vector3 approachPoint;
-        if (TryGetToyApproachPoint(toyTransform, out approachPoint))
-        {
-            yield return TravelTo(approachPoint, toyApproachTimeout, DogMovementPace.Run, false, Mathf.Max(0.04f, destinationReachedDistance * 0.65f), true);
-        }
+        yield return ChaseFetchToyUntilClose(toyTransform, toyApproachTimeout);
 
         if (toy == null)
         {
@@ -2059,6 +2079,77 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         FinishFetchToyRoutine(true, onCompleted);
+    }
+
+    private IEnumerator ChaseFetchToyUntilClose(Transform toy, float timeout)
+    {
+        if (toy == null || !TryEnsureOnNavMesh(true))
+        {
+            yield break;
+        }
+
+        Vector3 destination;
+        if (!TryGetToyApproachPoint(toy, out destination))
+        {
+            yield break;
+        }
+
+        float originalStoppingDistance = agent.stoppingDistance;
+        agent.stoppingDistance = Mathf.Min(
+            originalStoppingDistance,
+            Mathf.Max(0.02f, maxToyPickupPlanarDistance * Mathf.Clamp(fetchToyPickupReachMultiplier, 0.25f, 1f)));
+
+        try
+        {
+            yield return PrepareForMovement(destination);
+
+            if (!PrimeDestination(destination, DogMovementPace.Run))
+            {
+                yield break;
+            }
+
+            yield return WaitForWalkAnimationLeadIn();
+            ReleaseAgentForPrimedPath();
+
+            float elapsed = 0f;
+            float repathElapsed = 0f;
+            Vector3 lastDestination = destination;
+
+            while (toy != null
+                && (timeout <= 0f || elapsed < timeout)
+                && !IsToyWithinPickupDistance(toy))
+            {
+                repathElapsed += Time.deltaTime;
+                if (repathElapsed >= Mathf.Max(0.03f, fetchToyRepathInterval)
+                    || !agent.hasPath
+                    || (!agent.pathPending && agent.remainingDistance <= Mathf.Max(agent.stoppingDistance, destinationReachedDistance)))
+                {
+                    repathElapsed = 0f;
+                    Vector3 refreshedDestination;
+                    bool needsFreshPath = !agent.hasPath
+                        || (!agent.pathPending && agent.remainingDistance <= Mathf.Max(agent.stoppingDistance, destinationReachedDistance));
+                    if (TryGetToyApproachPoint(toy, out refreshedDestination)
+                        && (needsFreshPath
+                            || GetPlanarDistance(refreshedDestination, lastDestination) >= Mathf.Max(0.02f, fetchToyRepathDistance)))
+                    {
+                        ApplyPace(DogMovementPace.Run);
+                        if (agent.SetDestination(refreshedDestination))
+                        {
+                            agent.isStopped = false;
+                            lastDestination = refreshedDestination;
+                        }
+                    }
+                }
+
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+        }
+        finally
+        {
+            StopAgent();
+            agent.stoppingDistance = originalStoppingDistance;
+        }
     }
 
     private void FinishFetchToyRoutine(bool completed, System.Action onCompleted)
@@ -2787,6 +2878,16 @@ public class DogRoomAgent : MonoBehaviour
         isPlayingOneShotAnimation = false;
     }
 
+    private IEnumerator PutDownHeldToyBeforeMovementIfNeeded()
+    {
+        if (!HasHeldToy)
+        {
+            yield break;
+        }
+
+        yield return PlayPutDownToy();
+    }
+
     private void DropHeldToyImmediately()
     {
         if (heldToy == null && (toyAttach == null || !toyAttach.HasToy))
@@ -3054,6 +3155,93 @@ public class DogRoomAgent : MonoBehaviour
     {
         isResting = false;
         isSleeping = false;
+    }
+
+    private IEnumerator StandBeforeMovementIfNeeded()
+    {
+        if (!ShouldStandBeforeMovement())
+        {
+            yield break;
+        }
+
+        bool wasSleeping = isSleeping || needsSleepWakeBeforeMovement;
+        isResting = false;
+        isSleeping = false;
+        isPlayingOneShotAnimation = true;
+        animator.SetBool(MoveHash, false);
+        animator.SetFloat(SpeedHash, 0f);
+        animator.SetFloat(DirectionHash, 0f);
+        SetNeutralIdle();
+        StopDirectClipGraph();
+
+        if (wasSleeping)
+        {
+            yield return PlaySleepWakeAnimation();
+        }
+
+        yield return PlayLieStandAnimation();
+
+        SetNeutralIdle();
+        needsStandBeforeMovement = false;
+        needsSleepWakeBeforeMovement = false;
+        isPlayingOneShotAnimation = false;
+    }
+
+    private bool ShouldStandBeforeMovement()
+    {
+        return needsStandBeforeMovement || IsAnimatorInLieRestState();
+    }
+
+    private bool IsAnimatorInLieRestState()
+    {
+        return IsAnimatorInState(lieStartStateHash, lieStartStateName)
+            || IsAnimatorInState(lieLoopStateHash, lieLoopStateName)
+            || IsAnimatorInState(lieSleepStartStateHash, lieSleepStartStateName)
+            || IsAnimatorInState(lieSleepLoopStateHash, lieSleepLoopStateName)
+            || IsAnimatorInState(lieSleepEndStateHash, lieSleepEndStateName);
+    }
+
+    private IEnumerator PlaySleepWakeAnimation()
+    {
+        if (lieSleepEndStateHash != 0)
+        {
+            yield return PlayStateForDuration(lieSleepEndStateHash, lieSleepEndStateName, wakePauseDuration, restCrossFadeDuration, false);
+            yield break;
+        }
+
+        AnimationClip sleepEndClip;
+        if (TryGetImportedRestClip("Lie_belly_sleep_end", out sleepEndClip)
+            || TryGetImportedRestClip("Lie_Sleep_end", out sleepEndClip))
+        {
+            yield return PlayDirectClip(sleepEndClip, Mathf.Max(0.25f, sleepEndClip.length * 0.95f), false);
+        }
+    }
+
+    private IEnumerator PlayLieStandAnimation()
+    {
+        if (lieEndStateHash != 0)
+        {
+            yield return PlayStateForDuration(lieEndStateHash, lieEndStateName, sitEndRecoveryDuration, restCrossFadeDuration, false);
+            yield break;
+        }
+
+        AnimationClip lieEndClip;
+        if (TryGetImportedRestClip("Lie_belly_end", out lieEndClip))
+        {
+            yield return PlayDirectClip(lieEndClip, Mathf.Max(0.25f, lieEndClip.length * 0.95f), false);
+            yield break;
+        }
+
+        if (sitEndStateHash != 0)
+        {
+            CrossFadeState(sitEndStateHash, restCrossFadeDuration);
+        }
+        else
+        {
+            animator.SetTrigger(SitEndTriggerHash);
+        }
+
+        yield return new WaitForSeconds(sitEndRecoveryDuration);
     }
 
     private IEnumerator PlayImportedLieLoop(DogRestFlavor restFlavor, float remainingLieTime, AnimationClip lieLoopClip)

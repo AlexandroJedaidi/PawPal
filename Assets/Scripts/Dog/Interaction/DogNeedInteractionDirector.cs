@@ -155,7 +155,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         List<DogRoomAgent> pausedBlockers = new List<DogRoomAgent>();
         try
         {
-            dog.PauseForSocial();
+            dog.PauseForSocial(false);
 
             activeBowl = Instantiate(bowlPrefab);
             activeBowl.name = bowlPrefab.name;
@@ -648,13 +648,20 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 
         AudioSource source = audioObject.AddComponent<AudioSource>();
         source.clip = clip;
-        source.volume = Mathf.Clamp01(bowlUseVolume);
+        source.volume = PawPalAudioSettings.ApplySoundEffectsVolume(bowlUseVolume);
         source.spatialBlend = 0f;
         source.loop = true;
         source.playOnAwake = false;
         source.Play();
 
-        yield return new WaitForSeconds(Mathf.Max(0.1f, duration));
+        float targetDuration = Mathf.Max(0.1f, duration);
+        float elapsed = 0f;
+        while (elapsed < targetDuration && source != null)
+        {
+            source.volume = PawPalAudioSettings.ApplySoundEffectsVolume(bowlUseVolume);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
 
         Destroy(audioObject);
     }

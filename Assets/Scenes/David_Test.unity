@@ -506,6 +506,37 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 0
+--- !u!1 &550098874
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 550098875}
+  m_Layer: 7
+  m_Name: MouthSocket
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &550098875
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 550098874}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.11841653, y: -0.38091338, z: 0.031965245, w: 0.9164392}
+  m_LocalPosition: {x: 0.019, y: 0.0138, z: -0.0101}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1316589438}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &610933833
 GameObject:
   m_ObjectHideFlags: 0
@@ -872,6 +903,63 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8b9a305e18de0c04dbd257a21cd47087, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1001 &691212650
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 100004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_Name
+      value: Furniture_foliageplant_08_LOD1
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -0.679
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.004
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 2.479
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 93964bda8aa8bb6408252ae9ac6bb4a2, type: 3}
 --- !u!1 &700573927
 GameObject:
   m_ObjectHideFlags: 0
@@ -1061,7 +1149,7 @@ Light:
     serializedVersion: 2
     m_Bits: 4294967295
   m_RenderingLayerMask: 1
-  m_Lightmapping: 2
+  m_Lightmapping: 4
   m_LightShadowCasterMode: 0
   m_AreaSize: {x: 1, y: 1}
   m_BounceIntensity: 1
@@ -1327,7 +1415,10 @@ PrefabInstance:
       objectReference: {fileID: 9100000, guid: faa9cbf8bbdc47d49bfb6cc5db34a664, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
-    m_AddedGameObjects: []
+    m_AddedGameObjects:
+    - targetCorrespondingSourceObject: {fileID: -2245469844294402668, guid: d1b5ea25f29b5ab44b20ebe7895e325f, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 550098875}
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: d1b5ea25f29b5ab44b20ebe7895e325f, type: 3}
       insertIndex: -1
@@ -1761,6 +1852,11 @@ Transform:
   m_Children: []
   m_Father: {fileID: 4300000101}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!4 &1316589438 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -2245469844294402668, guid: d1b5ea25f29b5ab44b20ebe7895e325f, type: 3}
+  m_PrefabInstance: {fileID: 941525845}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1345658505
 GameObject:
   m_ObjectHideFlags: 0
@@ -1862,6 +1958,75 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 3481795110779517258, guid: 9c137b75d0f2d7d4cba375165ab73de3, type: 3}
   m_PrefabInstance: {fileID: 1403786134}
   m_PrefabAsset: {fileID: 0}
+--- !u!1001 &1447798002
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 100004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_Name
+      value: Furniture_foliageplant_09_LOD1
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0.253
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.009
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -2.462
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400004, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 98e2bcc51e457ea419e8e1e9d06155f6, type: 3}
 --- !u!1001 &1498285508
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2805,6 +2970,9 @@ MonoBehaviour:
   maxToyPickupApproachDistance: 0.12
   maxToyPickupPlanarDistance: 0.25
   toyApproachTimeout: 6
+  fetchToyRepathInterval: 0.18
+  fetchToyRepathDistance: 0.18
+  fetchToyPickupReachMultiplier: 0.85
   toyFaceDuration: 0.45
   pickupAttachDelay: 0.55
   pickupAnimationDuration: 1.15
@@ -2838,6 +3006,8 @@ MonoBehaviour:
   bigBallChaseChance: 0.75
   bigBallChaseTimeout: 2.5
   bigBallChaseFollowDistance: 0.55
+  focusCameraDuringToyInteractions: 1
+  toyCameraFocusOffset: {x: 0, y: 0.35, z: 0}
   walkingClip: {fileID: 0}
   walkingVolume: 0.18
   ballBounceClip: {fileID: 0}
@@ -2972,6 +3142,9 @@ MonoBehaviour:
   maxToyPickupApproachDistance: 0.12
   maxToyPickupPlanarDistance: 0.25
   toyApproachTimeout: 6
+  fetchToyRepathInterval: 0.18
+  fetchToyRepathDistance: 0.18
+  fetchToyPickupReachMultiplier: 0.85
   toyFaceDuration: 0.45
   pickupAttachDelay: 0.55
   pickupAnimationDuration: 1.15
@@ -3005,6 +3178,8 @@ MonoBehaviour:
   bigBallChaseChance: 0.75
   bigBallChaseTimeout: 2.5
   bigBallChaseFollowDistance: 0.55
+  focusCameraDuringToyInteractions: 1
+  toyCameraFocusOffset: {x: 0, y: 0.35, z: 0}
   walkingClip: {fileID: 0}
   walkingVolume: 0.18
   ballBounceClip: {fileID: 0}
@@ -3067,6 +3242,7 @@ MonoBehaviour:
   initialInteractionDelayRange: {x: 60, y: 140}
   meetDistance: 0.85
   minimumDogSpacing: 1.05
+  maxProximityInteractionStartDistance: 1.35
   approachTimeout: 5
   faceDuration: 0.75
   preAnimationHeadLookSettleDuration: 0.25
@@ -3129,6 +3305,20 @@ MonoBehaviour:
   zoomOutDuration: 2.25
   minimumZoomCooldown: 8
   zoomHeadFocusOffset: {x: 0, y: 0.03, z: 0}
+  minimumAutoSwitchInterval: 12
+  focusReleaseLingerDuration: 0.35
+  postFocusSwitchCooldown: 3
+  photoDefaultZoom01: 0.35
+  photoMinDistance: 1.15
+  photoMaxDistance: 4.2
+  photoMinPitch: -18
+  photoMaxPitch: 42
+  photoOrbitSensitivity: 0.18
+  photoTouchOrbitSensitivity: 0.12
+  photoZoomStep: 0.08
+  photoPinchZoomSensitivity: 0.004
+  photoMinFieldOfView: 28
+  photoHeadFocusOffset: {x: 0, y: 0.04, z: 0}
 --- !u!114 &3200000021
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4045,3 +4235,5 @@ SceneRoots:
   - {fileID: 610933838}
   - {fileID: 1938843949}
   - {fileID: 68997571}
+  - {fileID: 691212650}
+  - {fileID: 1447798002}

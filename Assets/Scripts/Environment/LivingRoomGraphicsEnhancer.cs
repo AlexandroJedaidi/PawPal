@@ -222,6 +222,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         resolvedSun.color = sunColor;
         resolvedSun.useColorTemperature = true;
         resolvedSun.colorTemperature = sunColorTemperature;
+        resolvedSun.lightmapBakeType = LightmapBakeType.Realtime;
         resolvedSun.shadows = LightShadows.Soft;
         resolvedSun.shadowStrength = sunShadowStrength;
         resolvedSun.shadowBias = sunShadowBias;
@@ -427,6 +428,26 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             {
                 renderer.shadowCastingMode = ShadowCastingMode.On;
             }
+        }
+
+        if (enableRoomReceiveShadows)
+        {
+            ConfigureTerrainShadows();
+        }
+    }
+
+    private void ConfigureTerrainShadows()
+    {
+        Terrain[] terrains = FindSceneObjects<Terrain>();
+        for (int i = 0; i < terrains.Length; i++)
+        {
+            Terrain terrain = terrains[i];
+            if (!IsSceneObject(terrain) || !terrain.enabled)
+            {
+                continue;
+            }
+
+            terrain.shadowCastingMode = ShadowCastingMode.On;
         }
     }
 

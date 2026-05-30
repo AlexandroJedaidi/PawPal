@@ -259,6 +259,47 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
 
     public bool TrySpawnToy(PawPalCatalogItemDefinition definition)
     {
+        GameObject spawnedToy;
+        return TryCreateToyInstance(definition, true, out spawnedToy);
+    }
+
+    public bool TrySpawnToyForThrow(PawPalCatalogItemDefinition definition)
+    {
+        EnsurePlayerToyThrowController();
+
+        Camera mainCamera = Camera.main;
+        PawPalPlayerToyThrowController throwController = mainCamera != null
+            ? mainCamera.GetComponent<PawPalPlayerToyThrowController>()
+            : null;
+        if (throwController == null)
+        {
+            Debug.LogWarning("PawPalDogSceneBridge could not spawn a toy for throw because the main camera has no PawPalPlayerToyThrowController.");
+            return false;
+        }
+
+        GameObject spawnedToy;
+        if (!TryCreateToyInstance(definition, false, out spawnedToy))
+        {
+            return false;
+        }
+
+        if (throwController.TryHoldToyForThrow(spawnedToy, true))
+        {
+            return true;
+        }
+
+        RemoveSpawnedToyRecord(spawnedToy);
+        if (spawnedToy != null)
+        {
+            Destroy(spawnedToy);
+        }
+
+        return false;
+    }
+
+    private bool TryCreateToyInstance(PawPalCatalogItemDefinition definition, bool placeOnFloor, out GameObject spawnedToy)
+    {
+        spawnedToy = null;
         if (definition == null || string.IsNullOrEmpty(definition.RoomPrefabResourcePath))
         {
             return false;
@@ -278,7 +319,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
             return false;
         }
 
-        GameObject spawnedToy = Instantiate(prefab);
+        spawnedToy = Instantiate(prefab);
         spawnedToy.name = prefab.name;
         PawPalToyRuntimeMetadata metadata = spawnedToy.GetComponent<PawPalToyRuntimeMetadata>();
         if (metadata == null)
@@ -290,8 +331,10 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         ApplyInstanceTint(spawnedToy, definition.ToyTint);
         spawnedToy.transform.rotation = Quaternion.identity;
         EnsureDynamicToyCollider(spawnedToy);
-        spawnedToy.transform.position = ResolveToySpawnPosition(spawnedToy, GetToySpawnPosition());
-        if (definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll)
+        spawnedToy.transform.position = placeOnFloor
+            ? ResolveToySpawnPosition(spawnedToy, GetToySpawnPosition())
+            : GetToySpawnPosition();
+        if (placeOnFloor && definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll)
         {
             ConfigureLargeToyNavigationBlocker(spawnedToy, metadata);
         }
@@ -312,6 +355,23 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         TrySetToyTag(spawnedToy);
         activeSpawnedToys.Add(new SpawnedToyRecord(spawnedToy, definition.Id));
         return true;
+    }
+
+    private void RemoveSpawnedToyRecord(GameObject spawnedToy)
+    {
+        if (spawnedToy == null)
+        {
+            return;
+        }
+
+        for (int i = activeSpawnedToys.Count - 1; i >= 0; i--)
+        {
+            SpawnedToyRecord record = activeSpawnedToys[i];
+            if (record == null || record.Instance == null || record.Instance == spawnedToy)
+            {
+                activeSpawnedToys.RemoveAt(i);
+            }
+        }
     }
 
     public bool IsToyActiveInScene(string itemId)

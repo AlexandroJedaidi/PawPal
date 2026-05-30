@@ -1,11 +1,19 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.EventSystems;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [DisallowMultipleComponent]
 public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 {
+#if UNITY_EDITOR
+    private const string EditorToyPickupAudioAssetPath = "Assets/Audio/toy_pickup.mp3";
+#endif
+
     private enum PointerMode
     {
         None,
@@ -16,6 +24,10 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     [Header("Pickup")]
     [SerializeField] private float pickRayDistance = 100f;
     [SerializeField] private string[] toyNameKeywords = { "ball", "bone", "cattoy" };
+
+    [Header("Audio")]
+    [SerializeField] private AudioClip toyPickupClip;
+    [SerializeField, Range(0f, 1f)] private float toyPickupVolume = 0.7f;
 
     [Header("Held Toy")]
     [SerializeField] private Vector3 heldViewportPosition = new Vector3(0.5f, 0.42f, 0.65f);
@@ -47,6 +59,16 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     [SerializeField] private Vector3 returnViewportPosition = new Vector3(0.5f, 0.12f, 1.4f);
     [SerializeField] private float returnNavMeshSampleRadius = 1.8f;
 
+    [Header("Dog Anticipation")]
+    [SerializeField] private float dogAnticipationApproachDistance = 1.15f;
+    [SerializeField] private float dogAnticipationLateralSpacing = 0.58f;
+    [SerializeField] private float dogAnticipationSampleRadius = 1.6f;
+    [SerializeField] private float dogAnticipationApproachTimeout = 5.5f;
+    [SerializeField] private float dogAnticipationFaceDuration = 0.45f;
+    [SerializeField] private float dogAnticipationBarkDuration = 0.55f;
+    [SerializeField] private float dogAnticipationLookRefreshDuration = 0.7f;
+    [SerializeField] private float dogAnticipationWaitTick = 0.25f;
+
     private static PawPalPlayerToyThrowController activeInteractionController;
 
     private Camera attachedCamera;
@@ -61,6 +83,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     private CollisionDetectionMode originalCollisionDetectionMode;
     private Collider[] heldColliders;
     private bool[] heldColliderStates;
+    private NavMeshObstacle[] heldNavMeshObstacles;
+    private bool[] heldNavMeshObstacleStates;
+    private PawPalToyRuntimeMetadata heldToyMetadata;
+    private bool heldToyOriginalBlocksDogNavigation;
+    private float heldToyOriginalDogNavigationRadius;
     private PawPalPlayerHeldToyMarker heldMarker;
     private PointerMode pointerMode;
     private int activeTouchFingerId = -1;
@@ -72,8 +99,12 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     private LineRenderer aimPreviewLine;
     private Transform aimPreviewMarker;
     private Material aimPreviewMaterial;
+    private readonly List<Coroutine> dogAnticipationRoutines = new List<Coroutine>();
+    private readonly List<DogRoomAgent> anticipatingDogs = new List<DogRoomAgent>();
 
     public static bool IsPointerInteractionActive => activeInteractionController != null;
+    public bool HasHeldToy => heldToy != null;
+    public GameObject HeldToy => heldToy;
 
     private void Awake()
     {
@@ -85,12 +116,14 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
 
         EnsureAnchors();
+        AutoAssignEditorAudioClips();
         DisableAimPreview();
     }
 
     private void OnEnable()
     {
         showAimPreview = false;
+        AutoAssignEditorAudioClips();
         DisableAimPreview();
     }
 
@@ -114,6 +147,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
 
         UpdateHoldAnchor();
+        if (heldToy == null && anticipatingDogs.Count > 0)
+        {
+            StopDogAnticipation(true);
+        }
+
         if (showAimPreview)
         {
             UpdateAimPreview();
@@ -283,8 +321,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             return false;
         }
 
-        HoldToy(bestToy.gameObject);
-        return true;
+        return TryHoldToyForThrow(bestToy.gameObject, true);
     }
 
     private Transform ResolvePickableToyRoot(Transform candidate)
@@ -303,7 +340,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         PawPalToyRuntimeMetadata metadata = candidate.GetComponentInParent<PawPalToyRuntimeMetadata>();
         if (metadata != null)
         {
-            return metadata.InteractionMode == PawPalToyInteractionMode.CarryInMouth ? metadata.transform : null;
+            return metadata.transform;
         }
 
         Transform current = candidate;
@@ -352,7 +389,18 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         return false;
     }
 
-    private void HoldToy(GameObject toy)
+    public bool TryHoldToyForThrow(GameObject toy, bool inviteDogs = true)
+    {
+        if (toy == null || heldToy != null)
+        {
+            return false;
+        }
+
+        HoldToy(toy, inviteDogs);
+        return heldToy == toy;
+    }
+
+    private void HoldToy(GameObject toy, bool inviteDogs)
     {
         if (toy == null)
         {
@@ -369,6 +417,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         Transform toyTransform = heldToy.transform;
         originalParent = toyTransform.parent;
         originalLocalScale = toyTransform.localScale;
+        PlayToyPickupAudio(toyTransform.position);
 
         heldBody = heldToy.GetComponent<Rigidbody>();
         if (heldBody != null)
@@ -393,6 +442,33 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             }
         }
 
+        heldNavMeshObstacles = heldToy.GetComponentsInChildren<NavMeshObstacle>(true);
+        heldNavMeshObstacleStates = new bool[heldNavMeshObstacles.Length];
+        for (int i = 0; i < heldNavMeshObstacles.Length; i++)
+        {
+            heldNavMeshObstacleStates[i] = heldNavMeshObstacles[i] != null && heldNavMeshObstacles[i].enabled;
+            if (heldNavMeshObstacles[i] != null)
+            {
+                heldNavMeshObstacles[i].enabled = false;
+            }
+        }
+
+        heldToyMetadata = heldToy.GetComponent<PawPalToyRuntimeMetadata>();
+        if (heldToyMetadata != null)
+        {
+            heldToyOriginalBlocksDogNavigation = heldToyMetadata.BlocksDogNavigation;
+            heldToyOriginalDogNavigationRadius = heldToyMetadata.DogNavigationBlockRadius;
+            if (heldToyOriginalBlocksDogNavigation)
+            {
+                heldToyMetadata.SetBlocksDogNavigation(false, heldToyOriginalDogNavigationRadius);
+            }
+        }
+        else
+        {
+            heldToyOriginalBlocksDogNavigation = false;
+            heldToyOriginalDogNavigationRadius = 0.45f;
+        }
+
         heldMarker = heldToy.GetComponent<PawPalPlayerHeldToyMarker>();
         if (heldMarker == null)
         {
@@ -404,6 +480,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         toyTransform.localRotation = Quaternion.identity;
         toyTransform.localScale = originalLocalScale * Mathf.Max(0.01f, heldVisualScaleMultiplier);
         AlignHeldToyVisualToAnchor();
+
+        if (inviteDogs)
+        {
+            StartDogAnticipation();
+        }
     }
 
     private void ThrowHeldToy(Vector2 screenPosition)
@@ -415,6 +496,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
 
         GameObject thrownToy = heldToy;
+        PawPalToyInteractionMode interactionMode = GetToyInteractionMode(thrownToy);
         Vector3 throwOrigin = holdAnchor != null ? holdAnchor.position : thrownToy.transform.position;
         Quaternion throwRotation = holdAnchor != null ? holdAnchor.rotation : thrownToy.transform.rotation;
         float throwPower = CalculateThrowPower(screenPosition);
@@ -439,6 +521,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         body.linearVelocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;
+        EnsureThrownToyBounceAudio(thrownToy);
 
         Vector3 launchVelocity = CalculateArcLaunchVelocity(throwOrigin, throwTarget, throwPower);
         Vector3 launchDirection = launchVelocity;
@@ -459,7 +542,52 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
         ArmThrownToyRecovery(thrownToy);
         ClearPointerCapture();
-        QueueFetch(thrownToy);
+        if (interactionMode == PawPalToyInteractionMode.CarryInMouth)
+        {
+            QueueFetch(thrownToy);
+        }
+        else
+        {
+            CancelFetchDispatch();
+        }
+    }
+
+    private static PawPalToyInteractionMode GetToyInteractionMode(GameObject toy)
+    {
+        PawPalToyRuntimeMetadata metadata = toy != null ? toy.GetComponentInParent<PawPalToyRuntimeMetadata>() : null;
+        return metadata != null ? metadata.InteractionMode : PawPalToyInteractionMode.CarryInMouth;
+    }
+
+    private static void EnsureThrownToyBounceAudio(GameObject toy)
+    {
+        if (toy == null || !ShouldUseBallBounceAudio(toy))
+        {
+            return;
+        }
+
+        PawPalBallBounceAudio.EnsureOn(toy);
+    }
+
+    private static bool ShouldUseBallBounceAudio(GameObject toy)
+    {
+        if (toy == null)
+        {
+            return false;
+        }
+
+        PawPalToyRuntimeMetadata metadata = toy.GetComponentInParent<PawPalToyRuntimeMetadata>();
+        if (metadata != null && ContainsBallName(metadata.ItemId))
+        {
+            return true;
+        }
+
+        return ContainsBallName(toy.name);
+    }
+
+    private static bool ContainsBallName(string value)
+    {
+        return !string.IsNullOrEmpty(value)
+            && value.IndexOf("ball", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private void ArmThrownToyRecovery(GameObject thrownToy)
@@ -512,9 +640,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     {
         if (heldToy == null)
         {
+            StopDogAnticipation(true);
             return;
         }
 
+        StopDogAnticipation(true);
         Transform toyTransform = heldToy.transform;
         toyTransform.SetParent(originalParent, worldPositionStays: true);
         toyTransform.localScale = originalLocalScale;
@@ -522,6 +652,13 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         if (restoreColliderState)
         {
             RestoreHeldColliderStates();
+        }
+
+        RestoreHeldNavMeshObstacles();
+
+        if (heldToyMetadata != null && heldToyOriginalBlocksDogNavigation)
+        {
+            heldToyMetadata.SetBlocksDogNavigation(true, heldToyOriginalDogNavigationRadius);
         }
 
         if (heldBody != null)
@@ -541,6 +678,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         heldBody = null;
         heldColliders = null;
         heldColliderStates = null;
+        heldNavMeshObstacles = null;
+        heldNavMeshObstacleStates = null;
+        heldToyMetadata = null;
+        heldToyOriginalBlocksDogNavigation = false;
+        heldToyOriginalDogNavigationRadius = 0.45f;
         heldMarker = null;
     }
 
@@ -557,6 +699,195 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             {
                 heldColliders[i].enabled = heldColliderStates[i];
             }
+        }
+    }
+
+    private void RestoreHeldNavMeshObstacles()
+    {
+        if (heldNavMeshObstacles == null || heldNavMeshObstacleStates == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < heldNavMeshObstacles.Length; i++)
+        {
+            if (heldNavMeshObstacles[i] != null)
+            {
+                heldNavMeshObstacles[i].enabled = heldNavMeshObstacleStates[i];
+            }
+        }
+    }
+
+    private void StartDogAnticipation()
+    {
+        StopDogAnticipation(false);
+        if (heldToy == null || attachedCamera == null)
+        {
+            return;
+        }
+
+        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        if (dogs == null || dogs.Length == 0)
+        {
+            return;
+        }
+
+        GameObject toySnapshot = heldToy;
+        int invitedIndex = 0;
+        for (int i = 0; i < dogs.Length; i++)
+        {
+            DogRoomAgent dog = dogs[i];
+            if (!CanInviteDogToToyAnticipation(dog))
+            {
+                continue;
+            }
+
+            anticipatingDogs.Add(dog);
+            dogAnticipationRoutines.Add(StartCoroutine(DogToyAnticipationRoutine(dog, invitedIndex, toySnapshot)));
+            invitedIndex++;
+        }
+    }
+
+    private void StopDogAnticipation(bool resumeRoaming)
+    {
+        for (int i = 0; i < dogAnticipationRoutines.Count; i++)
+        {
+            if (dogAnticipationRoutines[i] != null)
+            {
+                StopCoroutine(dogAnticipationRoutines[i]);
+            }
+        }
+
+        dogAnticipationRoutines.Clear();
+
+        if (resumeRoaming)
+        {
+            for (int i = 0; i < anticipatingDogs.Count; i++)
+            {
+                DogRoomAgent dog = anticipatingDogs[i];
+                if (dog != null && dog.isActiveAndEnabled)
+                {
+                    dog.StartRoaming();
+                }
+            }
+        }
+
+        anticipatingDogs.Clear();
+    }
+
+    private static bool CanInviteDogToToyAnticipation(DogRoomAgent dog)
+    {
+        return dog != null
+            && dog.isActiveAndEnabled
+            && !dog.IsBusy
+            && !dog.IsResting
+            && !dog.IsSleeping
+            && !dog.IsPlayingOneShotAnimation
+            && !dog.HasHeldToy;
+    }
+
+    private IEnumerator DogToyAnticipationRoutine(DogRoomAgent dog, int dogIndex, GameObject toySnapshot)
+    {
+        if (dog == null || toySnapshot == null)
+        {
+            yield break;
+        }
+
+        dog.PauseForSocial(true);
+        RequestDogCameraAttention(dog, dogAnticipationLookRefreshDuration);
+
+        Vector3 waitPoint;
+        if (TryResolveDogAnticipationPoint(dog, dogIndex, out waitPoint))
+        {
+            yield return dog.MoveNear(waitPoint, Mathf.Max(0.1f, dogAnticipationApproachTimeout), DogMovementPace.Run);
+        }
+
+        if (dog != null && heldToy == toySnapshot)
+        {
+            RequestDogCameraAttention(dog, dogAnticipationLookRefreshDuration);
+            yield return dog.FaceTarget(attachedCamera != null ? attachedCamera.transform : transform, Mathf.Max(0.05f, dogAnticipationFaceDuration));
+            yield return PlayDogAnticipationBark(dog);
+        }
+
+        while (dog != null && heldToy == toySnapshot)
+        {
+            RequestDogCameraAttention(dog, dogAnticipationLookRefreshDuration);
+            yield return dog.FaceTarget(attachedCamera != null ? attachedCamera.transform : transform, Mathf.Max(0.05f, dogAnticipationFaceDuration));
+            float elapsed = 0f;
+            float waitDuration = Mathf.Max(0.05f, dogAnticipationWaitTick);
+            while (elapsed < waitDuration && dog != null && heldToy == toySnapshot)
+            {
+                RequestDogCameraAttention(dog, dogAnticipationLookRefreshDuration);
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+        }
+    }
+
+    private bool TryResolveDogAnticipationPoint(DogRoomAgent dog, int dogIndex, out Vector3 point)
+    {
+        point = dog != null ? dog.transform.position : Vector3.zero;
+        if (dog == null || attachedCamera == null)
+        {
+            return false;
+        }
+
+        Transform cameraTransform = attachedCamera.transform;
+        Vector3 forward = cameraTransform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = cameraTransform.up;
+            forward.y = 0f;
+        }
+
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = Vector3.forward;
+        }
+
+        forward.Normalize();
+        Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+        int lane = dogIndex == 0 ? 0 : ((dogIndex + 1) / 2) * (dogIndex % 2 == 0 ? -1 : 1);
+        Vector3 candidate = cameraTransform.position
+            + forward * Mathf.Max(0.2f, dogAnticipationApproachDistance)
+            + right * lane * Mathf.Max(0f, dogAnticipationLateralSpacing);
+        candidate.y = dog.transform.position.y;
+
+        return dog.TryGetRoomSafePoint(candidate, Mathf.Max(0.05f, dogAnticipationSampleRadius), out point);
+    }
+
+    private static void RequestDogCameraAttention(DogRoomAgent dog, float duration)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        DogCameraAttention attention = dog.GetComponent<DogCameraAttention>();
+        if (attention == null)
+        {
+            attention = dog.gameObject.AddComponent<DogCameraAttention>();
+        }
+
+        attention.RequestCameraAttention(duration);
+    }
+
+    private IEnumerator PlayDogAnticipationBark(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            yield break;
+        }
+
+        DogSocialDirector barkDirector = DogSocialDirector.Instance;
+        if (barkDirector != null)
+        {
+            yield return barkDirector.PlayAmbientBarkForAgent(dog);
+        }
+        else
+        {
+            yield return dog.PlayBark(Mathf.Max(0.05f, dogAnticipationBarkDuration));
         }
     }
 
@@ -1043,6 +1374,34 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         return hasBounds;
     }
 
+    private void PlayToyPickupAudio(Vector3 position)
+    {
+        PlaySpatialOneShot(toyPickupClip, position, toyPickupVolume);
+    }
+
+    private void PlaySpatialOneShot(AudioClip clip, Vector3 position, float volume)
+    {
+        float effectiveVolume = PawPalAudioSettings.ApplySoundEffectsVolume(volume);
+        if (clip == null || effectiveVolume <= 0f)
+        {
+            return;
+        }
+
+        GameObject audioObject = new GameObject("PawPalPlayerToyPickupAudio");
+        audioObject.hideFlags = HideFlags.DontSave;
+        audioObject.transform.position = position;
+
+        AudioSource source = audioObject.AddComponent<AudioSource>();
+        source.playOnAwake = false;
+        source.loop = false;
+        source.spatialBlend = 1f;
+        source.rolloffMode = AudioRolloffMode.Linear;
+        source.minDistance = 0.25f;
+        source.maxDistance = 6f;
+        source.PlayOneShot(clip, effectiveVolume);
+        Destroy(audioObject, Mathf.Max(0.1f, clip.length + 0.15f));
+    }
+
     private void CancelFetchDispatch()
     {
         if (fetchDispatchRoutine == null)
@@ -1074,5 +1433,15 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     private static bool IsPointerOverUi(int pointerId)
     {
         return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(pointerId);
+    }
+
+    private void AutoAssignEditorAudioClips()
+    {
+#if UNITY_EDITOR
+        if (toyPickupClip == null)
+        {
+            toyPickupClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorToyPickupAudioAssetPath);
+        }
+#endif
     }
 }

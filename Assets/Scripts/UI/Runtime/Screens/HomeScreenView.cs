@@ -29,6 +29,10 @@ public class HomeScreenView : AppScreenViewBase
     private const float InventoryNameBottomOffset = 257f;
     private const float InventoryAddonsBottomOffset = 306f;
     private const float NeedPopupBottomOffset = 130f;
+    private const float VoicePanelX = 58f;
+    private const float VoicePanelY = 394f;
+    private const float VoicePanelWidth = 276f;
+    private const float VoicePanelHeight = 178f;
     private const float BottomHudReferenceHeight = UiTheme.ReferenceContentHeight;
 
     private RectTransform exactFrame;
@@ -41,11 +45,16 @@ public class HomeScreenView : AppScreenViewBase
     private DogDetailsWidgetView dogDetails;
     private InventoryNameBarView inventoryNameBar;
     private InventoryPanelView inventoryPanel;
+    private DogVoiceCommandDirector voiceCommandDirector;
+    private PawPalVoiceInputController voiceController;
+    private HomeVoicePanelView voicePanel;
+    private RectTransform voicePanelRect;
     private RectTransform needPopup;
     private TextMeshProUGUI needPopupLabel;
     private Coroutine needPopupRoutine;
     private HomeDetailMode detailMode;
     private ResponsiveFigmaFrameLayout frameLayout;
+    private bool voiceDogSwitchLockActive;
 
     protected override bool UseScreenContainer
     {
@@ -65,6 +74,8 @@ public class HomeScreenView : AppScreenViewBase
 
     private void OnDisable()
     {
+        CloseVoicePanel();
+
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime != null)
         {
@@ -91,8 +102,12 @@ public class HomeScreenView : AppScreenViewBase
         bottomHudFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, BottomHudReferenceHeight);
         bottomHudFrame.anchoredPosition = Vector2.zero;
 
+        voiceCommandDirector = gameObject.AddComponent<DogVoiceCommandDirector>();
+        voiceController = gameObject.AddComponent<PawPalVoiceInputController>();
+        voiceController.Initialize(voiceCommandDirector);
+
         addons = CreateNode<HomeAddonsView>("Addons", bottomHudFrame, 107f, BaseAddonsY, 180f, 38f);
-        addons.Initialize(sprites, ToggleInventoryPanel);
+        addons.Initialize(sprites, ToggleVoicePanel, ToggleInventoryPanel, EnterPhotoMode);
         addonsRect = addons.GetComponent<RectTransform>();
 
         dogDetails = CreateNode<DogDetailsWidgetView>("DogDetails", bottomHudFrame, BasePanelX, BasePanelY, 246f, BasePanelHeight);
@@ -109,6 +124,11 @@ public class HomeScreenView : AppScreenViewBase
         inventoryPanel.Initialize(sprites);
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
+
+        voicePanel = CreateNode<HomeVoicePanelView>("VoicePanel", bottomHudFrame, VoicePanelX, VoicePanelY, VoicePanelWidth, VoicePanelHeight);
+        voicePanel.Initialize(voiceController, CloseVoicePanel);
+        voicePanelRect = voicePanel.GetComponent<RectTransform>();
+        voicePanel.gameObject.SetActive(false);
 
         BuildNeedPopup();
         ApplyDetailMode();
@@ -142,14 +162,69 @@ public class HomeScreenView : AppScreenViewBase
 
     private void ToggleDetailsPanel()
     {
+        CloseVoicePanel();
         detailMode = detailMode == HomeDetailMode.Stats ? HomeDetailMode.Collapsed : HomeDetailMode.Stats;
         ApplyDetailMode();
     }
 
     private void ToggleInventoryPanel()
     {
+        CloseVoicePanel();
         detailMode = detailMode == HomeDetailMode.Inventory ? HomeDetailMode.Collapsed : HomeDetailMode.Inventory;
         ApplyDetailMode();
+    }
+
+    private void ToggleVoicePanel()
+    {
+        if (voicePanel == null)
+        {
+            return;
+        }
+
+        bool shouldShow = !voicePanel.gameObject.activeSelf;
+        if (!shouldShow)
+        {
+            CloseVoicePanel();
+            return;
+        }
+
+        AcquireVoiceDogSwitchLock();
+        detailMode = HomeDetailMode.Collapsed;
+        ApplyDetailMode();
+        if (voiceController != null)
+        {
+            voiceController.RefreshForActiveDog();
+        }
+
+        voicePanel.gameObject.SetActive(true);
+        voicePanel.Refresh();
+    }
+
+    private void CloseVoicePanel()
+    {
+        if (voiceController != null)
+        {
+            voiceController.CancelActiveOperation();
+        }
+
+        if (voicePanel != null)
+        {
+            voicePanel.gameObject.SetActive(false);
+        }
+
+        ReleaseVoiceDogSwitchLock();
+    }
+
+    private void EnterPhotoMode()
+    {
+        CloseVoicePanel();
+        detailMode = HomeDetailMode.Collapsed;
+        ApplyDetailMode();
+
+        if (shell != null)
+        {
+            shell.EnterPhotoMode();
+        }
     }
 
     private void ApplyDetailMode()
@@ -191,6 +266,11 @@ public class HomeScreenView : AppScreenViewBase
         if (inventoryPanelRect != null)
         {
             inventoryPanelRect.anchoredPosition = new Vector2(InventoryRegionX, -528f);
+        }
+
+        if (voicePanelRect != null)
+        {
+            voicePanelRect.anchoredPosition = new Vector2(VoicePanelX, -VoicePanelY);
         }
 
         if (needPopup != null)
@@ -243,25 +323,80 @@ public class HomeScreenView : AppScreenViewBase
         {
             inventoryPanel.RefreshRuntimeState(runtime);
         }
+
+        RefreshVoicePanelForDogSwitch();
     }
 
     private void SelectPreviousDog()
     {
+        if (IsDogSwitchBlockedByOverlay())
+        {
+            return;
+        }
+
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime != null)
         {
             runtime.SelectPreviousDog();
             DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
+            RefreshVoicePanelForDogSwitch();
         }
     }
 
     private void SelectNextDog()
     {
+        if (IsDogSwitchBlockedByOverlay())
+        {
+            return;
+        }
+
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime != null)
         {
             runtime.SelectNextDog();
             DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
+            RefreshVoicePanelForDogSwitch();
+        }
+    }
+
+    private bool IsDogSwitchBlockedByOverlay()
+    {
+        return (voicePanel != null && voicePanel.gameObject.activeSelf)
+            || (shell != null && shell.IsPhotoModeActive);
+    }
+
+    private void AcquireVoiceDogSwitchLock()
+    {
+        if (voiceDogSwitchLockActive)
+        {
+            return;
+        }
+
+        DogCycleCamera.PushDogSwitchLock();
+        voiceDogSwitchLockActive = true;
+    }
+
+    private void ReleaseVoiceDogSwitchLock()
+    {
+        if (!voiceDogSwitchLockActive)
+        {
+            return;
+        }
+
+        DogCycleCamera.PopDogSwitchLock();
+        voiceDogSwitchLockActive = false;
+    }
+
+    private void RefreshVoicePanelForDogSwitch()
+    {
+        if (voiceController != null)
+        {
+            voiceController.RefreshForActiveDog();
+        }
+
+        if (voicePanel != null && voicePanel.gameObject.activeSelf)
+        {
+            voicePanel.Refresh();
         }
     }
 
@@ -336,7 +471,12 @@ public class HomeScreenView : AppScreenViewBase
             return;
         }
 
-        runtime.TrySpawnToy(itemId);
+        if (runtime.TrySpawnToyForThrow(itemId))
+        {
+            detailMode = HomeDetailMode.Collapsed;
+            ApplyDetailMode();
+            RefreshRuntimeState();
+        }
     }
 
     private void BuildNeedPopup()

@@ -10,6 +10,8 @@ public class ToyAttach : MonoBehaviour
     [SerializeField] private float generatedMouthHeightOffset = 0.015f;
     [SerializeField] private float anatomicalMouthForwardOffset = 0.04f;
     [SerializeField] private float anatomicalMouthDownOffset = 0.006f;
+    [SerializeField] private float generatedMouthToNoseBlend = 0.18f;
+    [SerializeField] private float generatedMouthBoneDownOffset = 0.012f;
     [SerializeField] private float releasedToyFloorPadding = 0.035f;
 
     private GameObject currentToy;
@@ -116,7 +118,7 @@ public class ToyAttach : MonoBehaviour
         toyTransform.localPosition = carryLocalPosition;
         toyTransform.localRotation = carryLocalRotation;
         toyTransform.localScale = originalLocalScale;
-        AlignCarriedToyVisualToAnchor(toyTransform, carryAnchor);
+        AlignCarriedToyVisualToPoint(toyTransform, carryParent.TransformPoint(carryLocalPosition));
         return true;
     }
 
@@ -249,9 +251,9 @@ public class ToyAttach : MonoBehaviour
         return hasBounds;
     }
 
-    private void AlignCarriedToyVisualToAnchor(Transform toyTransform, Transform carryAnchor)
+    private void AlignCarriedToyVisualToPoint(Transform toyTransform, Vector3 desiredWorldCenter)
     {
-        if (toyTransform == null || carryAnchor == null)
+        if (toyTransform == null)
         {
             return;
         }
@@ -262,7 +264,7 @@ public class ToyAttach : MonoBehaviour
             return;
         }
 
-        toyTransform.position += carryAnchor.position - visualBounds.center;
+        toyTransform.position += desiredWorldCenter - visualBounds.center;
     }
 
     private bool TryGetToyVisualBounds(GameObject toy, out Bounds bounds)
@@ -322,8 +324,22 @@ public class ToyAttach : MonoBehaviour
 
     private void ResolveMouthSocketIfNeeded()
     {
+        Transform preferredSocket = FindPreferredMouthSocket();
+        if (preferredSocket != null
+            && (mouthSocket == null || IsSuspiciousMouthSocket(mouthSocket) || !IsExplicitMouthSocket(mouthSocket)))
+        {
+            mouthSocket = preferredSocket;
+            return;
+        }
+
         if (mouthSocket != null)
         {
+            return;
+        }
+
+        if (preferredSocket != null)
+        {
+            mouthSocket = preferredSocket;
             return;
         }
 
@@ -331,12 +347,44 @@ public class ToyAttach : MonoBehaviour
         for (int i = 0; i < children.Length; i++)
         {
             string lowerName = children[i].name.ToLowerInvariant();
-            if (lowerName == "mouth" || lowerName.Contains("mouthsocket"))
+            if (lowerName == "mouth")
             {
                 mouthSocket = children[i];
                 return;
             }
         }
+    }
+
+    private Transform FindPreferredMouthSocket()
+    {
+        Transform[] children = GetComponentsInChildren<Transform>(true);
+        Transform fallbackSocket = null;
+
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform candidate = children[i];
+            if (!IsExplicitMouthSocket(candidate))
+            {
+                continue;
+            }
+
+            if (fallbackSocket == null)
+            {
+                fallbackSocket = candidate;
+            }
+
+            if (!IsSuspiciousMouthSocket(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return fallbackSocket;
+    }
+
+    private static bool IsExplicitMouthSocket(Transform candidate)
+    {
+        return candidate != null && candidate.name.ToLowerInvariant().Contains("mouthsocket");
     }
 
     private Transform GetCarryParent(Transform carryAnchor)
@@ -372,15 +420,15 @@ public class ToyAttach : MonoBehaviour
             return null;
         }
 
+        if (IsSuspiciousMouthSocket(mouthSocket))
+        {
+            return GetOrCreateGeneratedCarryAnchor();
+        }
+
         Transform overrideAnchor = FindCarryAnchorOverride();
         if (overrideAnchor != null && IsUsefulCarryAnchorOverride(overrideAnchor))
         {
             return overrideAnchor;
-        }
-
-        if (IsSuspiciousMouthSocket(mouthSocket))
-        {
-            return GetOrCreateGeneratedCarryAnchor();
         }
 
         return mouthSocket;
@@ -608,6 +656,12 @@ public class ToyAttach : MonoBehaviour
 
     private Vector3 ResolveGeneratedMouthWorldPosition(Transform fallbackParent)
     {
+        Vector3 anatomicalPosition;
+        if (TryResolveGeneratedAnatomicalMouthPosition(out anatomicalPosition))
+        {
+            return anatomicalPosition;
+        }
+
         Vector3 referencePosition = mouthSocket != null ? mouthSocket.position : fallbackParent.position;
         Vector3 forward = transform.forward;
         if (forward.sqrMagnitude < 0.001f)
@@ -630,10 +684,46 @@ public class ToyAttach : MonoBehaviour
         float forwardDistance = Mathf.Max(0.02f, frontProjection - referenceProjection + generatedMouthForwardOffset);
         float headHeight = EstimateHeadHeight(visualBounds);
 
-        return referencePosition
+        Vector3 generatedPosition = referencePosition
             + forward * forwardDistance
             + Vector3.down * Mathf.Clamp(generatedMouthDownOffset, 0f, headHeight * 0.35f)
             + Vector3.up * generatedMouthHeightOffset;
+
+        Vector3 right = transform.right;
+        if (right.sqrMagnitude > 0.001f)
+        {
+            right.Normalize();
+            float centerProjection = Vector3.Dot(visualBounds.center, right);
+            float generatedProjection = Vector3.Dot(generatedPosition, right);
+            generatedPosition += right * (centerProjection - generatedProjection);
+        }
+
+        return generatedPosition;
+    }
+
+    private bool TryResolveGeneratedAnatomicalMouthPosition(out Vector3 position)
+    {
+        Transform searchRoot = mouthSocket != null && mouthSocket.parent != null ? mouthSocket.parent : transform;
+        Transform mouth = FindAnchorByExactName(searchRoot, "mouth");
+        Transform nose = FindAnchorByExactName(searchRoot, "nose");
+
+        if (mouth == null || nose == null)
+        {
+            position = Vector3.zero;
+            return false;
+        }
+
+        Vector3 mouthToNose = nose.position - mouth.position;
+        if (mouthToNose.sqrMagnitude < 0.0001f)
+        {
+            position = Vector3.zero;
+            return false;
+        }
+
+        position = mouth.position
+            + mouthToNose * Mathf.Clamp01(generatedMouthToNoseBlend)
+            + Vector3.down * Mathf.Max(0f, generatedMouthBoneDownOffset);
+        return true;
     }
 
     private bool TryGetDogVisualBounds(out Bounds bounds)

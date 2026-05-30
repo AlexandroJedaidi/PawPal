@@ -35,8 +35,10 @@ public class ShopScreenView : AppScreenViewBase
     private static readonly Color32 ComingSoonGrey = new Color32(163, 163, 163, 255);
     private static readonly Color32 ComingSoonLight = new Color32(220, 220, 220, 255);
     private static readonly Color32 TransparentHit = new Color32(255, 255, 255, 1);
+    private static readonly Rect StandardShopImageRect = new Rect(15.5f, 15f, 84f, 84f);
 
     private static readonly Dictionary<string, Sprite> RuntimeSpriteCache = new Dictionary<string, Sprite>();
+    private static readonly Dictionary<string, bool> ResourceSpriteExistsCache = new Dictionary<string, bool>();
 
     private RectTransform exactFrame;
     private RectTransform shopViewport;
@@ -633,7 +635,7 @@ public class ShopScreenView : AppScreenViewBase
             y,
             item.DisplayName,
             GetFieldSpriteForItem(item),
-            item.ShopSpritePath,
+            GetShopSpritePath(item),
             GetShopImageRect(item, category, index),
             badgeKind,
             badgeText,
@@ -707,7 +709,7 @@ public class ShopScreenView : AppScreenViewBase
         {
             Image art = UiFactory.CreateImage("Art", card, sprites.GetResourceSprite(imageResource), Color.white);
             art.type = Image.Type.Simple;
-            art.preserveAspect = false;
+            art.preserveAspect = true;
             art.raycastTarget = false;
             SetTopLeft(art.rectTransform, imageRect.x, imageRect.y, imageRect.width, imageRect.height);
         }
@@ -819,11 +821,7 @@ public class ShopScreenView : AppScreenViewBase
             return;
         }
 
-        Image preview = UiFactory.CreateImage("Preview", parent, sprites.GetResourceSprite(GetDetailsPreviewSpritePath(item)), Color.white);
-        preview.type = Image.Type.Simple;
-        preview.preserveAspect = false;
-        preview.raycastTarget = false;
-        SetTopLeft(preview.rectTransform, 82f, 2f, 150f, 160f);
+        BuildItemPreview(parent, item);
 
         RectTransform header = CreateNode("DetailsHeader", parent, 11.5f, 168f, 291f, 21f);
         Image line = UiFactory.CreateImage("Line", header, GetHorizontalLineSprite(291, 1), UiTheme.NavBrand);
@@ -836,7 +834,7 @@ public class ShopScreenView : AppScreenViewBase
         SetTopLeft(details.rectTransform, 90.40776f, 0f, 109.24272f, 21f);
 
         RectTransform itemFrame = CreateNode("ItemFrame", parent, 10f, 195f, 294f, 115f);
-        BuildProductCard(itemFrame, item.Id + "MiniCard", 0f, 0f, item.DisplayName, GetFieldSpriteForItem(item), item.ShopSpritePath, GetShopImageRect(item, item.Category, 0), GetModalBadgeKind(item), GetModalBadgeText(item), GetModalBadgeWidth(item), CtaBlue, Color.white, null);
+        BuildProductCard(itemFrame, item.Id + "MiniCard", 0f, 0f, item.DisplayName, GetFieldSpriteForItem(item), GetShopSpritePath(item), GetShopImageRect(item, item.Category, 0), GetModalBadgeKind(item), GetModalBadgeText(item), GetModalBadgeWidth(item), CtaBlue, Color.white, null);
 
         RectTransform textFrame = CreateNode("DescriptionFrame", itemFrame, 117f, 0f, 177f, 115f);
         TextMeshProUGUI description = CreateText(textFrame, "Description", BuildDetailsDescription(item), 15, Color.black, UiTheme.NavRegularFont, TextAlignmentOptions.MidlineLeft);
@@ -851,6 +849,7 @@ public class ShopScreenView : AppScreenViewBase
         CreateActionButton(purchase, "Cancel", "Cancel", 9.5f, 42.5f, 69f, 24f, false, delegate
         {
             modalState = ModalState.None;
+            RebuildModalPanels();
             RefreshState();
         });
         bool canBuy = CanBuySelectedItem();
@@ -885,8 +884,31 @@ public class ShopScreenView : AppScreenViewBase
         CreateActionButton(parent, "Continue", "Continue", 96.5f, 169f, 88f, 24f, true, delegate
         {
             modalState = ModalState.None;
+            RebuildModalPanels();
             RefreshState();
         });
+    }
+
+    private void BuildItemPreview(RectTransform parent, PawPalCatalogItemDefinition item)
+    {
+        RectTransform previewRoot = CreateNode("ItemPreview", parent, 10f, 8f, 294f, 154f);
+
+        Image fill = UiFactory.CreateImage("PreviewFill", previewRoot, GetRoundedRectSprite(294, 154, 8f, 0f, true), SupportFill);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        SetTopLeft(fill.rectTransform, 0f, 0f, 294f, 154f);
+
+        Image border = UiFactory.CreateImage("PreviewBorder", previewRoot, GetRoundedRectSprite(294, 154, 8f, 1f, false), UiTheme.NavBrand);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        SetTopLeft(border.rectTransform, 0f, 0f, 294f, 154f);
+
+        RectTransform previewContent = CreateNode("PreviewContent", previewRoot, 8f, 6f, 278f, 142f);
+        ShopItem3DPreviewView previewView = previewContent.gameObject.AddComponent<ShopItem3DPreviewView>();
+        previewView.Initialize(sprites);
+        previewView.ShowItem(item);
     }
 
     private void BuildSuccessItemCard(RectTransform parent, float x, float y)
@@ -915,9 +937,9 @@ public class ShopScreenView : AppScreenViewBase
 
         Image art = UiFactory.CreateImage("Art", card, sprites.GetResourceSprite(GetSuccessSpritePath(item)), Color.white);
         art.type = Image.Type.Simple;
-        art.preserveAspect = false;
+        art.preserveAspect = true;
         art.raycastTarget = false;
-        SetTopLeft(art.rectTransform, 1f, 33f, 112f, 61f);
+        SetTopLeft(art.rectTransform, StandardShopImageRect.x, StandardShopImageRect.y, StandardShopImageRect.width, StandardShopImageRect.height);
     }
 
     private void BuildPanelShell(RectTransform parent, float width, float height, float radius, float border, bool shadow)
@@ -1349,21 +1371,6 @@ public class ShopScreenView : AppScreenViewBase
         return item.Price >= 100 ? 54f : 45f;
     }
 
-    private string GetDetailsPreviewSpritePath(PawPalCatalogItemDefinition item)
-    {
-        if (item == null)
-        {
-            return "UI/Figma/Shop/bubble_bone_preview";
-        }
-
-        if (item.Id == "toy_bubble_bone")
-        {
-            return "UI/Figma/Shop/bubble_bone_preview";
-        }
-
-        return item.ShopSpritePath;
-    }
-
     private string GetSuccessSpritePath(PawPalCatalogItemDefinition item)
     {
         if (item == null)
@@ -1373,7 +1380,22 @@ public class ShopScreenView : AppScreenViewBase
 
         if (item.Id == "toy_bubble_bone")
         {
-            return "UI/Figma/Shop/bubble_bone_success";
+            return GetShopSpritePath(item);
+        }
+
+        return GetShopSpritePath(item);
+    }
+
+    private string GetShopSpritePath(PawPalCatalogItemDefinition item)
+    {
+        if (item == null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrEmpty(item.GeneratedShopSpritePath) && ResourceSpriteExists(item.GeneratedShopSpritePath))
+        {
+            return item.GeneratedShopSpritePath;
         }
 
         return item.ShopSpritePath;
@@ -1414,31 +1436,7 @@ public class ShopScreenView : AppScreenViewBase
             return Rect.zero;
         }
 
-        switch (item.Id)
-        {
-            case "dog_husky":
-                return new Rect(17f, 18f, 81f, 63f);
-            case "dog_rottweiler":
-                return new Rect(6f, 22f, 103f, 63f);
-            case "food_basic":
-            case "food_premium":
-                return new Rect(21f, 18f, 69f, 69f);
-            case "toy_bubble_bone":
-                return new Rect(11f, 29f, 92f, 50f);
-            case "toy_bouncy_ball":
-            case "toy_star_ball":
-                return item.Id == "toy_bouncy_ball" ? new Rect(11f, 7f, 93f, 93f) : new Rect(28f, 22f, 60f, 59f);
-            case "toy_turbo_roll":
-                return new Rect(30f, 22f, 60f, 59f);
-            case "collar_ocean_band":
-                return new Rect(15f, 24f, 84f, 51f);
-            case "collar_maple_loop":
-                return new Rect(11f, 28f, 88f, 50f);
-            case "collar_cherry_charm":
-                return new Rect(15f, 22f, 84f, 57f);
-            default:
-                return Rect.zero;
-        }
+        return StandardShopImageRect;
     }
 
     private Vector2 GetShopCardPosition(PawPalItemCategory category, int index)
@@ -1523,12 +1521,26 @@ public class ShopScreenView : AppScreenViewBase
     {
         if (itemDetailsPanel != null)
         {
-            BuildItemDetailsPanel(itemDetailsPanel);
+            if (modalState == ModalState.ItemDetails)
+            {
+                BuildItemDetailsPanel(itemDetailsPanel);
+            }
+            else
+            {
+                ClearChildren(itemDetailsPanel);
+            }
         }
 
         if (itemSuccessPanel != null)
         {
-            BuildItemSuccessPanel(itemSuccessPanel);
+            if (modalState == ModalState.ItemSuccess)
+            {
+                BuildItemSuccessPanel(itemSuccessPanel);
+            }
+            else
+            {
+                ClearChildren(itemSuccessPanel);
+            }
         }
     }
 
@@ -1631,6 +1643,24 @@ public class ShopScreenView : AppScreenViewBase
         text.textWrappingMode = TextWrappingModes.NoWrap;
         text.overflowMode = TextOverflowModes.Ellipsis;
         return text;
+    }
+
+    private static bool ResourceSpriteExists(string resourcePath)
+    {
+        if (string.IsNullOrEmpty(resourcePath))
+        {
+            return false;
+        }
+
+        bool exists;
+        if (ResourceSpriteExistsCache.TryGetValue(resourcePath, out exists))
+        {
+            return exists;
+        }
+
+        exists = Resources.Load<Sprite>(resourcePath) != null || Resources.Load<Texture2D>(resourcePath) != null;
+        ResourceSpriteExistsCache[resourcePath] = exists;
+        return exists;
     }
 
     private static Sprite CreateStandardFieldSprite(string key, Color32 midColor, Color32 outerColor)

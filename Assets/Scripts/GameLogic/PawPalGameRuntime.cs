@@ -57,6 +57,13 @@ public enum PawPalToyInteractionMode
     PawHitRoll
 }
 
+public enum PawPalShopPreviewMode
+{
+    SpriteOnly,
+    StandaloneModel,
+    WearableOnDog
+}
+
 [Serializable]
 public sealed class PawPalTrainerState
 {
@@ -197,6 +204,10 @@ public sealed class PawPalCatalogItemDefinition
     public string DisabledReason;
     public string Description;
     public string ShopSpritePath;
+    public string GeneratedShopSpritePath;
+    public string PreviewSpritePath;
+    public string PreviewPrefabResourcePath;
+    public PawPalShopPreviewMode PreviewMode = PawPalShopPreviewMode.SpriteOnly;
     public string InventorySpritePath;
     public InventoryCardTheme InventoryCardTheme;
     public string RoomPrefabResourcePath;
@@ -1317,6 +1328,30 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return spawned;
     }
 
+    public bool TrySpawnToyForThrow(string itemId)
+    {
+        PawPalCatalogItemDefinition item = GetCatalogItem(itemId);
+        if (item == null || item.Category != PawPalItemCategory.Toys || !IsItemOwned(itemId))
+        {
+            return false;
+        }
+
+        EnsureBridge();
+        if (sceneBridge == null)
+        {
+            return false;
+        }
+
+        bool spawned = sceneBridge.TrySpawnToyForThrow(item);
+        if (spawned)
+        {
+            inventoryRevision++;
+            NotifyStateChanged();
+        }
+
+        return spawned;
+    }
+
     public bool IsToyActiveInScene(string itemId)
     {
         if (string.IsNullOrEmpty(itemId))
@@ -1671,7 +1706,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             DisabledInShop = true,
             DisabledReason = "Dog breeds are not purchasable in this milestone.",
             Description = "A playful premium dog breed with high energy and strong mobility.",
-            ShopSpritePath = "UI/Figma/Shop/husky"
+            ShopSpritePath = "UI/Figma/Shop/husky",
+            PreviewSpritePath = "UI/Figma/Shop/husky"
         });
 
         AddCatalogItem(new PawPalCatalogItemDefinition
@@ -1685,7 +1721,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             DisabledInShop = true,
             DisabledReason = "Dog breeds are not purchasable in this milestone.",
             Description = "A sturdy breed card that stays visible while kennel logic is deferred.",
-            ShopSpritePath = "UI/Figma/Shop/rottweiler"
+            ShopSpritePath = "UI/Figma/Shop/rottweiler",
+            PreviewSpritePath = "UI/Figma/Shop/rottweiler"
         });
 
         AddCatalogItem(new PawPalCatalogItemDefinition
@@ -1700,6 +1737,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             StarterQuantity = 5,
             Description = "A simple daily meal. Feeding from Home consumes one unit automatically.",
             ShopSpritePath = "UI/Figma/Shop/basic_food",
+            PreviewSpritePath = "UI/Figma/Shop/basic_food",
             InventorySpritePath = "UI/Figma/Shop/basic_food",
             InventoryCardTheme = InventoryCardTheme.Bone
         });
@@ -1714,6 +1752,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             CanPurchaseMultiple = true,
             Description = "A richer meal that restores a little more food and energy when basic food is gone.",
             ShopSpritePath = "UI/Figma/Shop/premium_food",
+            PreviewSpritePath = "UI/Figma/Shop/premium_food",
             InventorySpritePath = "UI/Figma/Shop/premium_food",
             InventoryCardTheme = InventoryCardTheme.Roll
         });
@@ -1729,6 +1768,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             StarterQuantity = 1,
             Description = "An owned starter toy. Tapping it in inventory spawns a room toy for the dogs to discover.",
             ShopSpritePath = "UI/Figma/Shop/bubble_bone",
+            GeneratedShopSpritePath = "UI/Generated/Shop/toy_bubble_bone",
+            PreviewSpritePath = "UI/Figma/Shop/bubble_bone_preview",
+            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Bone_1",
+            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
             InventorySpritePath = "UI/Figma/HomeInventory/item_bone",
             InventoryCardTheme = InventoryCardTheme.Bone,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Bone_1",
@@ -1744,6 +1787,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Price = 150,
             Description = "A room ball toy that dogs can pick up and move around on their own.",
             ShopSpritePath = "UI/Figma/Shop/bouncy_ball",
+            GeneratedShopSpritePath = "UI/Generated/Shop/toy_bouncy_ball",
+            PreviewSpritePath = "UI/Figma/Shop/bouncy_ball",
+            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
+            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
             InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
             InventoryCardTheme = InventoryCardTheme.Ball,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
@@ -1760,6 +1807,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Price = 150,
             Description = "A rolling toy that drops into the room with physics and gives the dogs another object to chase.",
             ShopSpritePath = "UI/Figma/Shop/turbo_roll",
+            GeneratedShopSpritePath = "UI/Generated/Shop/toy_turbo_roll",
+            PreviewSpritePath = "UI/Figma/Shop/turbo_roll",
+            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Wheel",
+            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
             InventorySpritePath = "UI/Figma/HomeInventory/item_roll",
             InventoryCardTheme = InventoryCardTheme.Roll,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Wheel",
@@ -1775,6 +1826,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Price = 150,
             Description = "A second ball-style toy tier that uses the same room ball family in this milestone.",
             ShopSpritePath = "UI/Figma/Shop/star_toy",
+            GeneratedShopSpritePath = "UI/Generated/Shop/toy_star_ball",
+            PreviewSpritePath = "UI/Figma/Shop/star_toy",
+            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
+            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
             InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
             InventoryCardTheme = InventoryCardTheme.Ball,
             RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
@@ -1796,7 +1851,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             AppearsInInventory = false,
             DisabledInShop = true,
             DisabledReason = "Clothing stays visible but disabled in this milestone.",
-            Description = "Clothing is still presentation-only for now."
+            Description = "Clothing is still presentation-only for now.",
+            PreviewMode = PawPalShopPreviewMode.SpriteOnly
         });
 
         AddCatalogItem(new PawPalCatalogItemDefinition
@@ -1809,7 +1865,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             AppearsInInventory = false,
             DisabledInShop = true,
             DisabledReason = "Furniture stays visible but disabled in this milestone.",
-            Description = "Furniture purchasing is intentionally deferred."
+            Description = "Furniture purchasing is intentionally deferred.",
+            PreviewMode = PawPalShopPreviewMode.SpriteOnly
         });
     }
 
@@ -1826,6 +1883,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             StarterQuantity = starterOwned ? 1 : 0,
             Description = "A visible collar that can be equipped from the Home inventory for the active dog.",
             ShopSpritePath = shopSpritePath,
+            GeneratedShopSpritePath = "UI/Generated/Shop/" + id,
+            PreviewSpritePath = shopSpritePath,
+            PreviewPrefabResourcePath = collarPrefabResourcePath,
+            PreviewMode = PawPalShopPreviewMode.WearableOnDog,
             InventorySpritePath = shopSpritePath,
             InventoryCardTheme = inventoryCardTheme,
             CollarPrefabResourcePath = collarPrefabResourcePath,
@@ -1912,6 +1973,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
             ValidateCatalogResourcePath(item.Id, "collar prefab", item.CollarPrefabResourcePath);
             ValidateCatalogResourcePath(item.Id, "room prefab", item.RoomPrefabResourcePath);
+            ValidateCatalogResourcePath(item.Id, "shop preview prefab", item.PreviewPrefabResourcePath);
         }
     }
 
