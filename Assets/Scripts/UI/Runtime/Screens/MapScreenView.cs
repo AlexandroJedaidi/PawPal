@@ -152,6 +152,7 @@ public class MapScreenView : AppScreenViewBase
     private TextMeshProUGUI competitionDogNameLabel;
     private MapMode currentMode;
     private ResponsiveFigmaFrameLayout frameLayout;
+    private MapWalkPlannerController walkPlanner;
 
     protected override bool UseScreenContainer
     {
@@ -278,12 +279,6 @@ public class MapScreenView : AppScreenViewBase
 
         CreateWalkButton(parent, 11f, 699f, delegate
         {
-            PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-            if (runtime != null)
-            {
-                runtime.WalkActiveDog();
-            }
-
             SetMode(MapMode.Walk);
         });
 
@@ -297,15 +292,6 @@ public class MapScreenView : AppScreenViewBase
     {
         CreateBackgroundImage(parent, "WalkBackground", "UI/Figma/Map/map_walk_background", -65f, 0f, 524f, 786f);
 
-        Image path = CreateImageNode(parent, "WalkPath", UiTheme.RoundedTenSprite, new Color32(255, 148, 148, 255), 102f, 504f, 14f, 133f);
-        path.type = Image.Type.Sliced;
-        path.preserveAspect = false;
-
-        CreatePawMarker(parent, 87f, 482f);
-        CreateEncounter(parent, 268f, 576f);
-        CreateEncounter(parent, 351f, 177f);
-        CreateEncounter(parent, 28f, 240f);
-
         CreateLocationHotspot(parent, "WalkHomeHotspot", 43f, 593f, 67f, 64f, "Home", "icon_home_brand", 30f, delegate
         {
             shell.ShowScreen(AppScreenId.Home);
@@ -317,7 +303,11 @@ public class MapScreenView : AppScreenViewBase
         });
 
         CreateBackgroundImage(parent, "WalkSmallSign", "UI/Figma/Map/walk_small_sign", 135f, 381f, 57f, 13f);
-        CreateWalkButton(parent, 11f, 699f, null);
+        walkPlanner = parent.gameObject.AddComponent<MapWalkPlannerController>();
+        walkPlanner.Initialize(shell, sprites, delegate
+        {
+            SetMode(MapMode.Base);
+        });
     }
 
     private void BuildCompetitionState(RectTransform parent)
@@ -628,6 +618,10 @@ public class MapScreenView : AppScreenViewBase
         if (walkRoot != null)
         {
             walkRoot.gameObject.SetActive(mode == MapMode.Walk);
+            if (mode == MapMode.Walk && walkPlanner != null)
+            {
+                walkPlanner.EnterPlanner();
+            }
         }
 
         if (competitionRoot != null)
@@ -942,6 +936,11 @@ public class MapScreenView : AppScreenViewBase
         {
             PawPalDogState activeDog = runtime.ActiveDog;
             competitionDogNameLabel.text = activeDog == null || string.IsNullOrEmpty(activeDog.DisplayName) ? "Dog" : activeDog.DisplayName;
+        }
+
+        if (walkPlanner != null)
+        {
+            walkPlanner.RefreshRuntimeState();
         }
     }
 

@@ -18,6 +18,8 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
     private const float MinimumZoom = 0.7f;
     private const float MaximumZoom = 3.2f;
     private const float StandaloneFramePadding = 1.35f;
+    private const float SpriteCardFramePadding = 1.18f;
+    private const float SpriteCardDepth = 0.035f;
     private const float WearableFocusPadding = 2.8f;
     private const float WearableDogHeightPadding = 0.18f;
     private const int AnimatorBaseLayerIndex = 0;
@@ -69,6 +71,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
     private Transform focusRoot;
     private Camera previewCamera;
     private readonly List<Material> runtimeMaterials = new List<Material>();
+    private readonly List<Mesh> runtimeMeshes = new List<Mesh>();
     private readonly List<Camera> sceneCamerasWithPreviewLayer = new List<Camera>();
     private Animator previewDogAnimator;
     private Coroutine previewDogAnimationRoutine;
@@ -95,7 +98,13 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         EnsureUi();
         ClearPreview();
 
-        if (item == null || item.PreviewMode == PawPalShopPreviewMode.SpriteOnly || !TryBuildPreview(item))
+        if (item != null && item.PreviewMode != PawPalShopPreviewMode.SpriteOnly && TryBuildPreview(item))
+        {
+            return;
+        }
+
+        ClearPreview();
+        if (item == null || !TryBuildSpritePreview(item))
         {
             ShowSpriteFallback(item);
         }
@@ -286,6 +295,58 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         return true;
     }
 
+    private bool TryBuildSpritePreview(PawPalCatalogItemDefinition item)
+    {
+        Sprite sprite = ResolvePreviewSprite(item);
+        if (sprite == null || sprite == UiTheme.WhiteSprite)
+        {
+            return false;
+        }
+
+        activePreviewMode = PawPalShopPreviewMode.SpriteOnly;
+        CreatePreviewStage();
+        modelRoot = new GameObject("ShopItemPreviewSprite").transform;
+        modelRoot.SetParent(stageRoot.transform, false);
+        modelRoot.localPosition = Vector3.zero;
+        modelRoot.localRotation = Quaternion.identity;
+        modelRoot.localScale = Vector3.one;
+
+        GameObject card = new GameObject("SpriteCard");
+        card.hideFlags = HideFlags.HideAndDontSave;
+        card.transform.SetParent(modelRoot, false);
+        card.transform.localPosition = Vector3.zero;
+        card.transform.localRotation = Quaternion.identity;
+        card.transform.localScale = Vector3.one;
+
+        MeshFilter meshFilter = card.AddComponent<MeshFilter>();
+        MeshRenderer meshRenderer = card.AddComponent<MeshRenderer>();
+        Material spriteMaterial = CreateSpritePreviewMaterial(sprite);
+        if (spriteMaterial == null)
+        {
+            return false;
+        }
+
+        meshFilter.sharedMesh = CreateSpriteCardMesh(sprite);
+        meshRenderer.sharedMaterial = spriteMaterial;
+        focusRoot = card.transform;
+
+        SetLayerRecursively(stageRoot.transform, PreviewLayer);
+        if (!TryFrameModel(SpriteCardFramePadding))
+        {
+            return false;
+        }
+
+        fallbackImage.enabled = false;
+        previewImage.enabled = true;
+        previewImage.texture = renderTexture;
+        previewYaw = 0f;
+        zoomScale = 1f;
+        ApplyModelRotation();
+        ApplyCameraZoom();
+        RenderPreview();
+        return true;
+    }
+
     private bool BuildWearablePreview(PawPalCatalogItemDefinition item, GameObject wearablePrefab)
     {
         GameObject dogPrefab = Resources.Load<GameObject>(PreviewDogResourcePath);
@@ -372,6 +433,34 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         string spritePath = ResolveFallbackSpritePath(item);
         fallbackImage.sprite = sprites != null ? sprites.GetResourceSprite(spritePath) : UiTheme.WhiteSprite;
         fallbackImage.enabled = true;
+    }
+
+    private Sprite ResolvePreviewSprite(PawPalCatalogItemDefinition item)
+    {
+        string spritePath = ResolveFallbackSpritePath(item);
+        if (string.IsNullOrEmpty(spritePath))
+        {
+            return null;
+        }
+
+        if (sprites != null)
+        {
+            return sprites.GetResourceSprite(spritePath);
+        }
+
+        Sprite sprite = Resources.Load<Sprite>(spritePath);
+        if (sprite != null)
+        {
+            return sprite;
+        }
+
+        Texture2D texture = Resources.Load<Texture2D>(spritePath);
+        if (texture == null)
+        {
+            return null;
+        }
+
+        return Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
     }
 
     private static string ResolveFallbackSpritePath(PawPalCatalogItemDefinition item)
@@ -461,6 +550,11 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
     private bool TryFrameModel()
     {
+        return TryFrameModel(StandaloneFramePadding);
+    }
+
+    private bool TryFrameModel(float standaloneFramePadding)
+    {
         Bounds fullBounds;
         if (!TryGetRendererBounds(modelRoot, out fullBounds))
         {
@@ -489,7 +583,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
         float size = wearableFocus
             ? Mathf.Max(largestExtent * WearableFocusPadding, fullBounds.size.y * WearableDogHeightPadding)
-            : largestExtent * StandaloneFramePadding;
+            : largestExtent * standaloneFramePadding;
 
         baseOrthographicSize = Mathf.Max(0.05f, size);
         previewCamera.orthographicSize = baseOrthographicSize;
@@ -498,6 +592,119 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         previewCamera.transform.position = center + new Vector3(0f, baseOrthographicSize * 0.08f, -cameraDistance);
         previewCamera.transform.LookAt(center + Vector3.up * baseOrthographicSize * 0.02f);
         return true;
+    }
+
+    private Mesh CreateSpriteCardMesh(Sprite sprite)
+    {
+        Vector2 spriteSize = sprite != null ? sprite.bounds.size : Vector2.one;
+        float width = Mathf.Max(0.01f, spriteSize.x);
+        float height = Mathf.Max(0.01f, spriteSize.y);
+        float halfWidth = width * 0.5f;
+        float halfHeight = height * 0.5f;
+        float halfDepth = Mathf.Max(SpriteCardDepth, Mathf.Min(width, height) * 0.012f) * 0.5f;
+
+        Rect textureRect = sprite.textureRect;
+        Texture texture = sprite.texture;
+        float textureWidth = texture != null ? Mathf.Max(1f, texture.width) : 1f;
+        float textureHeight = texture != null ? Mathf.Max(1f, texture.height) : 1f;
+        float uMin = textureRect.xMin / textureWidth;
+        float uMax = textureRect.xMax / textureWidth;
+        float vMin = textureRect.yMin / textureHeight;
+        float vMax = textureRect.yMax / textureHeight;
+
+        Mesh mesh = new Mesh();
+        mesh.name = "ShopSpritePreviewCardMesh";
+        mesh.hideFlags = HideFlags.HideAndDontSave;
+        mesh.vertices = new[]
+        {
+            new Vector3(-halfWidth, -halfHeight, -halfDepth),
+            new Vector3(-halfWidth, halfHeight, -halfDepth),
+            new Vector3(halfWidth, halfHeight, -halfDepth),
+            new Vector3(halfWidth, -halfHeight, -halfDepth),
+            new Vector3(-halfWidth, -halfHeight, halfDepth),
+            new Vector3(halfWidth, -halfHeight, halfDepth),
+            new Vector3(halfWidth, halfHeight, halfDepth),
+            new Vector3(-halfWidth, halfHeight, halfDepth)
+        };
+        mesh.uv = new[]
+        {
+            new Vector2(uMin, vMin),
+            new Vector2(uMin, vMax),
+            new Vector2(uMax, vMax),
+            new Vector2(uMax, vMin),
+            new Vector2(uMin, vMin),
+            new Vector2(uMax, vMin),
+            new Vector2(uMax, vMax),
+            new Vector2(uMin, vMax)
+        };
+        mesh.triangles = new[]
+        {
+            0, 1, 2,
+            0, 2, 3,
+            4, 5, 6,
+            4, 6, 7
+        };
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        runtimeMeshes.Add(mesh);
+        return mesh;
+    }
+
+    private Material CreateSpritePreviewMaterial(Sprite sprite)
+    {
+        if (sprite == null || sprite.texture == null)
+        {
+            return null;
+        }
+
+        Shader shader = Shader.Find("Sprites/Default");
+        if (shader == null)
+        {
+            shader = Shader.Find("Unlit/Transparent");
+        }
+
+        if (shader == null)
+        {
+            shader = Shader.Find("Universal Render Pipeline/Unlit");
+        }
+
+        if (shader == null)
+        {
+            return null;
+        }
+
+        Material material = new Material(shader);
+        material.name = "ShopSpritePreviewMaterial";
+        material.hideFlags = HideFlags.HideAndDontSave;
+        material.renderQueue = 3000;
+
+        if (material.HasProperty("_BaseMap"))
+        {
+            material.SetTexture("_BaseMap", sprite.texture);
+        }
+
+        if (material.HasProperty("_MainTex"))
+        {
+            material.SetTexture("_MainTex", sprite.texture);
+        }
+
+        if (material.HasProperty("_BaseColor"))
+        {
+            material.SetColor("_BaseColor", Color.white);
+        }
+
+        if (material.HasProperty("_Color"))
+        {
+            material.SetColor("_Color", Color.white);
+        }
+
+        if (material.HasProperty("_Cull"))
+        {
+            material.SetFloat("_Cull", 0f);
+        }
+
+        runtimeMaterials.Add(material);
+        return material;
     }
 
     private static bool TryGetRendererBounds(Transform root, out Bounds bounds)
@@ -1137,6 +1344,16 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         }
 
         runtimeMaterials.Clear();
+
+        for (int i = 0; i < runtimeMeshes.Count; i++)
+        {
+            if (runtimeMeshes[i] != null)
+            {
+                Destroy(runtimeMeshes[i]);
+            }
+        }
+
+        runtimeMeshes.Clear();
 
         if (stageRoot != null)
         {

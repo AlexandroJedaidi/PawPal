@@ -12,8 +12,6 @@ public static class LivingRoomGraphicsEnhancerInstaller
 
     static LivingRoomGraphicsEnhancerInstaller()
     {
-        EditorApplication.delayCall += AutoInstallForDavidTest;
-        EditorSceneManager.sceneOpened += OnSceneOpened;
     }
 
     [MenuItem("PawFriends/Graphics/Install Living Room Graphics Enhancer")]

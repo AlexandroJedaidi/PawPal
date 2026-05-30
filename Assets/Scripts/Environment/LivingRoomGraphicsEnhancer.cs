@@ -13,12 +13,16 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private const string WindowFillLightName = "Window Soft Fill";
     private const string SofaFillLightName = "Sofa Warm Fill";
     private const string ReflectionProbeName = "Living Room Reflection Probe";
+    private const float RoomFootprintPadding = 0.85f;
+    private const float RoomRendererMaxFootprintMultiplier = 1.8f;
+    private const float MinimumRoomBoundsHeight = 3.25f;
+    private const float MinimumRoomBoundsCenterY = 1.4f;
 
     [Header("Apply")]
     [SerializeField] private bool applyOnEnable = true;
     [SerializeField] private bool configureMainCamera = true;
     [SerializeField] private bool configureRenderSettings = true;
-    [SerializeField] private bool configureSkybox = true;
+    [SerializeField] private bool configureSkybox;
     [SerializeField] private bool configurePostProcessing = true;
     [SerializeField] private bool configureReflectionProbe = true;
     [SerializeField] private bool configureQualityInPlayMode = true;
@@ -222,6 +226,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void ConfigureSkybox()
     {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
         Material skybox = ResolveRuntimeSkyboxMaterial();
         if (skybox == null)
         {
@@ -548,12 +557,18 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     {
         bool hasBounds = false;
         Bounds bounds = new Bounds(transform.position, new Vector3(6f, 3f, 6f));
+        bool hasRoomFootprint = TryResolveRoomFootprint(out Bounds roomFootprint);
         Renderer[] renderers = FindSceneObjects<Renderer>();
 
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer renderer = renderers[i];
             if (!IsSceneObject(renderer) || !renderer.enabled || IsEffectRenderer(renderer))
+            {
+                continue;
+            }
+
+            if (hasRoomFootprint && !IsInsideRoomFootprint(renderer.bounds, roomFootprint))
             {
                 continue;
             }
@@ -571,10 +586,75 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
         if (!hasBounds)
         {
+            if (hasRoomFootprint)
+            {
+                return CreateFallbackRoomBounds(roomFootprint);
+            }
+
             return bounds;
         }
 
         bounds.Expand(new Vector3(0.5f, 0.25f, 0.5f));
+        bounds = EnsureMinimumRoomHeight(bounds);
+        return bounds;
+    }
+
+    private bool TryResolveRoomFootprint(out Bounds footprint)
+    {
+        DogRoomAgent[] agents = FindSceneObjects<DogRoomAgent>();
+        for (int i = 0; i < agents.Length; i++)
+        {
+            DogRoomAgent agent = agents[i];
+            if (!IsSceneObject(agent) || !agent.TryGetRoomBounds(out footprint))
+            {
+                continue;
+            }
+
+            footprint.Expand(new Vector3(RoomFootprintPadding * 2f, 0f, RoomFootprintPadding * 2f));
+            return true;
+        }
+
+        footprint = new Bounds();
+        return false;
+    }
+
+    private static bool IsInsideRoomFootprint(Bounds bounds, Bounds footprint)
+    {
+        Vector3 center = bounds.center;
+        if (center.x < footprint.min.x || center.x > footprint.max.x ||
+            center.z < footprint.min.z || center.z > footprint.max.z)
+        {
+            return false;
+        }
+
+        return bounds.size.x <= footprint.size.x * RoomRendererMaxFootprintMultiplier &&
+               bounds.size.z <= footprint.size.z * RoomRendererMaxFootprintMultiplier;
+    }
+
+    private static Bounds CreateFallbackRoomBounds(Bounds footprint)
+    {
+        Vector3 center = new Vector3(footprint.center.x, MinimumRoomBoundsCenterY, footprint.center.z);
+        Vector3 size = new Vector3(
+            Mathf.Max(6f, footprint.size.x),
+            MinimumRoomBoundsHeight,
+            Mathf.Max(6f, footprint.size.z));
+        return new Bounds(center, size);
+    }
+
+    private static Bounds EnsureMinimumRoomHeight(Bounds bounds)
+    {
+        if (bounds.size.y >= MinimumRoomBoundsHeight)
+        {
+            return bounds;
+        }
+
+        Vector3 center = bounds.center;
+        center.y = Mathf.Max(center.y, MinimumRoomBoundsCenterY);
+        bounds.center = center;
+
+        Vector3 size = bounds.size;
+        size.y = MinimumRoomBoundsHeight;
+        bounds.size = size;
         return bounds;
     }
 

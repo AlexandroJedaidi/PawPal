@@ -26,6 +26,8 @@ public class DogDetailsWidgetView : MonoBehaviour
     private RectTransform statsHeader;
     private RectTransform statsFrame;
     private TextMeshProUGUI dogNameLabel;
+    private TextMeshProUGUI walkStaminaValueLabel;
+    private Image walkStaminaFill;
     private TextMeshProUGUI enduranceValueLabel;
     private TextMeshProUGUI mobilityValueLabel;
     private TextMeshProUGUI speedValueLabel;
@@ -277,20 +279,20 @@ public class DogDetailsWidgetView : MonoBehaviour
         statsFrame.sizeDelta = new Vector2(207f, 105.6f);
         statsFrame.anchoredPosition = new Vector2(19.5f, -139f);
 
-        BuildEnergyStat(statsFrame, sprites);
+        BuildWalkStaminaStat(statsFrame, sprites);
         BuildMainStats(statsFrame, sprites);
     }
 
-    private void BuildEnergyStat(RectTransform parent, UiSpriteLibrary sprites)
+    private void BuildWalkStaminaStat(RectTransform parent, UiSpriteLibrary sprites)
     {
-        RectTransform group = UiFactory.CreateRect("EnergyStat", parent);
+        RectTransform group = UiFactory.CreateRect("WalkStaminaStat", parent);
         group.anchorMin = new Vector2(0f, 1f);
         group.anchorMax = new Vector2(0f, 1f);
         group.pivot = new Vector2(0f, 1f);
         group.sizeDelta = new Vector2(47f, 49.8f);
         group.anchoredPosition = new Vector2(0f, -27.9f);
 
-        Image graph = UiFactory.CreateImage("Graph", group, sprites.GetResourceSprite("UI/Figma/HomeStats/graph_energy"), Color.white);
+        Image graph = UiFactory.CreateImage("Graph", group, UiTheme.CircleSprite, SupportCream);
         graph.type = Image.Type.Simple;
         graph.preserveAspect = false;
         graph.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -299,16 +301,28 @@ public class DogDetailsWidgetView : MonoBehaviour
         graph.rectTransform.sizeDelta = new Vector2(31.8f, 31.8f);
         graph.rectTransform.anchoredPosition = new Vector2(7.6f, 0f);
 
-        Image icon = UiFactory.CreateImage("Icon", graph.rectTransform, sprites.GetResourceSprite("UI/Figma/HomeStats/icon_energy"), Color.white);
+        walkStaminaFill = UiFactory.CreateImage("Fill", graph.rectTransform, UiTheme.CircleSprite, UiTheme.NavBrand);
+        walkStaminaFill.type = Image.Type.Filled;
+        walkStaminaFill.fillMethod = Image.FillMethod.Radial360;
+        walkStaminaFill.fillOrigin = (int)Image.Origin360.Top;
+        walkStaminaFill.fillClockwise = true;
+        walkStaminaFill.preserveAspect = false;
+        UiFactory.Stretch(walkStaminaFill.rectTransform, 0f, 0f, 0f, 0f);
+
+        Image icon = UiFactory.CreateImage("Icon", graph.rectTransform, sprites.GetWhiteIcon("icon_paw_brand"), new Color(1f, 1f, 1f, 0.26f));
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
         icon.rectTransform.anchorMin = new Vector2(0f, 1f);
         icon.rectTransform.anchorMax = new Vector2(0f, 1f);
         icon.rectTransform.pivot = new Vector2(0f, 1f);
-        icon.rectTransform.sizeDelta = new Vector2(18f, 18f);
-        icon.rectTransform.anchoredPosition = new Vector2(6.9f, -7.1f);
+        icon.rectTransform.sizeDelta = new Vector2(15f, 15f);
+        icon.rectTransform.anchoredPosition = new Vector2(8.4f, -8.2f);
 
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", group, "Energy", 13, EnergyLabelBlack, FontStyles.Normal, TextAlignmentOptions.Center);
+        walkStaminaValueLabel = UiFactory.CreateLabel("Value", graph.rectTransform, "100", 11, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+        ConfigureCompactLabel(walkStaminaValueLabel, UiTheme.NavExtraBoldFont, 10f);
+        UiFactory.Stretch(walkStaminaValueLabel.rectTransform, 1f, 1f, 1f, 1f);
+
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", group, "Walk", 13, EnergyLabelBlack, FontStyles.Normal, TextAlignmentOptions.Center);
         ConfigureCompactLabel(label, UiTheme.DefaultFont, 11f);
         label.rectTransform.anchorMin = new Vector2(0f, 1f);
         label.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -470,6 +484,20 @@ public class DogDetailsWidgetView : MonoBehaviour
         if (focusValueLabel != null)
         {
             focusValueLabel.text = dog.Focus.ToString();
+        }
+
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        PawPalWalkStaminaSnapshot walkStamina = runtime != null
+            ? runtime.GetWalkStaminaSnapshot(dog)
+            : new PawPalWalkStaminaSnapshot();
+        if (walkStaminaValueLabel != null)
+        {
+            walkStaminaValueLabel.text = Mathf.RoundToInt(walkStamina.Current).ToString();
+        }
+
+        if (walkStaminaFill != null)
+        {
+            walkStaminaFill.fillAmount = walkStamina.Fill01;
         }
 
         RefreshNeedVisual(PawPalDogNeed.Food, dog.Food01);

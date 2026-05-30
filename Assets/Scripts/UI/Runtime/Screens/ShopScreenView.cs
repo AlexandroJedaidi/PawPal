@@ -75,11 +75,22 @@ public class ShopScreenView : AppScreenViewBase
     private static readonly Color32 OfferTimerFill = new Color32(249, 232, 222, 255);
     private static readonly Color32 OfferBodyText = new Color32(70, 54, 46, 255);
     private static readonly Rect StandardShopImageRect = new Rect(15.5f, 15f, 84f, 84f);
+    private const int RuntimeShapeSupersample = 4;
+    private const float StorefrontHeight = 126f;
+    private const float AwningHeight = 98f;
+    private const float AwningPanelHeight = 93f;
+    private const float AwningStripeWidth = 63f;
+    private const float AwningBottomRadius = 25f;
+    private const float ShopSignSize = 126f;
 
     private static readonly Dictionary<string, Sprite> RuntimeSpriteCache = new Dictionary<string, Sprite>();
     private static readonly Dictionary<string, bool> ResourceSpriteExistsCache = new Dictionary<string, bool>();
 
     private RectTransform exactFrame;
+    private RectTransform storefrontRoot;
+    private Image storefrontAwningShadow;
+    private Image storefrontAwning;
+    private RectTransform storefrontSignRect;
     private RectTransform shopViewport;
     private RectTransform scrollContent;
     private ScrollRect shopScrollRect;
@@ -174,6 +185,7 @@ public class ShopScreenView : AppScreenViewBase
             frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame);
         }
 
+        ApplyStorefrontLayout();
         ApplyViewportLayout();
     }
 
@@ -198,38 +210,42 @@ public class ShopScreenView : AppScreenViewBase
 
     private void BuildStorefront(RectTransform parent)
     {
-        RectTransform root = CreateNode("Storefront", parent, 6f, 0f, 381f, 126f);
+        storefrontRoot = UiFactory.CreateRect("Storefront", parent);
+        storefrontRoot.anchorMin = new Vector2(0.5f, 1f);
+        storefrontRoot.anchorMax = new Vector2(0.5f, 1f);
+        storefrontRoot.pivot = new Vector2(0.5f, 1f);
+        storefrontRoot.sizeDelta = new Vector2(UiTheme.ReferenceWidth, StorefrontHeight);
+        storefrontRoot.anchoredPosition = Vector2.zero;
 
-        BuildAwningStripe(root, "ShadowLeft", 0f, 5f, 54.43287f, 93f, true, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowMiddle1", 54.11935f, 5f, 54.43287f, 93f, false, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowMiddle2", 108.23863f, 5f, 55.50019f, 93f, false, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowMiddle3", 163.44034f, 5f, 54.43287f, 93f, false, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowMiddle4", 217.55966f, 5f, 54.43287f, 93f, false, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowMiddle5", 271.67896f, 5f, 54.43287f, 93f, false, false, new Color32(243, 243, 243, 255));
-        BuildAwningStripe(root, "ShadowRight", 325.56714f, 5f, 54.43287f, 93f, false, true, new Color32(243, 243, 243, 255));
+        storefrontAwningShadow = UiFactory.CreateImage(
+            "AwningShadow",
+            storefrontRoot,
+            GetShopAwningSprite(Mathf.RoundToInt(UiTheme.ReferenceWidth), Mathf.RoundToInt(AwningHeight), true),
+            Color.white);
+        storefrontAwningShadow.type = Image.Type.Simple;
+        storefrontAwningShadow.preserveAspect = false;
+        storefrontAwningShadow.raycastTarget = false;
 
-        BuildAwningStripe(root, "FrontLeft", 0f, 0f, 54.43287f, 93f, true, false, new Color32(255, 86, 86, 255));
-        BuildAwningStripe(root, "FrontMiddle1", 54.11935f, 0f, 54.43287f, 93f, false, false, Color.white);
-        BuildAwningStripe(root, "FrontMiddle2", 108.23863f, 0f, 55.50019f, 93f, false, false, new Color32(255, 86, 86, 255));
-        BuildAwningStripe(root, "FrontMiddle3", 163.44034f, 0f, 54.43287f, 93f, false, false, Color.white);
-        BuildAwningStripe(root, "FrontMiddle4", 217.55966f, 0f, 54.43287f, 93f, false, false, new Color32(255, 86, 86, 255));
-        BuildAwningStripe(root, "FrontMiddle5", 271.67896f, 0f, 54.43287f, 93f, false, false, Color.white);
-        BuildAwningStripe(root, "FrontRight", 325.56714f, 0f, 54.43287f, 93f, false, true, new Color32(255, 86, 86, 255));
+        storefrontAwning = UiFactory.CreateImage(
+            "Awning",
+            storefrontRoot,
+            GetShopAwningSprite(Mathf.RoundToInt(UiTheme.ReferenceWidth), Mathf.RoundToInt(AwningHeight), false),
+            Color.white);
+        storefrontAwning.type = Image.Type.Simple;
+        storefrontAwning.preserveAspect = false;
+        storefrontAwning.raycastTarget = false;
 
         Image sign = UiFactory.CreateImage(
             "ShopSign",
-            root,
+            storefrontRoot,
             sprites.GetResourceSprite("UI/Figma/Shop/storefront_sign"),
             Color.white);
         sign.type = Image.Type.Simple;
         sign.preserveAspect = false;
         sign.raycastTarget = false;
-        RectTransform signRect = sign.rectTransform;
-        signRect.anchorMin = new Vector2(0f, 1f);
-        signRect.anchorMax = new Vector2(0f, 1f);
-        signRect.pivot = new Vector2(0f, 1f);
-        signRect.sizeDelta = new Vector2(126f, 126f);
-        signRect.anchoredPosition = new Vector2(125f, 0f);
+        storefrontSignRect = sign.rectTransform;
+
+        ApplyStorefrontLayout();
     }
 
     private void BuildHeader(RectTransform parent)
@@ -320,6 +336,48 @@ public class ShopScreenView : AppScreenViewBase
         shopViewport.sizeDelta = new Vector2(382f, viewportHeight);
         shopViewport.anchoredPosition = new Vector2(6f, -viewportTop);
         UpdateScrollContentHeight();
+    }
+
+    private void ApplyStorefrontLayout()
+    {
+        if (storefrontRoot == null)
+        {
+            return;
+        }
+
+        float availableWidth = frameLayout.AvailableWidth > 0f ? frameLayout.AvailableWidth : UiTheme.ReferenceWidth;
+        RectTransform host = exactFrame != null ? exactFrame.parent as RectTransform : null;
+        if (host != null && host.rect.width > 0f)
+        {
+            availableWidth = Mathf.Max(availableWidth, host.rect.width);
+        }
+
+        float storefrontWidth = Mathf.Max(UiTheme.ReferenceWidth, availableWidth);
+        int spriteWidth = Mathf.Max(Mathf.RoundToInt(storefrontWidth), Mathf.RoundToInt(UiTheme.ReferenceWidth));
+        int spriteHeight = Mathf.RoundToInt(AwningHeight);
+
+        storefrontRoot.anchorMin = new Vector2(0.5f, 1f);
+        storefrontRoot.anchorMax = new Vector2(0.5f, 1f);
+        storefrontRoot.pivot = new Vector2(0.5f, 1f);
+        storefrontRoot.sizeDelta = new Vector2(storefrontWidth, StorefrontHeight);
+        storefrontRoot.anchoredPosition = Vector2.zero;
+
+        if (storefrontAwningShadow != null)
+        {
+            storefrontAwningShadow.sprite = GetShopAwningSprite(spriteWidth, spriteHeight, true);
+            SetTopLeft(storefrontAwningShadow.rectTransform, 0f, 5f, storefrontWidth, AwningHeight);
+        }
+
+        if (storefrontAwning != null)
+        {
+            storefrontAwning.sprite = GetShopAwningSprite(spriteWidth, spriteHeight, false);
+            SetTopLeft(storefrontAwning.rectTransform, 0f, 0f, storefrontWidth, AwningHeight);
+        }
+
+        if (storefrontSignRect != null)
+        {
+            SetTopLeft(storefrontSignRect, (storefrontWidth - ShopSignSize) * 0.5f, 0f, ShopSignSize, ShopSignSize);
+        }
     }
 
     private void BuildSpecialOfferSection(RectTransform parent)
@@ -793,13 +851,13 @@ public class ShopScreenView : AppScreenViewBase
         switch (badgeKind)
         {
             case CardBadgeKind.Price:
-                CreatePointsPill(card, "Price", (115f - badgeWidth) * 0.5f, 91f, badgeWidth, 22f, badgeText);
+                CreatePointsPill(card, "Price", Mathf.Round((115f - badgeWidth) * 0.5f), 90f, badgeWidth, 24f, badgeText);
                 break;
             case CardBadgeKind.Owned:
-                CreateOwnedPill(card, "Owned", 29f, 92f, 57f, 20f, badgeText);
+                CreateOwnedPill(card, "Owned", 28f, 91f, 59f, 22f, badgeText);
                 break;
             case CardBadgeKind.Empty:
-                CreateEmptyPill(card, "Empty", 33f, 91f, badgeWidth, 20f);
+                CreateEmptyPill(card, "Empty", 33f, 91f, badgeWidth, 22f);
                 break;
         }
     }
@@ -833,7 +891,7 @@ public class ShopScreenView : AppScreenViewBase
         hitArea.color = new Color(1f, 1f, 1f, 0.002f);
         hitArea.raycastTarget = true;
 
-        BuildPanelShell(parent, 362f, 396.39624f, 10f, 2f, false);
+        BuildPanelShell(parent, 362f, 396f, 10f, 2f, false);
         BuildSectionHeader(parent, "BuyPointsHeader", 10f, 20f, 342f, 24f, "Buy PawPoints", null, 0f, 16, UiTheme.NavExtraBoldFont);
         CreateCloseButton(parent, "CloseBuyPoints", 331f, 20f, 21f, 21f, delegate
         {
@@ -841,18 +899,18 @@ public class ShopScreenView : AppScreenViewBase
             RefreshState();
         });
 
-        RectTransform packages = CreateNode("Packages", parent, 10f, 64f, 342f, 312.39624f);
-        BuildPointsPackage(packages, "Package200", 11.5f, 16.79874f, "200", "1.99\u20AC", null);
-        BuildPointsPackage(packages, "Package500", 177.5f, 0f, "500", "4.49\u20AC", "10% saved");
-        BuildPointsPackage(packages, "Package1000", 11.5f, 112.79874f, "1000", "8.99\u20AC", "10% saved");
-        BuildPointsPackage(packages, "Package2500", 177.5f, 112.79874f, "2500", "19.99\u20AC", "20% saved");
-        BuildPointsPackage(packages, "Package3500", 11.5f, 225.59749f, "3500", "25.99\u20AC", "25% saved");
-        BuildPointsPackage(packages, "Package5000", 177.5f, 225.59749f, "5000", "34.99\u20AC", "30% saved");
+        RectTransform packages = CreateNode("Packages", parent, 10f, 64f, 342f, 312f);
+        BuildPointsPackage(packages, "Package200", 12f, 17f, "200", "1.99\u20AC", null);
+        BuildPointsPackage(packages, "Package500", 177f, 0f, "500", "4.49\u20AC", "10% saved");
+        BuildPointsPackage(packages, "Package1000", 12f, 113f, "1000", "8.99\u20AC", "10% saved");
+        BuildPointsPackage(packages, "Package2500", 177f, 113f, "2500", "19.99\u20AC", "20% saved");
+        BuildPointsPackage(packages, "Package3500", 12f, 226f, "3500", "25.99\u20AC", "25% saved");
+        BuildPointsPackage(packages, "Package5000", 177f, 226f, "5000", "34.99\u20AC", "30% saved");
     }
 
     private void BuildPointsPackage(RectTransform parent, string name, float x, float y, string points, string cost, string discount)
     {
-        RectTransform root = CreateNode(name, parent, x, y, 153f, discount == null ? 70f : 86.79874f);
+        RectTransform root = CreateNode(name, parent, x, y, 153f, discount == null ? 70f : 87f);
         RectTransform ribbonRoot = null;
 
         if (!string.IsNullOrEmpty(discount))
@@ -861,19 +919,19 @@ public class ShopScreenView : AppScreenViewBase
             ribbonRoot.anchorMin = new Vector2(0f, 1f);
             ribbonRoot.anchorMax = new Vector2(0f, 1f);
             ribbonRoot.pivot = new Vector2(0.5f, 0.5f);
-            ribbonRoot.sizeDelta = new Vector2(81.59387f, 33.79875f);
-            ribbonRoot.anchoredPosition = new Vector2(115.83458f, -16.89937f);
-            ribbonRoot.localRotation = Quaternion.Euler(0f, 0f, 11.12f);
-            Image ribbon = UiFactory.CreateImage("Ribbon", ribbonRoot, GetRoundedRectSprite(79, 19, 0f, 0f, true), UiTheme.NavBrand);
+            ribbonRoot.sizeDelta = new Vector2(82f, 34f);
+            ribbonRoot.anchoredPosition = new Vector2(116f, -17f);
+            ribbonRoot.localRotation = Quaternion.Euler(0f, 0f, 11f);
+            Image ribbon = UiFactory.CreateImage("Ribbon", ribbonRoot, GetRoundedRectSprite(80, 20, 0f, 0f, true), UiTheme.NavBrand);
             ribbon.type = Image.Type.Simple;
             ribbon.preserveAspect = false;
             ribbon.raycastTarget = false;
-            SetTopLeft(ribbon.rectTransform, 1f, 7.48737f, 79.455f, 18.824f);
-            TextMeshProUGUI ribbonText = CreateText(ribbonRoot, "Text", discount, 14, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-            SetTopLeft(ribbonText.rectTransform, 2.22749f, -1.08813f, 77.64242f, 35.07465f);
+            SetTopLeft(ribbon.rectTransform, 1f, 7f, 80f, 20f);
+            TextMeshProUGUI ribbonText = CreateText(ribbonRoot, "Text", discount, 13, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+            SetTopLeft(ribbonText.rectTransform, 2f, 0f, 78f, 34f);
         }
 
-        RectTransform card = CreateNode("Card", root, 0f, discount == null ? 0f : 16.79874f, 153f, 70f);
+        RectTransform card = CreateNode("Card", root, 0f, discount == null ? 0f : 17f, 153f, 70f);
         Image fill = UiFactory.CreateImage("Fill", card, GetRoundedRectSprite(153, 70, 5f, 0f, true), SupportFill);
         fill.type = Image.Type.Sliced;
         fill.preserveAspect = false;
@@ -891,7 +949,7 @@ public class ShopScreenView : AppScreenViewBase
         SetTopLeft(border.rectTransform, 0f, 0f, 153f, 70f);
 
         CreatePackageCostBlock(card, 10f, 10f, points, cost);
-        CreateActionButton(card, "BuyButton", "Buy", 98f, 23f, 45f, 24f, true, delegate
+        CreateActionButton(card, "BuyButton", "Buy", 97f, 22f, 48f, 26f, true, delegate
         {
             PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
             if (runtime != null)
@@ -1267,41 +1325,43 @@ public class ShopScreenView : AppScreenViewBase
 
     private TextMeshProUGUI BuildBigPointsPill(RectTransform parent, float x, float y, float width, float height, string text)
     {
-        Image pill = UiFactory.CreateImage("Pill", parent, GetRoundedRectSprite(85, 30, 10f, 1.5f, false), CtaBlueDark);
-        pill.type = Image.Type.Sliced;
-        pill.preserveAspect = false;
-        pill.raycastTarget = false;
-        SetTopLeft(pill.rectTransform, x + 1f, y + 0.5f, 84f, 25f);
+        float bodyX = 11f;
+        float bodyY = 2f;
+        float bodyWidth = Mathf.Max(32f, width - bodyX);
+        float bodyHeight = Mathf.Max(24f, height - 4f);
 
-        Image pillFill = UiFactory.CreateImage("PillFill", parent, GetRoundedRectSprite(84, 25, 10f, 0f, true), Color.white);
+        Image pillFill = UiFactory.CreateImage("PillFill", parent, GetRoundedRectSprite(Mathf.RoundToInt(bodyWidth), Mathf.RoundToInt(bodyHeight), bodyHeight * 0.5f, 0f, true), Color.white);
         pillFill.type = Image.Type.Sliced;
         pillFill.preserveAspect = false;
         pillFill.raycastTarget = false;
-        SetTopLeft(pillFill.rectTransform, x + 1f, y + 0.5f, 84f, 25f);
+        SetTopLeft(pillFill.rectTransform, x + bodyX, y + bodyY, bodyWidth, bodyHeight);
 
-        Image pillBorder = UiFactory.CreateImage("PillBorder", parent, GetRoundedRectSprite(84, 25, 10f, 1.5f, false), CtaBlueDark);
+        Image pillBorder = UiFactory.CreateImage("PillBorder", parent, GetRoundedRectSprite(Mathf.RoundToInt(bodyWidth), Mathf.RoundToInt(bodyHeight), bodyHeight * 0.5f, 1.5f, false), CtaBlueDark);
         pillBorder.type = Image.Type.Sliced;
         pillBorder.preserveAspect = false;
         pillBorder.raycastTarget = false;
-        SetTopLeft(pillBorder.rectTransform, x + 1f, y + 0.5f, 84f, 25f);
+        SetTopLeft(pillBorder.rectTransform, x + bodyX, y + bodyY, bodyWidth, bodyHeight);
 
-        Image iconCircle = UiFactory.CreateImage("IconCircle", parent, UiTheme.CircleSprite, CtaBlue);
-        iconCircle.type = Image.Type.Simple;
+        Image iconCircle = UiFactory.CreateImage("IconCircle", parent, GetRoundedRectSprite(30, 30, 15f, 0f, true), CtaBlue);
+        iconCircle.type = Image.Type.Sliced;
         iconCircle.preserveAspect = false;
         iconCircle.raycastTarget = false;
         SetTopLeft(iconCircle.rectTransform, x, y, 30f, 30f);
-        Outline iconBorder = iconCircle.gameObject.AddComponent<Outline>();
-        iconBorder.effectColor = CtaBlueDark;
-        iconBorder.effectDistance = Vector2.zero;
 
-        Image pawIcon = UiFactory.CreateImage("PawIcon", parent, sprites.GetIcon("icon_paw_white"), Color.white);
+        Image iconBorder = UiFactory.CreateImage("IconBorder", parent, GetRoundedRectSprite(30, 30, 15f, 1.5f, false), CtaBlueDark);
+        iconBorder.type = Image.Type.Sliced;
+        iconBorder.preserveAspect = false;
+        iconBorder.raycastTarget = false;
+        SetTopLeft(iconBorder.rectTransform, x, y, 30f, 30f);
+
+        Image pawIcon = UiFactory.CreateImage("PawIcon", parent, sprites.GetWhiteIcon("icon_paw_white"), Color.white);
         pawIcon.type = Image.Type.Simple;
         pawIcon.preserveAspect = true;
         pawIcon.raycastTarget = false;
-        SetTopLeft(pawIcon.rectTransform, x + 3.5f, y + 3.5f, 23f, 23f);
+        SetTopLeft(pawIcon.rectTransform, x + 4f, y + 4f, 22f, 22f);
 
         TextMeshProUGUI label = CreateText(parent, "PointsText", text, 16, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(label.rectTransform, x + 30f, y + 0.5f, 55f, 25f);
+        SetTopLeft(label.rectTransform, x + 32f, y + bodyY, Mathf.Max(20f, width - 36f), bodyHeight);
         return label;
     }
 
@@ -1315,32 +1375,42 @@ public class ShopScreenView : AppScreenViewBase
 
     private void CreatePackagePointsPill(RectTransform parent, float x, float y, float width, string value)
     {
-        Image pillFill = UiFactory.CreateImage("PillFill", parent, GetRoundedRectSprite(Mathf.RoundToInt(width - 1f), 25, 10f, 0f, true), Color.white);
+        const float circleSize = 26f;
+        const float bodyX = 12f;
+        float bodyWidth = Mathf.Max(30f, Mathf.Round(width - bodyX));
+
+        Image pillFill = UiFactory.CreateImage("PillFill", parent, GetRoundedRectSprite(Mathf.RoundToInt(bodyWidth), 26, 13f, 0f, true), Color.white);
         pillFill.type = Image.Type.Sliced;
         pillFill.preserveAspect = false;
         pillFill.raycastTarget = false;
-        SetTopLeft(pillFill.rectTransform, x + 1f, y + 0.5f, width - 1f, 25f);
+        SetTopLeft(pillFill.rectTransform, x + bodyX, y, bodyWidth, 26f);
 
-        Image pillBorder = UiFactory.CreateImage("PillBorder", parent, GetRoundedRectSprite(Mathf.RoundToInt(width - 1f), 25, 10f, 1f, false), CtaBlueDark);
+        Image pillBorder = UiFactory.CreateImage("PillBorder", parent, GetRoundedRectSprite(Mathf.RoundToInt(bodyWidth), 26, 13f, 1.25f, false), CtaBlueDark);
         pillBorder.type = Image.Type.Sliced;
         pillBorder.preserveAspect = false;
         pillBorder.raycastTarget = false;
-        SetTopLeft(pillBorder.rectTransform, x + 1f, y + 0.5f, width - 1f, 25f);
+        SetTopLeft(pillBorder.rectTransform, x + bodyX, y, bodyWidth, 26f);
 
-        Image circle = UiFactory.CreateImage("Circle", parent, UiTheme.CircleSprite, CtaBlue);
-        circle.type = Image.Type.Simple;
+        Image circle = UiFactory.CreateImage("Circle", parent, GetRoundedRectSprite(26, 26, 13f, 0f, true), CtaBlue);
+        circle.type = Image.Type.Sliced;
         circle.preserveAspect = false;
         circle.raycastTarget = false;
-        SetTopLeft(circle.rectTransform, x, y, 26f, 26f);
+        SetTopLeft(circle.rectTransform, x, y, circleSize, circleSize);
 
-        Image paw = UiFactory.CreateImage("Paw", parent, sprites.GetIcon("icon_paw_white"), Color.white);
+        Image circleBorder = UiFactory.CreateImage("CircleBorder", parent, GetRoundedRectSprite(26, 26, 13f, 1.25f, false), CtaBlueDark);
+        circleBorder.type = Image.Type.Sliced;
+        circleBorder.preserveAspect = false;
+        circleBorder.raycastTarget = false;
+        SetTopLeft(circleBorder.rectTransform, x, y, circleSize, circleSize);
+
+        Image paw = UiFactory.CreateImage("Paw", parent, sprites.GetWhiteIcon("icon_paw_white"), Color.white);
         paw.type = Image.Type.Simple;
         paw.preserveAspect = true;
         paw.raycastTarget = false;
-        SetTopLeft(paw.rectTransform, x + 1.5f, y + 1.5f, 23f, 23f);
+        SetTopLeft(paw.rectTransform, x + 3f, y + 3f, 20f, 20f);
 
-        TextMeshProUGUI text = CreateText(parent, "PointsValue", value, 13, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(text.rectTransform, x + 30f, y + 3f, width - 39f, 19f);
+        TextMeshProUGUI text = CreateText(parent, "PointsValue", value, value.Length >= 4 ? 13 : 14, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(text.rectTransform, x + 30f, y + 2f, Mathf.Max(14f, width - 34f), 22f);
     }
 
     private void CreateCloseButton(RectTransform parent, string name, float x, float y, float width, float height, Action onClick)
@@ -1380,41 +1450,47 @@ public class ShopScreenView : AppScreenViewBase
 
     private void CreatePointsPill(RectTransform parent, string name, float x, float y, float width, float height, string value)
     {
+        width = Mathf.Round(width);
+        height = Mathf.Round(height);
         RectTransform pillRoot = CreateNode(name, parent, x, y, width, height);
 
-        float pillWidth = Mathf.Max(20f, width - 10f);
-        Image fill = UiFactory.CreateImage("Fill", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), 20, 10f, 0f, true), Color.white);
+        float circleSize = Mathf.Max(22f, height);
+        float bodyX = Mathf.Round(circleSize * 0.45f);
+        float bodyY = 1f;
+        float bodyHeight = Mathf.Max(20f, height - 2f);
+        float pillWidth = Mathf.Max(24f, width - bodyX);
+        Image fill = UiFactory.CreateImage("Fill", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), Mathf.RoundToInt(bodyHeight), bodyHeight * 0.5f, 0f, true), Color.white);
         fill.type = Image.Type.Sliced;
         fill.preserveAspect = false;
         fill.raycastTarget = false;
-        SetTopLeft(fill.rectTransform, 10f, 1f, pillWidth, 20f);
+        SetTopLeft(fill.rectTransform, bodyX, bodyY, pillWidth, bodyHeight);
 
-        Image border = UiFactory.CreateImage("Border", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), 20, 10f, 1f, false), CtaBlueDark);
+        Image border = UiFactory.CreateImage("Border", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), Mathf.RoundToInt(bodyHeight), bodyHeight * 0.5f, 1.25f, false), CtaBlueDark);
         border.type = Image.Type.Sliced;
         border.preserveAspect = false;
         border.raycastTarget = false;
-        SetTopLeft(border.rectTransform, 10f, 1f, pillWidth, 20f);
+        SetTopLeft(border.rectTransform, bodyX, bodyY, pillWidth, bodyHeight);
 
-        TextMeshProUGUI label = CreateText(pillRoot, "Value", value, 13, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.MidlineRight);
-        SetTopLeft(label.rectTransform, 24f, 1f, Mathf.Max(10f, width - 28f), 20f);
+        TextMeshProUGUI label = CreateText(pillRoot, "Value", value, height >= 24f ? 14 : 13, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(label.rectTransform, bodyX + 14f, bodyY, Mathf.Max(12f, width - bodyX - 17f), bodyHeight);
 
-        Image circle = UiFactory.CreateImage("Circle", pillRoot, UiTheme.CircleSprite, CtaBlue);
-        circle.type = Image.Type.Simple;
+        Image circle = UiFactory.CreateImage("Circle", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(circleSize), Mathf.RoundToInt(circleSize), circleSize * 0.5f, 0f, true), CtaBlue);
+        circle.type = Image.Type.Sliced;
         circle.preserveAspect = false;
         circle.raycastTarget = false;
-        SetTopLeft(circle.rectTransform, 0f, 0f, 22f, 22f);
+        SetTopLeft(circle.rectTransform, 0f, 0f, circleSize, circleSize);
 
-        Image circleBorder = UiFactory.CreateImage("CircleBorder", pillRoot, GetRoundedRectSprite(22, 22, 11f, 1f, false), CtaBlueDark);
+        Image circleBorder = UiFactory.CreateImage("CircleBorder", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(circleSize), Mathf.RoundToInt(circleSize), circleSize * 0.5f, 1.25f, false), CtaBlueDark);
         circleBorder.type = Image.Type.Sliced;
         circleBorder.preserveAspect = false;
         circleBorder.raycastTarget = false;
-        SetTopLeft(circleBorder.rectTransform, 0f, 0f, 22f, 22f);
+        SetTopLeft(circleBorder.rectTransform, 0f, 0f, circleSize, circleSize);
 
-        Image paw = UiFactory.CreateImage("Paw", pillRoot, sprites.GetIcon("icon_paw_white"), Color.white);
+        Image paw = UiFactory.CreateImage("Paw", pillRoot, sprites.GetWhiteIcon("icon_paw_white"), Color.white);
         paw.type = Image.Type.Simple;
         paw.preserveAspect = true;
         paw.raycastTarget = false;
-        SetTopLeft(paw.rectTransform, 2f, 2f, 18f, 18f);
+        SetTopLeft(paw.rectTransform, 3f, 3f, circleSize - 6f, circleSize - 6f);
     }
 
     private void CreateOwnedPill(RectTransform parent, string name, float x, float y, float width, float height, string value)
@@ -1425,8 +1501,8 @@ public class ShopScreenView : AppScreenViewBase
         fill.raycastTarget = false;
         SetTopLeft(fill.rectTransform, x, y, width, height);
 
-        TextMeshProUGUI label = CreateText(parent, name + "Text", value, 14, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(label.rectTransform, x + 3f, y + 1f, width - 6f, height - 2f);
+        TextMeshProUGUI label = CreateText(parent, name + "Text", value, 13, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(label.rectTransform, x + 3f, y, width - 6f, height);
     }
 
     private void CreateEmptyPill(RectTransform parent, string name, float x, float y, float width, float height)
@@ -1467,7 +1543,8 @@ public class ShopScreenView : AppScreenViewBase
         underline.raycastTarget = false;
         SetTopLeft(underline.rectTransform, 0f, 0f, width, height);
 
-        TextMeshProUGUI text = CreateText(buttonRect, "Label", label, 16, primary ? Color.white : ComingSoonGrey, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        int fontSize = height <= 26f ? 14 : 15;
+        TextMeshProUGUI text = CreateText(buttonRect, "Label", label, fontSize, primary ? Color.white : ComingSoonGrey, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
         SetTopLeft(text.rectTransform, 0f, 0f, width, height);
 
         UiFactory.AddButton(buttonRect.gameObject, delegate
@@ -1821,8 +1898,8 @@ public class ShopScreenView : AppScreenViewBase
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
-        rect.sizeDelta = new Vector2(width, height);
-        rect.anchoredPosition = new Vector2(x, -y);
+        rect.sizeDelta = new Vector2(SnapUi(width), SnapUi(height));
+        rect.anchoredPosition = new Vector2(SnapUi(x), -SnapUi(y));
         return rect;
     }
 
@@ -1832,8 +1909,8 @@ public class ShopScreenView : AppScreenViewBase
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.sizeDelta = new Vector2(width, height);
-        rect.anchoredPosition = new Vector2(0f, yOffset);
+        rect.sizeDelta = new Vector2(SnapUi(width), SnapUi(height));
+        rect.anchoredPosition = new Vector2(0f, SnapUi(yOffset));
         return rect;
     }
 
@@ -1842,8 +1919,8 @@ public class ShopScreenView : AppScreenViewBase
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
-        rect.sizeDelta = new Vector2(width, height);
-        rect.anchoredPosition = new Vector2(x, -y);
+        rect.sizeDelta = new Vector2(SnapUi(width), SnapUi(height));
+        rect.anchoredPosition = new Vector2(SnapUi(x), -SnapUi(y));
     }
 
     private static TextMeshProUGUI CreateText(Transform parent, string name, string value, int fontSize, Color32 color, TMP_FontAsset font, TextAlignmentOptions alignment)
@@ -1851,9 +1928,33 @@ public class ShopScreenView : AppScreenViewBase
         TextMeshProUGUI text = UiFactory.CreateLabel(name, parent, value, fontSize, color, FontStyles.Normal, alignment);
         text.font = font;
         text.enableAutoSizing = false;
+        text.extraPadding = true;
+        text.isTextObjectScaleStatic = true;
+        text.raycastTarget = false;
         text.textWrappingMode = TextWrappingModes.NoWrap;
         text.overflowMode = TextOverflowModes.Ellipsis;
         return text;
+    }
+
+    private static float SnapUi(float value)
+    {
+        return Mathf.Round(value);
+    }
+
+    private static int GetShapeSupersample(int width, int height)
+    {
+        int maxDimension = Mathf.Max(Mathf.Abs(width), Mathf.Abs(height));
+        if (maxDimension <= 160)
+        {
+            return RuntimeShapeSupersample;
+        }
+
+        if (maxDimension <= 260)
+        {
+            return 2;
+        }
+
+        return 1;
     }
 
     private static bool ResourceSpriteExists(string resourcePath)
@@ -1952,25 +2053,30 @@ public class ShopScreenView : AppScreenViewBase
 
     private static Sprite GetRoundedRectSprite(int width, int height, float radius, float border, bool fill)
     {
-        string key = "rr_" + width + "_" + height + "_" + radius + "_" + border + "_" + fill;
+        int shapeScale = GetShapeSupersample(width, height);
+        string key = "rr_" + width + "_" + height + "_" + radius + "_" + border + "_" + fill + "_s" + shapeScale;
         Sprite sprite;
         if (RuntimeSpriteCache.TryGetValue(key, out sprite))
         {
             return sprite;
         }
 
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int textureWidth = Mathf.Max(1, width * shapeScale);
+        int textureHeight = Mathf.Max(1, height * shapeScale);
+        float scaledRadius = radius * shapeScale;
+        float scaledBorder = border * shapeScale;
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = key;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
         Color32 transparent = new Color32(255, 255, 255, 0);
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                bool inside = IsInsideRoundedRect(x, y, width, height, radius);
-                bool borderPixel = border > 0f && inside && !IsInsideRoundedRect(x, y, width, height, radius, border);
+                bool inside = IsInsideRoundedRect(x, y, textureWidth, textureHeight, scaledRadius);
+                bool borderPixel = scaledBorder > 0f && inside && !IsInsideRoundedRect(x, y, textureWidth, textureHeight, scaledRadius, scaledBorder);
                 if (fill && inside)
                 {
                     texture.SetPixel(x, y, UiTheme.White);
@@ -1987,7 +2093,14 @@ public class ShopScreenView : AppScreenViewBase
         }
 
         texture.Apply();
-        sprite = Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, new Vector4(radius, radius, radius, radius));
+        sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, textureWidth, textureHeight),
+            new Vector2(0.5f, 0.5f),
+            100f * shapeScale,
+            0u,
+            SpriteMeshType.FullRect,
+            new Vector4(scaledRadius, scaledRadius, scaledRadius, scaledRadius));
         sprite.name = key;
         RuntimeSpriteCache[key] = sprite;
         return sprite;
@@ -1995,29 +2108,40 @@ public class ShopScreenView : AppScreenViewBase
 
     private static Sprite GetTopRoundedSprite(int width, int height, float radius)
     {
-        string key = "top_" + width + "_" + height + "_" + radius;
+        int shapeScale = GetShapeSupersample(width, height);
+        string key = "top_" + width + "_" + height + "_" + radius + "_s" + shapeScale;
         Sprite sprite;
         if (RuntimeSpriteCache.TryGetValue(key, out sprite))
         {
             return sprite;
         }
 
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int textureWidth = Mathf.Max(1, width * shapeScale);
+        int textureHeight = Mathf.Max(1, height * shapeScale);
+        float scaledRadius = radius * shapeScale;
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = key;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                bool inside = IsInsideTopRoundedRect(x, y, width, height, radius);
+                bool inside = IsInsideTopRoundedRect(x, y, textureWidth, textureHeight, scaledRadius);
                 texture.SetPixel(x, y, inside ? UiTheme.White : new Color32(255, 255, 255, 0));
             }
         }
 
         texture.Apply();
-        sprite = Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, new Vector4(radius, radius, 0f, 0f));
+        sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, textureWidth, textureHeight),
+            new Vector2(0.5f, 0.5f),
+            100f * shapeScale,
+            0u,
+            SpriteMeshType.FullRect,
+            new Vector4(scaledRadius, scaledRadius, 0f, 0f));
         sprite.name = key;
         RuntimeSpriteCache[key] = sprite;
         return sprite;
@@ -2025,31 +2149,43 @@ public class ShopScreenView : AppScreenViewBase
 
     private static Sprite GetBottomUnderlineSprite(int width, int height, float radius, float thickness)
     {
-        string key = "underline_" + width + "_" + height + "_" + radius + "_" + thickness;
+        int shapeScale = GetShapeSupersample(width, height);
+        string key = "underline_" + width + "_" + height + "_" + radius + "_" + thickness + "_s" + shapeScale;
         Sprite sprite;
         if (RuntimeSpriteCache.TryGetValue(key, out sprite))
         {
             return sprite;
         }
 
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int textureWidth = Mathf.Max(1, width * shapeScale);
+        int textureHeight = Mathf.Max(1, height * shapeScale);
+        float scaledRadius = radius * shapeScale;
+        float scaledThickness = thickness * shapeScale;
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = key;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
         Color32 transparent = new Color32(255, 255, 255, 0);
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                bool inside = IsInsideRoundedRect(x, y, width, height, radius);
-                bool bottomBand = y <= thickness + (x < radius || x >= width - radius ? 1f : 0f);
+                bool inside = IsInsideRoundedRect(x, y, textureWidth, textureHeight, scaledRadius);
+                bool bottomBand = y <= scaledThickness + (x < scaledRadius || x >= textureWidth - scaledRadius ? shapeScale : 0f);
                 texture.SetPixel(x, y, inside && bottomBand ? UiTheme.White : transparent);
             }
         }
 
         texture.Apply();
-        sprite = Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, new Vector4(radius, radius, radius, radius));
+        sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, textureWidth, textureHeight),
+            new Vector2(0.5f, 0.5f),
+            100f * shapeScale,
+            0u,
+            SpriteMeshType.FullRect,
+            new Vector4(scaledRadius, scaledRadius, scaledRadius, scaledRadius));
         sprite.name = key;
         RuntimeSpriteCache[key] = sprite;
         return sprite;
@@ -2082,6 +2218,134 @@ public class ShopScreenView : AppScreenViewBase
         sprite.name = key;
         RuntimeSpriteCache[key] = sprite;
         return sprite;
+    }
+
+    private static Sprite GetShopAwningSprite(int width, int height, bool shadow)
+    {
+        width = Mathf.Max(1, width);
+        height = Mathf.Max(1, height);
+
+        string key = "shop_awning_" + width + "_" + height + "_" + shadow + "_s" + RuntimeShapeSupersample;
+        Sprite sprite;
+        if (RuntimeSpriteCache.TryGetValue(key, out sprite))
+        {
+            return sprite;
+        }
+
+        int scale = RuntimeShapeSupersample;
+        int textureWidth = Mathf.Max(1, width * scale);
+        int textureHeight = Mathf.Max(1, height * scale);
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
+        texture.name = key;
+        texture.filterMode = FilterMode.Bilinear;
+        texture.wrapMode = TextureWrapMode.Clamp;
+
+        for (int y = 0; y < textureHeight; y++)
+        {
+            float designY = height - ((y + 0.5f) / scale);
+            for (int x = 0; x < textureWidth; x++)
+            {
+                float designX = (x + 0.5f) / scale;
+                texture.SetPixel(x, y, SampleShopAwningPixel(designX, designY, width, shadow));
+            }
+        }
+
+        texture.Apply();
+        sprite = Sprite.Create(texture, new Rect(0f, 0f, textureWidth, textureHeight), new Vector2(0.5f, 0.5f), 100f * scale);
+        sprite.name = key;
+        RuntimeSpriteCache[key] = sprite;
+        return sprite;
+    }
+
+    private static Color SampleShopAwningPixel(float x, float y, float width, bool shadow)
+    {
+        float panelY = shadow ? y - 5f : y;
+        if (panelY < 0f || panelY > AwningPanelHeight)
+        {
+            return new Color(1f, 1f, 1f, 0f);
+        }
+
+        int stripeIndex = Mathf.FloorToInt(x / AwningStripeWidth);
+        float stripeX = x - (stripeIndex * AwningStripeWidth);
+        if (stripeIndex < 0 || stripeX < 0f || stripeX > AwningStripeWidth)
+        {
+            return new Color(1f, 1f, 1f, 0f);
+        }
+
+        if (!IsInsideAwningPanel(stripeX, panelY, AwningStripeWidth, AwningPanelHeight, AwningBottomRadius))
+        {
+            return new Color(1f, 1f, 1f, 0f);
+        }
+
+        float edgeFade = GetAwningEdgeFade(stripeX, panelY, AwningStripeWidth, AwningPanelHeight, AwningBottomRadius);
+        if (shadow)
+        {
+            float shadowAlpha = Mathf.Lerp(0.18f, 0.08f, Mathf.Clamp01(panelY / AwningPanelHeight)) * edgeFade;
+            return new Color(0.62f, 0.52f, 0.43f, shadowAlpha);
+        }
+
+        bool isRedStripe = stripeIndex % 2 == 0;
+        float vertical = Mathf.Clamp01(panelY / AwningPanelHeight);
+        float edgeShade = 1f - Mathf.Clamp01(Mathf.Min(stripeX, AwningStripeWidth - stripeX) / 5f);
+        Color redTop = new Color32(255, 88, 91, 255);
+        Color redBottom = new Color32(247, 71, 76, 255);
+        Color whiteTop = new Color32(255, 255, 255, 255);
+        Color whiteBottom = new Color32(246, 246, 246, 255);
+        Color color = isRedStripe ? Color.Lerp(redTop, redBottom, vertical) : Color.Lerp(whiteTop, whiteBottom, vertical);
+        Color edgeColor = isRedStripe ? new Color32(219, 65, 69, 255) : new Color32(231, 231, 231, 255);
+        color = Color.Lerp(color, edgeColor, edgeShade * 0.08f);
+        color.a = edgeFade;
+        return color;
+    }
+
+    private static bool IsInsideAwningPanel(float x, float y, float width, float height, float radius)
+    {
+        if (x < 0f || x > width || y < 0f || y > height)
+        {
+            return false;
+        }
+
+        if (y <= height - radius)
+        {
+            return true;
+        }
+
+        if (x < radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(radius, height - radius)) <= radius;
+        }
+
+        if (x > width - radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(width - radius, height - radius)) <= radius;
+        }
+
+        return true;
+    }
+
+    private static float GetAwningEdgeFade(float x, float y, float width, float height, float radius)
+    {
+        if (y <= height - radius)
+        {
+            return 1f;
+        }
+
+        float distanceOutside = -1f;
+        if (x < radius)
+        {
+            distanceOutside = Vector2.Distance(new Vector2(x, y), new Vector2(radius, height - radius)) - radius;
+        }
+        else if (x > width - radius)
+        {
+            distanceOutside = Vector2.Distance(new Vector2(x, y), new Vector2(width - radius, height - radius)) - radius;
+        }
+
+        if (distanceOutside <= -1f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01(1f - distanceOutside);
     }
 
     private static Sprite GetAwningStripeSprite(int width, int height, bool leftOuter, bool rightOuter)

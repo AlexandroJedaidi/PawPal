@@ -42,12 +42,15 @@ public class AppShellBootstrap : MonoBehaviour
 
     private static void EnsureShellForActiveScene()
     {
-        if (Object.FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include) != null)
+        DisableLegacyFigmaUi();
+
+        AppShellController existingShell = Object.FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include);
+        if (existingShell != null)
         {
+            HideRuntimeUiFromSceneView(existingShell.gameObject);
             return;
         }
 
-        DisableLegacyFigmaUi();
         EnsureEventSystem();
         CreateAppShellCanvas();
     }
@@ -163,5 +166,18 @@ public class AppShellBootstrap : MonoBehaviour
     {
         GameObject canvasObject = new GameObject("AppShellCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         canvasObject.AddComponent<AppShellController>();
+        HideRuntimeUiFromSceneView(canvasObject);
+    }
+
+    private static void HideRuntimeUiFromSceneView(GameObject target)
+    {
+#if UNITY_EDITOR
+        if (target == null)
+        {
+            return;
+        }
+
+        UnityEditor.SceneVisibilityManager.instance.Hide(target, true);
+#endif
     }
 }

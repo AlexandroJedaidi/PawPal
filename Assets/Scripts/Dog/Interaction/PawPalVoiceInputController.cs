@@ -40,7 +40,8 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
     [SerializeField] private int recordingFrequency = 16000;
     [SerializeField] private float recordingSeconds = 1.25f;
     [SerializeField, Range(0.1f, 1f)] private float nameMatchThreshold = 0.68f;
-    [SerializeField, Range(0.1f, 1f)] private float trickMatchThreshold = 0.66f;
+    // Sit is a short, one-syllable command and only runs after the dog name gate succeeds.
+    [SerializeField, Range(0.1f, 1f)] private float trickMatchThreshold = 0.42f;
 
     private readonly PawPalVoiceInputSnapshot snapshot = new PawPalVoiceInputSnapshot();
     private PawPalVoiceProfileStore profileStore;
