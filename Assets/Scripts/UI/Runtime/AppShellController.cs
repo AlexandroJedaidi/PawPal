@@ -18,6 +18,11 @@ public class AppShellController : MonoBehaviour
     private SafeAreaFitter safeAreaFitter;
     private AdaptiveLayoutRoot adaptiveLayout;
     private BottomNav bottomNav;
+    private Vector2Int lastScreenSize;
+    private Rect lastSafeArea;
+    private Vector2 lastRootSize;
+    private Vector2 lastSafeAreaRootSize;
+    private int pendingLayoutFrames;
 
     public UiLayoutBucket CurrentBucket { get; private set; }
     public float BottomNavHeight { get; private set; }
@@ -26,6 +31,32 @@ public class AppShellController : MonoBehaviour
     private void Awake()
     {
         BuildShell();
+    }
+
+    private void LateUpdate()
+    {
+        if (safeAreaFitter != null)
+        {
+            safeAreaFitter.Apply();
+        }
+
+        Canvas.ForceUpdateCanvases();
+
+        Vector2 rootSize = rootRect != null ? rootRect.rect.size : Vector2.zero;
+        Vector2 safeRootSize = safeAreaRoot != null ? safeAreaRoot.rect.size : Vector2.zero;
+        bool screenChanged = lastScreenSize.x != Screen.width || lastScreenSize.y != Screen.height;
+        bool safeAreaChanged = lastSafeArea != Screen.safeArea;
+        bool rootChanged = lastRootSize != rootSize || lastSafeAreaRootSize != safeRootSize;
+        if (screenChanged || safeAreaChanged || rootChanged)
+        {
+            pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
+        }
+
+        if (pendingLayoutFrames > 0)
+        {
+            ApplyCurrentLayout(CurrentBucket);
+            pendingLayoutFrames--;
+        }
     }
 
     public void ShowScreen(AppScreenId screenId)
@@ -57,7 +88,7 @@ public class AppShellController : MonoBehaviour
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-        scaler.matchWidthOrHeight = 0.35f;
+        scaler.matchWidthOrHeight = 0.5f;
         scaler.referencePixelsPerUnit = 100f;
 
         spriteLibrary = GetComponent<UiSpriteLibrary>();
@@ -77,6 +108,7 @@ public class AppShellController : MonoBehaviour
 
         screenLayer = UiFactory.CreateRect("ScreenLayer", safeAreaRoot);
         UiFactory.Stretch(screenLayer, 0f, 0f, 0f, 0f);
+        screenLayer.gameObject.AddComponent<RectMask2D>();
         screenLayer.gameObject.SetActive(true);
 
         modalLayer = UiFactory.CreateRect("ModalLayer", safeAreaRoot);
@@ -143,10 +175,28 @@ public class AppShellController : MonoBehaviour
     private void HandleLayoutChanged(UiLayoutBucket bucket)
     {
         CurrentBucket = bucket;
+        pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
+        ApplyCurrentLayout(bucket);
+    }
+
+    private void ApplyCurrentLayout(UiLayoutBucket bucket)
+    {
+        if (safeAreaFitter != null)
+        {
+            safeAreaFitter.Apply();
+        }
+
+        Canvas.ForceUpdateCanvases();
+
         if (bottomNav != null)
         {
             bottomNav.ApplyLayout(bucket);
             BottomNavHeight = bottomNav.CurrentHeight;
+        }
+
+        if (screenLayer != null)
+        {
+            UiFactory.Stretch(screenLayer, 0f, BottomNavHeight, 0f, 0f);
         }
 
         foreach (KeyValuePair<AppScreenId, AppScreenViewBase> pair in screens)
@@ -156,5 +206,10 @@ public class AppShellController : MonoBehaviour
                 pair.Value.ApplyLayout(bucket);
             }
         }
+
+        lastScreenSize = new Vector2Int(Screen.width, Screen.height);
+        lastSafeArea = Screen.safeArea;
+        lastRootSize = rootRect != null ? rootRect.rect.size : Vector2.zero;
+        lastSafeAreaRootSize = safeAreaRoot != null ? safeAreaRoot.rect.size : Vector2.zero;
     }
 }

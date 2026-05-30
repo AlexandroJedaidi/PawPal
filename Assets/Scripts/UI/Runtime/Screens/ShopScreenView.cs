@@ -39,6 +39,7 @@ public class ShopScreenView : AppScreenViewBase
     private static readonly Dictionary<string, Sprite> RuntimeSpriteCache = new Dictionary<string, Sprite>();
 
     private RectTransform exactFrame;
+    private RectTransform shopViewport;
     private RectTransform scrollContent;
     private RectTransform floatingPanelRoot;
     private RectTransform buyPointsPanel;
@@ -52,6 +53,7 @@ public class ShopScreenView : AppScreenViewBase
 
     private FloatingPanelState floatingPanelState;
     private ModalState modalState;
+    private ResponsiveFigmaFrameLayout frameLayout;
     private int lastShopRevision = -1;
     private string selectedCatalogItemId = string.Empty;
     private string lastPurchasedCatalogItemId = string.Empty;
@@ -85,6 +87,7 @@ public class ShopScreenView : AppScreenViewBase
     {
         RectTransform root = GetComponent<RectTransform>();
         UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
+        BuildFullscreenBackground(root);
 
         exactFrame = UiFactory.CreateRect("ShopMainFrame", root);
         exactFrame.anchorMin = new Vector2(0.5f, 1f);
@@ -103,6 +106,19 @@ public class ShopScreenView : AppScreenViewBase
         RefreshRuntimeState();
     }
 
+    private void BuildFullscreenBackground(RectTransform parent)
+    {
+        Image background = UiFactory.CreateImage(
+            "FullscreenBackground",
+            parent,
+            sprites.GetResourceSprite("UI/Figma/Shop/background_shop"),
+            Color.white);
+        background.type = Image.Type.Simple;
+        background.preserveAspect = false;
+        background.raycastTarget = false;
+        UiFactory.Stretch(background.rectTransform, 0f, 0f, 0f, 0f);
+    }
+
     public override void ApplyLayout(UiLayoutBucket bucket)
     {
         RectTransform root = GetComponent<RectTransform>();
@@ -110,12 +126,10 @@ public class ShopScreenView : AppScreenViewBase
 
         if (exactFrame != null)
         {
-            exactFrame.anchorMin = new Vector2(0.5f, 1f);
-            exactFrame.anchorMax = new Vector2(0.5f, 1f);
-            exactFrame.pivot = new Vector2(0.5f, 1f);
-            exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-            exactFrame.anchoredPosition = Vector2.zero;
+            frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame);
         }
+
+        ApplyViewportLayout();
     }
 
     private void BuildBackground(RectTransform parent)
@@ -221,21 +235,21 @@ public class ShopScreenView : AppScreenViewBase
 
     private void BuildScrollableContent(RectTransform parent)
     {
-        RectTransform viewport = CreateNode("ShopViewport", parent, 6f, 162f, 382f, 627f);
-        Image viewportHit = viewport.gameObject.AddComponent<Image>();
+        shopViewport = CreateNode("ShopViewport", parent, 6f, 162f, 382f, 627f);
+        Image viewportHit = shopViewport.gameObject.AddComponent<Image>();
         viewportHit.color = new Color(1f, 1f, 1f, 0.002f);
         viewportHit.raycastTarget = true;
-        viewport.gameObject.AddComponent<RectMask2D>();
+        shopViewport.gameObject.AddComponent<RectMask2D>();
 
-        scrollContent = UiFactory.CreateRect("ScrollContent", viewport);
+        scrollContent = UiFactory.CreateRect("ScrollContent", shopViewport);
         scrollContent.anchorMin = new Vector2(0f, 1f);
         scrollContent.anchorMax = new Vector2(0f, 1f);
         scrollContent.pivot = new Vector2(0f, 1f);
         scrollContent.sizeDelta = new Vector2(382f, 1752f);
         scrollContent.anchoredPosition = Vector2.zero;
 
-        ScrollRect scrollRect = viewport.gameObject.AddComponent<ScrollRect>();
-        scrollRect.viewport = viewport;
+        ScrollRect scrollRect = shopViewport.gameObject.AddComponent<ScrollRect>();
+        scrollRect.viewport = shopViewport;
         scrollRect.content = scrollContent;
         scrollRect.horizontal = false;
         scrollRect.vertical = true;
@@ -245,6 +259,21 @@ public class ShopScreenView : AppScreenViewBase
         BuildSpecialOfferSection(scrollContent);
         catalogSectionRoot = CreateNode("CatalogSectionRoot", scrollContent, 0f, 445f, 382f, 1307f);
         RebuildCatalogSections();
+        ApplyViewportLayout();
+    }
+
+    private void ApplyViewportLayout()
+    {
+        if (shopViewport == null)
+        {
+            return;
+        }
+
+        float frameHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
+        float viewportTop = 162f;
+        float viewportHeight = Mathf.Max(220f, frameHeight - viewportTop);
+        shopViewport.sizeDelta = new Vector2(382f, viewportHeight);
+        shopViewport.anchoredPosition = new Vector2(6f, -viewportTop);
     }
 
     private void BuildSpecialOfferSection(RectTransform parent)

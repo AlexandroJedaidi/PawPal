@@ -151,6 +151,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
     private IEnumerator InteractionRoutine(DogRoomAgent dog, GameObject bowlPrefab, PawPalDogNeed need, Action onCompleted)
     {
         bool completed = false;
+        int cameraFocusId = 0;
         List<DogRoomAgent> pausedBlockers = new List<DogRoomAgent>();
         try
         {
@@ -163,7 +164,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             DogCycleCamera resolvedDogCamera = ResolveDogCamera();
             if (resolvedDogCamera != null)
             {
-                resolvedDogCamera.BeginInteractionFocus(activeBowl.transform, cameraFocusOffset);
+                cameraFocusId = resolvedDogCamera.BeginPairFocus(dog.transform, activeBowl.transform, DogCameraFocusPriority.NeedInteraction, cameraFocusOffset);
             }
 
             Vector3 approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
@@ -184,9 +185,9 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         finally
         {
             DogCycleCamera resolvedDogCamera = ResolveDogCamera();
-            if (resolvedDogCamera != null)
+            if (resolvedDogCamera != null && cameraFocusId != 0)
             {
-                resolvedDogCamera.EndInteractionFocus();
+                resolvedDogCamera.EndFocus(cameraFocusId);
             }
 
             CleanupActiveBowl();

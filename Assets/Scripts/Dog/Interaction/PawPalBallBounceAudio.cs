@@ -12,10 +12,11 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
 
     [SerializeField] private AudioClip bounceClip;
     [SerializeField, Range(0f, 1f)] private float volume = 0.65f;
-    [SerializeField] private float minCollisionSpeed = 0.25f;
-    [SerializeField] private float minSecondsBetweenSounds = 0.18f;
+    [SerializeField] private float minCollisionSpeed = 0.75f;
+    [SerializeField] private float minSecondsBetweenSounds = 0.22f;
 
     private AudioSource source;
+    private Rigidbody body;
     private float nextAllowedSoundTime;
 
     public static PawPalBallBounceAudio EnsureOn(GameObject target)
@@ -38,12 +39,14 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
 
     private void Awake()
     {
+        body = GetComponent<Rigidbody>();
         AutoAssignEditorAudioClip();
         EnsureAudioSource();
     }
 
     private void OnEnable()
     {
+        body = GetComponent<Rigidbody>();
         AutoAssignEditorAudioClip();
         EnsureAudioSource();
     }
@@ -53,16 +56,11 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
         TryPlayCollisionSound(collision);
     }
 
-    private void OnCollisionStay(Collision collision)
-    {
-        TryPlayCollisionSound(collision);
-    }
-
     private void TryPlayCollisionSound(Collision collision)
     {
         if (bounceClip == null
             || collision == null
-            || collision.relativeVelocity.magnitude < Mathf.Max(0.01f, minCollisionSpeed)
+            || GetImpactSpeed(collision) < Mathf.Max(0.01f, minCollisionSpeed)
             || Time.time < nextAllowedSoundTime)
         {
             return;
@@ -76,6 +74,38 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
 
         nextAllowedSoundTime = Time.time + Mathf.Max(0f, minSecondsBetweenSounds);
         source.PlayOneShot(bounceClip, Mathf.Clamp01(volume));
+    }
+
+    private float GetImpactSpeed(Collision collision)
+    {
+        if (body == null)
+        {
+            body = GetComponent<Rigidbody>();
+        }
+
+        if (body != null && body.IsSleeping())
+        {
+            return 0f;
+        }
+
+        Vector3 relativeVelocity = collision.relativeVelocity;
+        if (collision.contactCount <= 0)
+        {
+            return relativeVelocity.magnitude;
+        }
+
+        float strongestImpactSpeed = 0f;
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            ContactPoint contact = collision.GetContact(i);
+            float normalSpeed = Mathf.Abs(Vector3.Dot(relativeVelocity, contact.normal));
+            if (normalSpeed > strongestImpactSpeed)
+            {
+                strongestImpactSpeed = normalSpeed;
+            }
+        }
+
+        return strongestImpactSpeed;
     }
 
     private void EnsureAudioSource()

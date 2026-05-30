@@ -91,7 +91,13 @@ public class BottomNavItemView : MonoBehaviour
 
     public void ApplyLayout(float scale)
     {
-        float itemWidth = 60f * scale;
+        ApplyLayout(scale, 60f * scale);
+    }
+
+    public void ApplyLayout(float scale, float slotWidth)
+    {
+        float itemWidth = Mathf.Max(1f, slotWidth);
+        float visualWidth = Mathf.Min(60f * scale, itemWidth);
         float itemHeight = (isMapItem ? MapItemSize : RegularItemHeight) * scale;
         float iconSize = IconSize * scale;
         float labelHeight = LabelHeight * scale;
@@ -102,6 +108,7 @@ public class BottomNavItemView : MonoBehaviour
         layoutElement.preferredHeight = itemHeight;
         layoutElement.minWidth = itemWidth;
         layoutElement.minHeight = itemHeight;
+        layoutElement.flexibleWidth = 1f;
         if (rectTransform != null)
         {
             rectTransform.sizeDelta = new Vector2(itemWidth, itemHeight);
@@ -112,7 +119,7 @@ public class BottomNavItemView : MonoBehaviour
             mapCircle.rectTransform.anchorMin = new Vector2(0.5f, 1f);
             mapCircle.rectTransform.anchorMax = new Vector2(0.5f, 1f);
             mapCircle.rectTransform.pivot = new Vector2(0.5f, 1f);
-            mapCircle.rectTransform.sizeDelta = new Vector2(itemWidth, itemHeight);
+            mapCircle.rectTransform.sizeDelta = new Vector2(itemHeight, itemHeight);
             mapCircle.rectTransform.anchoredPosition = Vector2.zero;
 
             iconImage.rectTransform.anchorMin = new Vector2(0.5f, 1f);
@@ -137,13 +144,13 @@ public class BottomNavItemView : MonoBehaviour
             selectedBackground.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             selectedBackground.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             selectedBackground.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            selectedBackground.rectTransform.sizeDelta = new Vector2(itemWidth, itemHeight);
+            selectedBackground.rectTransform.sizeDelta = new Vector2(visualWidth, itemHeight);
             selectedBackground.rectTransform.anchoredPosition = Vector2.zero;
 
             selectedTopBorder.rectTransform.anchorMin = new Vector2(0.5f, 1f);
             selectedTopBorder.rectTransform.anchorMax = new Vector2(0.5f, 1f);
             selectedTopBorder.rectTransform.pivot = new Vector2(0.5f, 1f);
-            selectedTopBorder.rectTransform.sizeDelta = new Vector2(itemWidth, 2f * scale);
+            selectedTopBorder.rectTransform.sizeDelta = new Vector2(visualWidth, 2f * scale);
             selectedTopBorder.rectTransform.anchoredPosition = Vector2.zero;
 
             iconImage.rectTransform.anchorMin = new Vector2(0.5f, 1f);

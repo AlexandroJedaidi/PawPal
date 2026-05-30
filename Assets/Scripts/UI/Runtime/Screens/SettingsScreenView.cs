@@ -99,11 +99,13 @@ public class SettingsScreenView : AppScreenViewBase
     private RectTransform feedbackSuccessModal;
     private TMP_InputField feedbackInput;
     private ScrollRect languagesScrollRect;
+    private ScrollRect screenScrollRect;
     private ToggleVisual soundToggle;
 
     private SettingsPage currentPage = SettingsPage.Main;
     private SettingsModal currentModal = SettingsModal.None;
     private bool soundEffectsOn = true;
+    private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
     {
@@ -116,6 +118,13 @@ public class SettingsScreenView : AppScreenViewBase
 
         RectTransform root = GetComponent<RectTransform>();
         UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
+
+        Image fullBackground = root.gameObject.AddComponent<Image>();
+        fullBackground.sprite = UiTheme.WhiteSprite;
+        fullBackground.type = Image.Type.Simple;
+        fullBackground.preserveAspect = false;
+        fullBackground.color = SettingsBackground;
+        fullBackground.raycastTarget = true;
 
         exactFrame = UiFactory.CreateRect("SettingsExactFrame", root);
         exactFrame.anchorMin = new Vector2(0.5f, 1f);
@@ -151,6 +160,14 @@ public class SettingsScreenView : AppScreenViewBase
         feedbackModal = BuildFeedbackModal(modalLayer);
         feedbackSuccessModal = BuildFeedbackSuccessModal(modalLayer);
 
+        screenScrollRect = root.gameObject.AddComponent<ScrollRect>();
+        screenScrollRect.viewport = root;
+        screenScrollRect.content = exactFrame;
+        screenScrollRect.horizontal = false;
+        screenScrollRect.vertical = true;
+        screenScrollRect.movementType = ScrollRect.MovementType.Clamped;
+        screenScrollRect.scrollSensitivity = 22f;
+
         RefreshViewState();
     }
 
@@ -161,11 +178,21 @@ public class SettingsScreenView : AppScreenViewBase
 
         if (exactFrame != null)
         {
-            exactFrame.anchorMin = new Vector2(0.5f, 1f);
-            exactFrame.anchorMax = new Vector2(0.5f, 1f);
-            exactFrame.pivot = new Vector2(0.5f, 1f);
-            exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-            exactFrame.anchoredPosition = Vector2.zero;
+            frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame);
+        }
+
+        ApplyFooterLayout(mainPage);
+        ApplyFooterLayout(notificationsPage);
+        ApplyFooterLayout(languagesPage);
+
+        if (screenScrollRect != null)
+        {
+            bool contentOverflows = frameLayout.LogicalHeight > frameLayout.VisibleLogicalHeight + 0.5f;
+            screenScrollRect.vertical = contentOverflows;
+            if (!contentOverflows)
+            {
+                screenScrollRect.verticalNormalizedPosition = 1f;
+            }
         }
     }
 
@@ -530,6 +557,25 @@ public class SettingsScreenView : AppScreenViewBase
         paw.rectTransform.pivot = new Vector2(0f, 1f);
         paw.rectTransform.sizeDelta = new Vector2(105.9635f, 105.9635f);
         paw.rectTransform.anchoredPosition = new Vector2(172.0182f, 0f);
+    }
+
+    private void ApplyFooterLayout(RectTransform page)
+    {
+        if (page == null)
+        {
+            return;
+        }
+
+        Transform footerTransform = page.Find("Frame_PWVersion");
+        RectTransform footer = footerTransform as RectTransform;
+        if (footer == null)
+        {
+            return;
+        }
+
+        float frameHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
+        float footerY = Mathf.Max(0f, frameHeight - 105.9635f - 60f);
+        footer.anchoredPosition = new Vector2(57f, -footerY);
     }
 
     private RectTransform BuildCard(RectTransform parent, string name, float x, float y, float width, float height)

@@ -23,13 +23,20 @@ public class HomeScreenView : AppScreenViewBase
     private const float InventoryAddonsY = 442f;
     private const float InventoryRegionX = 69f;
     private const float InventoryRegionY = 485f;
+    private const float BasePanelBottomOffset = 0f;
+    private const float BaseAddonsBottomOffset = 122f;
+    private const float StatsAddonsBottomOffset = 256f;
+    private const float InventoryNameBottomOffset = 257f;
+    private const float InventoryAddonsBottomOffset = 306f;
+    private const float NeedPopupBottomOffset = 130f;
+    private const float BottomHudReferenceHeight = UiTheme.ReferenceContentHeight;
 
     private RectTransform exactFrame;
+    private RectTransform bottomHudFrame;
     private RectTransform addonsRect;
     private RectTransform dogDetailsRect;
     private RectTransform inventoryNameRect;
     private RectTransform inventoryPanelRect;
-    private TrainerLevelWidgetView trainerLevel;
     private HomeAddonsView addons;
     private DogDetailsWidgetView dogDetails;
     private InventoryNameBarView inventoryNameBar;
@@ -38,6 +45,7 @@ public class HomeScreenView : AppScreenViewBase
     private TextMeshProUGUI needPopupLabel;
     private Coroutine needPopupRoutine;
     private HomeDetailMode detailMode;
+    private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
     {
@@ -76,24 +84,28 @@ public class HomeScreenView : AppScreenViewBase
         exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
         exactFrame.anchoredPosition = Vector2.zero;
 
-        trainerLevel = CreateNode<TrainerLevelWidgetView>("TrainerLevel", 109f, 0f, 175f, 76f);
-        trainerLevel.Initialize(sprites);
+        bottomHudFrame = UiFactory.CreateRect("HomeBottomHudFrame", root);
+        bottomHudFrame.anchorMin = new Vector2(0.5f, 0f);
+        bottomHudFrame.anchorMax = new Vector2(0.5f, 0f);
+        bottomHudFrame.pivot = new Vector2(0.5f, 0f);
+        bottomHudFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, BottomHudReferenceHeight);
+        bottomHudFrame.anchoredPosition = Vector2.zero;
 
-        addons = CreateNode<HomeAddonsView>("Addons", 107f, BaseAddonsY, 180f, 38f);
+        addons = CreateNode<HomeAddonsView>("Addons", bottomHudFrame, 107f, BaseAddonsY, 180f, 38f);
         addons.Initialize(sprites, ToggleInventoryPanel);
         addonsRect = addons.GetComponent<RectTransform>();
 
-        dogDetails = CreateNode<DogDetailsWidgetView>("DogDetails", BasePanelX, BasePanelY, 246f, BasePanelHeight);
+        dogDetails = CreateNode<DogDetailsWidgetView>("DogDetails", bottomHudFrame, BasePanelX, BasePanelY, 246f, BasePanelHeight);
         dogDetails.Initialize(sprites, ToggleDetailsPanel);
         dogDetails.BindInteractions(SelectPreviousDog, SelectNextDog, HandleNeedPressed);
         dogDetailsRect = dogDetails.GetComponent<RectTransform>();
 
-        inventoryNameBar = CreateNode<InventoryNameBarView>("InventoryNameBar", InventoryRegionX, InventoryRegionY, 255f, 44f);
+        inventoryNameBar = CreateNode<InventoryNameBarView>("InventoryNameBar", bottomHudFrame, InventoryRegionX, InventoryRegionY, 255f, 44f);
         inventoryNameBar.Initialize(sprites);
         inventoryNameBar.BindDogSwitching(SelectPreviousDog, SelectNextDog);
         inventoryNameRect = inventoryNameBar.GetComponent<RectTransform>();
 
-        inventoryPanel = CreateNode<InventoryPanelView>("InventoryPanel", InventoryRegionX, 528f, 255f, 258f);
+        inventoryPanel = CreateNode<InventoryPanelView>("InventoryPanel", bottomHudFrame, InventoryRegionX, 528f, 255f, 258f);
         inventoryPanel.Initialize(sprites);
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
@@ -110,19 +122,16 @@ public class HomeScreenView : AppScreenViewBase
 
         if (exactFrame != null)
         {
-            exactFrame.anchorMin = new Vector2(0.5f, 1f);
-            exactFrame.anchorMax = new Vector2(0.5f, 1f);
-            exactFrame.pivot = new Vector2(0.5f, 1f);
-            exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-            exactFrame.anchoredPosition = Vector2.zero;
+            frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame);
         }
 
+        ApplyBottomHudLayout(root);
         ApplyDetailMode();
     }
 
-    private T CreateNode<T>(string name, float x, float y, float width, float height) where T : Component
+    private T CreateNode<T>(string name, RectTransform parent, float x, float y, float width, float height) where T : Component
     {
-        RectTransform rect = UiFactory.CreateRect(name, exactFrame);
+        RectTransform rect = UiFactory.CreateRect(name, parent);
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
@@ -154,7 +163,8 @@ public class HomeScreenView : AppScreenViewBase
         if (dogDetailsRect != null)
         {
             bool statsExpanded = detailMode == HomeDetailMode.Stats;
-            dogDetailsRect.sizeDelta = new Vector2(246f, statsExpanded ? StatsPanelHeight : BasePanelHeight);
+            float panelHeight = statsExpanded ? StatsPanelHeight : BasePanelHeight;
+            dogDetailsRect.sizeDelta = new Vector2(246f, panelHeight);
             dogDetailsRect.anchoredPosition = new Vector2(statsExpanded ? StatsPanelX : BasePanelX, -(statsExpanded ? StatsPanelY : BasePanelY));
         }
 
@@ -171,6 +181,21 @@ public class HomeScreenView : AppScreenViewBase
             }
 
             addonsRect.anchoredPosition = new Vector2(107f, -addonsY);
+        }
+
+        if (inventoryNameRect != null)
+        {
+            inventoryNameRect.anchoredPosition = new Vector2(InventoryRegionX, -InventoryRegionY);
+        }
+
+        if (inventoryPanelRect != null)
+        {
+            inventoryPanelRect.anchoredPosition = new Vector2(InventoryRegionX, -528f);
+        }
+
+        if (needPopup != null)
+        {
+            needPopup.anchoredPosition = new Vector2(0f, -GetBottomAnchoredY(52f, NeedPopupBottomOffset));
         }
 
         if (addons != null)
@@ -203,11 +228,6 @@ public class HomeScreenView : AppScreenViewBase
             return;
         }
 
-        if (trainerLevel != null)
-        {
-            trainerLevel.SetState(runtime.TrainerState.Level, runtime.GetTrainerLevelProgress01());
-        }
-
         PawPalDogState activeDog = runtime.ActiveDog;
         if (dogDetails != null)
         {
@@ -231,6 +251,7 @@ public class HomeScreenView : AppScreenViewBase
         if (runtime != null)
         {
             runtime.SelectPreviousDog();
+            DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
         }
     }
 
@@ -240,6 +261,7 @@ public class HomeScreenView : AppScreenViewBase
         if (runtime != null)
         {
             runtime.SelectNextDog();
+            DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
         }
     }
 
@@ -319,12 +341,12 @@ public class HomeScreenView : AppScreenViewBase
 
     private void BuildNeedPopup()
     {
-        needPopup = UiFactory.CreateRect("NeedPopup", exactFrame);
+        needPopup = UiFactory.CreateRect("NeedPopup", bottomHudFrame);
         needPopup.anchorMin = new Vector2(0.5f, 1f);
         needPopup.anchorMax = new Vector2(0.5f, 1f);
         needPopup.pivot = new Vector2(0.5f, 0.5f);
         needPopup.sizeDelta = new Vector2(254f, 52f);
-        needPopup.anchoredPosition = new Vector2(0f, -604f);
+        needPopup.anchoredPosition = new Vector2(0f, -GetBottomAnchoredY(52f, NeedPopupBottomOffset));
 
         Image background = needPopup.gameObject.AddComponent<Image>();
         background.sprite = UiTheme.RoundedTenSprite;
@@ -345,6 +367,30 @@ public class HomeScreenView : AppScreenViewBase
         UiFactory.Stretch(needPopupLabel.rectTransform, 12f, 8f, 12f, 8f);
 
         needPopup.gameObject.SetActive(false);
+    }
+
+    private void ApplyBottomHudLayout(RectTransform root)
+    {
+        if (root == null || bottomHudFrame == null)
+        {
+            return;
+        }
+
+        float availableWidth = root.rect.width > 0f ? root.rect.width : UiTheme.ReferenceWidth;
+        float scale = UiTheme.GetHudVisualScale(availableWidth);
+
+        bottomHudFrame.anchorMin = new Vector2(0.5f, 0f);
+        bottomHudFrame.anchorMax = new Vector2(0.5f, 0f);
+        bottomHudFrame.pivot = new Vector2(0.5f, 0f);
+        bottomHudFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, BottomHudReferenceHeight);
+        bottomHudFrame.anchoredPosition = Vector2.zero;
+        bottomHudFrame.localScale = new Vector3(scale, scale, 1f);
+    }
+
+    private float GetBottomAnchoredY(float height, float bottomOffset)
+    {
+        float frameHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
+        return Mathf.Max(0f, frameHeight - height - bottomOffset);
     }
 
     private void ShowNeedPopup(string message)

@@ -6,6 +6,8 @@ using TMPro;
 [RequireComponent(typeof(RectTransform))]
 public class InventoryNameBarView : MonoBehaviour
 {
+    private static readonly Vector2 SelectorArrowSize = new Vector2(16f, 24f);
+
     private TextMeshProUGUI dogNameLabel;
     private Action previousDogRequested;
     private Action nextDogRequested;
@@ -73,9 +75,8 @@ public class InventoryNameBarView : MonoBehaviour
         arrow.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         arrow.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         arrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.sizeDelta = new Vector2(12f, 24f);
+        arrow.rectTransform.sizeDelta = SelectorArrowSize;
         arrow.rectTransform.anchoredPosition = Vector2.zero;
-        arrow.rectTransform.localRotation = Quaternion.Euler(0f, 0f, previousDog ? 90f : -90f);
         UiFactory.AddButton(hitArea.gameObject, delegate
         {
             if (previousDog)

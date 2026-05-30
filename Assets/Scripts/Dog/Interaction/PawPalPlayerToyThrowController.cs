@@ -28,9 +28,16 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     [SerializeField] private float heldMoveFollowSharpness = 18f;
 
     [Header("Throw")]
-    [SerializeField] private float throwImpulse = 1.65f;
-    [SerializeField] private float throwUpImpulse = 0.45f;
-    [SerializeField] private float throwForwardFallbackDistance = 2.35f;
+    [SerializeField] private float minThrowImpulse = 0.85f;
+    [SerializeField] private float throwImpulse = 3.6f;
+    [SerializeField] private float minThrowUpImpulse = 0.45f;
+    [SerializeField] private float throwUpImpulse = 1.25f;
+    [SerializeField] private float throwPowerScreenDistance = 0.65f;
+    [SerializeField] private float throwPowerExponent = 1.15f;
+    [SerializeField] private float minThrowForwardFallbackDistance = 0.65f;
+    [SerializeField] private float throwForwardFallbackDistance = 3.5f;
+    [SerializeField] private float minThrowArcHeight = 0.35f;
+    [SerializeField] private float throwArcHeight = 1.1f;
     [SerializeField] private float throwTargetNavMeshSampleRadius = 1.4f;
     [SerializeField] private float fetchDispatchDelay = 0.75f;
     [SerializeField] private bool showAimPreview;
@@ -57,6 +64,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     private PawPalPlayerHeldToyMarker heldMarker;
     private PointerMode pointerMode;
     private int activeTouchFingerId = -1;
+    private bool pointerStartedAsPickupOnly;
     private Vector2 currentPointerPosition;
     private Vector2 pickupPointerPosition;
     private Vector3 currentHeldViewportPosition;
@@ -134,10 +142,13 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             }
 
             currentPointerPosition = Input.mousePosition;
-            if (TryPickToy(currentPointerPosition))
+            if (heldToy != null)
             {
-                pointerMode = PointerMode.Mouse;
-                activeInteractionController = this;
+                BeginPointerCapture(PointerMode.Mouse, -1, pickupOnly: false);
+            }
+            else if (TryPickToy(currentPointerPosition))
+            {
+                BeginPointerCapture(PointerMode.Mouse, -1, pickupOnly: true);
             }
         }
 
@@ -149,7 +160,14 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         currentPointerPosition = Input.mousePosition;
         if (Input.GetMouseButtonUp(0))
         {
-            ThrowHeldToy(currentPointerPosition);
+            if (pointerStartedAsPickupOnly)
+            {
+                ClearPointerCapture();
+            }
+            else
+            {
+                ThrowHeldToy(currentPointerPosition);
+            }
         }
     }
 
@@ -159,7 +177,14 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         {
             if (pointerMode == PointerMode.Touch)
             {
-                ThrowHeldToy(currentPointerPosition);
+                if (pointerStartedAsPickupOnly)
+                {
+                    ClearPointerCapture();
+                }
+                else
+                {
+                    ThrowHeldToy(currentPointerPosition);
+                }
             }
 
             return;
@@ -176,11 +201,13 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
                 }
 
                 currentPointerPosition = touch.position;
-                if (TryPickToy(currentPointerPosition))
+                if (heldToy != null)
                 {
-                    pointerMode = PointerMode.Touch;
-                    activeTouchFingerId = touch.fingerId;
-                    activeInteractionController = this;
+                    BeginPointerCapture(PointerMode.Touch, touch.fingerId, pickupOnly: false);
+                }
+                else if (TryPickToy(currentPointerPosition))
+                {
+                    BeginPointerCapture(PointerMode.Touch, touch.fingerId, pickupOnly: true);
                 }
 
                 return;
@@ -194,10 +221,31 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             currentPointerPosition = touch.position;
             if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
             {
-                ThrowHeldToy(currentPointerPosition);
+                if (pointerStartedAsPickupOnly)
+                {
+                    ClearPointerCapture();
+                }
+                else
+                {
+                    ThrowHeldToy(currentPointerPosition);
+                }
             }
 
             return;
+        }
+    }
+
+    private void BeginPointerCapture(PointerMode mode, int touchFingerId, bool pickupOnly)
+    {
+        pointerMode = mode;
+        activeTouchFingerId = touchFingerId;
+        pointerStartedAsPickupOnly = pickupOnly;
+        activeInteractionController = this;
+
+        if (!pickupOnly)
+        {
+            pickupPointerPosition = currentPointerPosition;
+            currentHeldViewportPosition = GetCurrentHeldViewportPosition();
         }
     }
 
@@ -369,7 +417,8 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         GameObject thrownToy = heldToy;
         Vector3 throwOrigin = holdAnchor != null ? holdAnchor.position : thrownToy.transform.position;
         Quaternion throwRotation = holdAnchor != null ? holdAnchor.rotation : thrownToy.transform.rotation;
-        Vector3 throwTarget = ResolveThrowTarget(screenPosition, throwOrigin);
+        float throwPower = CalculateThrowPower(screenPosition);
+        Vector3 throwTarget = ResolveThrowTarget(screenPosition, throwOrigin, throwPower);
 
         RestoreHeldToy(true);
         DisableAimPreview();
@@ -391,7 +440,8 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         body.linearVelocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;
 
-        Vector3 launchDirection = throwTarget - throwOrigin;
+        Vector3 launchVelocity = CalculateArcLaunchVelocity(throwOrigin, throwTarget, throwPower);
+        Vector3 launchDirection = launchVelocity;
         launchDirection.y = 0f;
         if (launchDirection.sqrMagnitude < 0.001f)
         {
@@ -400,11 +450,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
 
         launchDirection.Normalize();
-        body.AddForce(launchDirection * Mathf.Max(0.05f, throwImpulse) + Vector3.up * Mathf.Max(0f, throwUpImpulse), ForceMode.Impulse);
+        body.linearVelocity = launchVelocity;
         Vector3 torqueAxis = Vector3.Cross(Vector3.up, launchDirection);
         if (torqueAxis.sqrMagnitude > 0.001f)
         {
-            body.AddTorque(torqueAxis.normalized * 0.18f, ForceMode.Impulse);
+            body.AddTorque(torqueAxis.normalized * Mathf.Lerp(0.04f, 0.18f, throwPower), ForceMode.Impulse);
         }
 
         ArmThrownToyRecovery(thrownToy);
@@ -510,7 +560,56 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
     }
 
-    private Vector3 ResolveThrowTarget(Vector2 screenPosition, Vector3 throwOrigin)
+    private float CalculateThrowPower(Vector2 screenPosition)
+    {
+        Vector2 screenSize = new Vector2(Mathf.Max(1, Screen.width), Mathf.Max(1, Screen.height));
+        float referenceDistance = Mathf.Min(screenSize.x, screenSize.y) * Mathf.Max(0.05f, throwPowerScreenDistance);
+        float dragDistance = (screenPosition - pickupPointerPosition).magnitude;
+        float normalizedPower = Mathf.Clamp01(dragDistance / referenceDistance);
+        return Mathf.Pow(normalizedPower, Mathf.Max(0.2f, throwPowerExponent));
+    }
+
+    private Vector3 CalculateArcLaunchVelocity(Vector3 throwOrigin, Vector3 throwTarget, float throwPower)
+    {
+        Vector3 horizontalDelta = throwTarget - throwOrigin;
+        horizontalDelta.y = 0f;
+        if (horizontalDelta.sqrMagnitude < 0.001f)
+        {
+            Vector3 forward = attachedCamera != null ? attachedCamera.transform.forward : transform.forward;
+            forward.y = 0f;
+            horizontalDelta = forward.sqrMagnitude > 0.001f ? forward.normalized * 0.25f : Vector3.forward * 0.25f;
+        }
+
+        float gravity = Mathf.Max(0.01f, -Physics.gravity.y);
+        float heightDelta = throwTarget.y - throwOrigin.y;
+        float arcHeight = Mathf.Lerp(Mathf.Max(0.05f, minThrowArcHeight), Mathf.Max(minThrowArcHeight, throwArcHeight), Mathf.Clamp01(throwPower));
+        float apexAboveOrigin = Mathf.Max(arcHeight, heightDelta + 0.08f);
+        float upwardVelocity = Mathf.Sqrt(2f * gravity * apexAboveOrigin);
+        upwardVelocity = Mathf.Max(
+            upwardVelocity,
+            Mathf.Lerp(Mathf.Max(0f, minThrowUpImpulse), Mathf.Max(minThrowUpImpulse, throwUpImpulse), Mathf.Clamp01(throwPower)));
+
+        float timeUp = upwardVelocity / gravity;
+        float fallDistance = Mathf.Max(0.05f, apexAboveOrigin - heightDelta);
+        float timeDown = Mathf.Sqrt(2f * fallDistance / gravity);
+        float flightTime = Mathf.Max(0.1f, timeUp + timeDown);
+
+        Vector3 horizontalVelocity = horizontalDelta / flightTime;
+        float horizontalSpeed = horizontalVelocity.magnitude;
+        float maxHorizontalSpeed = Mathf.Lerp(
+            Mathf.Max(0.05f, minThrowImpulse),
+            Mathf.Max(minThrowImpulse, throwImpulse),
+            Mathf.Clamp01(throwPower));
+
+        if (horizontalSpeed > maxHorizontalSpeed)
+        {
+            horizontalVelocity = horizontalVelocity.normalized * maxHorizontalSpeed;
+        }
+
+        return horizontalVelocity + Vector3.up * upwardVelocity;
+    }
+
+    private Vector3 ResolveThrowTarget(Vector2 screenPosition, Vector3 throwOrigin, float throwPower)
     {
         Ray ray = attachedCamera.ScreenPointToRay(screenPosition);
         RaycastHit[] hits = Physics.RaycastAll(ray, pickRayDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
@@ -531,6 +630,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             hasPoint = true;
         }
 
+        float dynamicDistance = Mathf.Lerp(
+            Mathf.Max(0.1f, minThrowForwardFallbackDistance),
+            Mathf.Max(minThrowForwardFallbackDistance, throwForwardFallbackDistance),
+            Mathf.Clamp01(throwPower));
+
         if (!hasPoint)
         {
             Vector3 forward = attachedCamera != null ? attachedCamera.transform.forward : transform.forward;
@@ -540,7 +644,16 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
                 forward = Vector3.forward;
             }
 
-            bestPoint = throwOrigin + forward.normalized * Mathf.Max(0.5f, throwForwardFallbackDistance);
+            bestPoint = throwOrigin + forward.normalized * dynamicDistance;
+        }
+        else
+        {
+            Vector3 horizontalOffset = bestPoint - throwOrigin;
+            horizontalOffset.y = 0f;
+            if (horizontalOffset.magnitude > dynamicDistance)
+            {
+                bestPoint = throwOrigin + horizontalOffset.normalized * dynamicDistance;
+            }
         }
 
         NavMeshHit navHit;
@@ -715,7 +828,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         }
 
         EnsureAimPreview();
-        Vector3 target = ResolveThrowTarget(currentPointerPosition, holdAnchor.position);
+        Vector3 target = ResolveThrowTarget(currentPointerPosition, holdAnchor.position, CalculateThrowPower(currentPointerPosition));
         Vector3 markerPosition = target + Vector3.up * 0.04f;
 
         if (aimPreviewLine != null)
@@ -801,7 +914,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
     private Vector3 GetTargetHeldViewportPosition()
     {
-        if (!moveHeldToyWithPointer || heldToy == null || attachedCamera == null)
+        if (!moveHeldToyWithPointer
+            || heldToy == null
+            || attachedCamera == null
+            || pointerMode == PointerMode.None
+            || pointerStartedAsPickupOnly)
         {
             return heldViewportPosition;
         }
@@ -816,6 +933,11 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         viewport.y = Mathf.Clamp(viewport.y, Mathf.Min(heldViewportMin.y, heldViewportMax.y), Mathf.Max(heldViewportMin.y, heldViewportMax.y));
 
         return new Vector3(viewport.x, viewport.y, heldViewportPosition.z);
+    }
+
+    private Vector3 GetCurrentHeldViewportPosition()
+    {
+        return currentHeldViewportPosition == Vector3.zero ? heldViewportPosition : currentHeldViewportPosition;
     }
 
     private void UpdateReturnAnchor(DogRoomAgent dog)
@@ -941,6 +1063,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
         pointerMode = PointerMode.None;
         activeTouchFingerId = -1;
+        pointerStartedAsPickupOnly = false;
     }
 
     private static bool IsPointerOverUi()

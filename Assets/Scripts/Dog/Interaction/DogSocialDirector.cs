@@ -23,7 +23,10 @@ public class DogSocialDirector : MonoBehaviour
     private const string LabradorBarkAssetPath = "Assets/Audio/bark_light.mp3";
     private const string CorgiBarkAssetPath = "Assets/Audio/bark_dark.mp3";
     private const string AmbientCarAssetPath = "Assets/Audio/ambient_car.mp3";
-    private const float CozySocialMeetDistance = 0.55f;
+    private const float AmbientCarVolumeMultiplier = 1.5f;
+    private const float CozySocialMeetDistance = 0.46f;
+    private const float MaximumProximityInteractionStartDistance = 1.35f;
+    private const float SocialApproachReachedDistance = 0.1f;
     private const float MinimumSocialInteractionDelay = 120f;
     private const float MaximumSocialInteractionDelay = 180f;
     private const float MinimumPairCooldownSeconds = 150f;
@@ -38,6 +41,7 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private Vector2 initialInteractionDelayRange = new Vector2(60f, 140f);
     [SerializeField] private float meetDistance = CozySocialMeetDistance;
     [SerializeField] private float minimumDogSpacing = CozySocialMeetDistance;
+    [SerializeField] private float maxProximityInteractionStartDistance = MaximumProximityInteractionStartDistance;
     [SerializeField] private float approachTimeout = 5f;
     [SerializeField] private float faceDuration = 0.75f;
     [SerializeField] private float preAnimationHeadLookSettleDuration = 0.25f;
@@ -67,8 +71,6 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private float ambientCarIntervalSeconds = 60f;
     [SerializeField, Range(0f, 1f)] private float barkVolume = 1f;
     [SerializeField] private float barkSpacing = 0.18f;
-    [SerializeField, Range(1, 5)] private int barkAudioRepeatCount = 3;
-    [SerializeField] private float barkAudioRepeatGap = 0.04f;
 
     private Coroutine socialRoutine;
     private Coroutine backgroundMusicRoutine;
@@ -290,6 +292,12 @@ public class DogSocialDirector : MonoBehaviour
                     continue;
                 }
 
+                float distance = Vector3.Distance(firstCandidate.transform.position, secondCandidate.transform.position);
+                if (distance > GetEffectiveProximityInteractionStartDistance())
+                {
+                    continue;
+                }
+
                 float weight = 1f;
                 if (UsesRecentDogs(firstCandidate, secondCandidate))
                 {
@@ -319,6 +327,14 @@ public class DogSocialDirector : MonoBehaviour
         firstDog = selectedCandidate.First;
         secondDog = selectedCandidate.Second;
         return firstDog != null && secondDog != null && firstDog != secondDog;
+    }
+
+    private float GetEffectiveProximityInteractionStartDistance()
+    {
+        float requestedDistance = maxProximityInteractionStartDistance > 0f
+            ? maxProximityInteractionStartDistance
+            : MaximumProximityInteractionStartDistance;
+        return Mathf.Clamp(requestedDistance, GetEffectiveMeetDistance(), 2.5f);
     }
 
     private List<DogRoomAgent> GetAvailableDogs()
@@ -511,7 +527,7 @@ public class DogSocialDirector : MonoBehaviour
         firstDog.PauseForSocial();
         secondDog.PauseForSocial();
 
-        bool cameraFocusStarted = BeginSocialCameraFocus(firstDog, secondDog);
+        int cameraFocusId = BeginSocialCameraFocus(firstDog, secondDog);
         try
         {
             switch (interactionType)
@@ -533,9 +549,9 @@ public class DogSocialDirector : MonoBehaviour
         finally
         {
             EndSocialHeadLook(firstDog, secondDog);
-            if (cameraFocusStarted && resolvedDogCamera != null)
+            if (cameraFocusId != 0 && resolvedDogCamera != null)
             {
-                resolvedDogCamera.EndInteractionFocus();
+                resolvedDogCamera.EndFocus(cameraFocusId);
             }
         }
     }
@@ -592,10 +608,10 @@ public class DogSocialDirector : MonoBehaviour
 
         if (TryGetPlayfulFollowPoints(invitingDog, respondingDog, out Vector3 respondingPoint, out Vector3 invitingPoint))
         {
-            Coroutine moveResponder = StartCoroutine(respondingDog.MoveNear(respondingPoint, approachTimeout, DogMovementPace.Run));
+            Coroutine moveResponder = StartCoroutine(respondingDog.MoveNearSocial(respondingPoint, approachTimeout, DogMovementPace.Run, SocialApproachReachedDistance));
             yield return moveResponder;
 
-            Coroutine moveInviter = StartCoroutine(invitingDog.MoveNear(invitingPoint, approachTimeout, DogMovementPace.Trot));
+            Coroutine moveInviter = StartCoroutine(invitingDog.MoveNearSocial(invitingPoint, approachTimeout, DogMovementPace.Trot, SocialApproachReachedDistance));
             yield return moveInviter;
         }
 
@@ -638,8 +654,8 @@ public class DogSocialDirector : MonoBehaviour
         Vector3 secondPoint,
         DogMovementPace secondPace)
     {
-        Coroutine moveFirst = StartCoroutine(firstDog.MoveNear(firstPoint, approachTimeout, firstPace));
-        Coroutine moveSecond = StartCoroutine(secondDog.MoveNear(secondPoint, approachTimeout, secondPace));
+        Coroutine moveFirst = StartCoroutine(firstDog.MoveNearSocial(firstPoint, approachTimeout, firstPace, SocialApproachReachedDistance));
+        Coroutine moveSecond = StartCoroutine(secondDog.MoveNearSocial(secondPoint, approachTimeout, secondPace, SocialApproachReachedDistance));
         yield return moveFirst;
         yield return moveSecond;
     }
@@ -807,7 +823,7 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         requestedDistance = Mathf.Min(requestedDistance, CozySocialMeetDistance);
-        return Mathf.Clamp(requestedDistance, 0.35f, 1.25f);
+        return Mathf.Clamp(requestedDistance, 0.22f, 1.25f);
     }
 
     private void TryRebalanceMeetingPoints(DogRoomAgent firstDog, DogRoomAgent secondDog, float targetDistance, ref Vector3 pointA, ref Vector3 pointB)
@@ -841,21 +857,20 @@ public class DogSocialDirector : MonoBehaviour
         }
     }
 
-    private bool BeginSocialCameraFocus(DogRoomAgent firstDog, DogRoomAgent secondDog)
+    private int BeginSocialCameraFocus(DogRoomAgent firstDog, DogRoomAgent secondDog)
     {
         if (!focusCameraDuringSocialInteractions)
         {
-            return false;
+            return 0;
         }
 
         DogCycleCamera dogCamera = ResolveDogCamera();
         if (dogCamera == null)
         {
-            return false;
+            return 0;
         }
 
-        dogCamera.BeginPairInteractionFocus(firstDog.transform, secondDog.transform, socialCameraFocusOffset);
-        return true;
+        return dogCamera.BeginPairFocus(firstDog.transform, secondDog.transform, DogCameraFocusPriority.SocialInteraction, socialCameraFocusOffset);
     }
 
     private DogCycleCamera ResolveDogCamera()
@@ -1037,8 +1052,8 @@ public class DogSocialDirector : MonoBehaviour
         float barkDuration = 0f;
         if (barkClip != null)
         {
-            barkDuration = GetRepeatedBarkAudioDuration(barkClip);
-            StartCoroutine(PlayRepeatedBarkAudio(agent, barkClip));
+            barkDuration = GetBarkAudioDuration(barkClip);
+            PlayBarkAudio(agent, barkClip);
         }
 
         yield return StartCoroutine(agent.PlayBark(barkDuration));
@@ -1050,11 +1065,11 @@ public class DogSocialDirector : MonoBehaviour
         yield return PlayBarkForAgent(agent);
     }
 
-    private IEnumerator PlayRepeatedBarkAudio(DogRoomAgent agent, AudioClip barkClip)
+    private void PlayBarkAudio(DogRoomAgent agent, AudioClip barkClip)
     {
         if (agent == null || barkClip == null)
         {
-            yield break;
+            return;
         }
 
         GameObject barkAudioObject = new GameObject(agent.name + "_BarkAudio");
@@ -1067,34 +1082,22 @@ public class DogSocialDirector : MonoBehaviour
         barkSource.loop = false;
         barkSource.playOnAwake = false;
 
-        int repeatCount = Mathf.Max(1, barkAudioRepeatCount);
-        float repeatDelay = Mathf.Max(0.01f, barkClip.length + barkAudioRepeatGap);
-        for (int i = 0; i < repeatCount; i++)
+        if (!agent.HasHeldToy)
         {
-            if (agent == null || agent.HasHeldToy)
-            {
-                break;
-            }
-
             barkSource.PlayOneShot(barkClip, barkVolume);
-            if (i < repeatCount - 1)
-            {
-                yield return new WaitForSeconds(repeatDelay);
-            }
         }
 
         Destroy(barkAudioObject, barkClip.length + 0.1f);
     }
 
-    private float GetRepeatedBarkAudioDuration(AudioClip barkClip)
+    private float GetBarkAudioDuration(AudioClip barkClip)
     {
         if (barkClip == null)
         {
             return 0f;
         }
 
-        int repeatCount = Mathf.Max(1, barkAudioRepeatCount);
-        return barkClip.length * repeatCount + Mathf.Max(0f, barkAudioRepeatGap) * Mathf.Max(0, repeatCount - 1);
+        return barkClip.length;
     }
 
     private AudioClip GetBarkClipForAgent(DogRoomAgent agent)
@@ -1251,7 +1254,7 @@ public class DogSocialDirector : MonoBehaviour
         {
             yield return new WaitForSeconds(Mathf.Max(1f, ambientCarIntervalSeconds));
             ConfigureAmbientCarSource();
-            ambientCarSource.PlayOneShot(ambientCarClip, Mathf.Clamp01(ambientCarVolume));
+            ambientCarSource.PlayOneShot(ambientCarClip, Mathf.Clamp01(ambientCarVolume * AmbientCarVolumeMultiplier));
         }
 
         ambientCarRoutine = null;

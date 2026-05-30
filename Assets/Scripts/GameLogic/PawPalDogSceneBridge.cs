@@ -304,9 +304,9 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
 
         body.isKinematic = false;
         body.useGravity = true;
-        body.mass = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.65f : 0.35f;
-        body.linearDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.08f : 0f;
-        body.angularDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.16f : 0.05f;
+        body.mass = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.9f : 0.35f;
+        body.linearDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.14f : 0f;
+        body.angularDamping = definition.ToyInteractionMode == PawPalToyInteractionMode.PawHitRoll ? 0.26f : 0.05f;
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
         TrySetToyTag(spawnedToy);
@@ -397,6 +397,29 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         {
             mainCamera.gameObject.AddComponent<PawPalPlayerToyThrowController>();
         }
+
+        EnsureDogCycleCamera(mainCamera);
+    }
+
+    private static void EnsureDogCycleCamera(Camera mainCamera)
+    {
+        if (mainCamera == null || mainCamera.GetComponent<DogCycleCamera>() != null)
+        {
+            return;
+        }
+
+        if (mainCamera.GetComponent<CameraFollow>() != null)
+        {
+            return;
+        }
+
+        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        if (agents == null || agents.Length == 0)
+        {
+            return;
+        }
+
+        mainCamera.gameObject.AddComponent<DogCycleCamera>();
     }
 
     private void RefreshSingleAgentPresentation(DogRoomAgent agent)
@@ -1160,6 +1183,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
 
         if (metadata != null)
         {
+            metadata.ConfigureLargeToyPhysicsAndNavigation();
             metadata.SetBlocksDogNavigation(true, paddedRadius);
         }
 

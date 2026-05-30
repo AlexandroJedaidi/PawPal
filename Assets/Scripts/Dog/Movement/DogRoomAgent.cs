@@ -38,10 +38,15 @@ public class DogRoomAgent : MonoBehaviour
     private const string EditorWalkAudioAssetPath = "Assets/Audio/dog_walk.mp3";
     private const string EditorBallBounceAudioAssetPath = "Assets/Audio/ball_bounce.mp3";
     private const string EditorToyPickupAudioAssetPath = "Assets/Audio/toy_pickup.mp3";
+    private const string EditorSniffingAudioAssetPath = "Assets/Audio/sniffing.mp3";
+    private const string EditorScratchAndShakingAudioAssetPath = "Assets/Audio/scratch-and-shaking.mp3";
+    private const string EditorShakingX3AudioAssetPath = "Assets/Audio/shakingx3.mp3";
 #endif
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
+    private const float BigBallHitImpulseScale = 0.75f;
+    private const float BigBallHitTorqueScale = 0.75f;
     private static readonly HashSet<Transform> ClaimedToyTransforms = new HashSet<Transform>();
     private static readonly List<DogRoomAgent> ActiveAgents = new List<DogRoomAgent>();
     private static readonly Dictionary<DogRoomAgent, Vector3> ReservedDestinations = new Dictionary<DogRoomAgent, Vector3>();
@@ -216,6 +221,10 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float bigBallChaseTimeout = 2.5f;
     [SerializeField] private float bigBallChaseFollowDistance = 0.55f;
 
+    [Header("Camera Focus")]
+    [SerializeField] private bool focusCameraDuringToyInteractions = true;
+    [SerializeField] private Vector3 toyCameraFocusOffset = new Vector3(0f, 0.35f, 0f);
+
     [Header("Audio")]
     [SerializeField] private AudioClip walkingClip;
     [SerializeField, Range(0f, 1f)] private float walkingVolume = 0.18f;
@@ -223,6 +232,10 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float ballBounceVolume = 0.65f;
     [SerializeField] private AudioClip toyPickupClip;
     [SerializeField, Range(0f, 1f)] private float toyPickupVolume = 0.7f;
+    [SerializeField] private AudioClip sniffingClip;
+    [SerializeField] private AudioClip scratchAndShakingClip;
+    [SerializeField] private AudioClip shakingX3Clip;
+    [SerializeField, Range(0f, 1f)] private float idleActionVolume = 0.75f;
     [SerializeField] private float minSecondsBetweenBallBounceSounds = 0.18f;
 
     private Animator animator;
@@ -278,6 +291,10 @@ public class DogRoomAgent : MonoBehaviour
     private bool isToyRoutineActive;
     private Coroutine fetchRoutine;
     private float nextAllowedBallBounceAudioTime;
+    private DogCycleCamera resolvedDogCamera;
+    private int activeFetchCameraFocusId;
+    private int activeToyCameraFocusId;
+    private int activeToyPairCameraFocusId;
     private PlayableGraph directClipGraph;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
@@ -372,6 +389,7 @@ public class DogRoomAgent : MonoBehaviour
         isPlayingOneShotAnimation = false;
         isToyRoutineActive = false;
         fetchRoutine = null;
+        EndActiveDogCameraFocuses();
         DropHeldToyImmediately();
         ReleaseReservedDestination();
         ReleaseClaimedToy();
@@ -520,6 +538,11 @@ public class DogRoomAgent : MonoBehaviour
         yield return TravelTo(worldPosition, timeout, pace, false, reachedDistance, true);
     }
 
+    public IEnumerator MoveNearSocial(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
+    {
+        yield return TravelTo(worldPosition, timeout, pace, false, reachedDistance, true, true, false);
+    }
+
     public IEnumerator FaceTarget(Transform target, float duration)
     {
         if (target == null)
@@ -609,7 +632,8 @@ public class DogRoomAgent : MonoBehaviour
     {
         int stateHash = idleIndex == scratchIdleIndex ? scratchStateHash : tailWagStateHash;
         string stateName = idleIndex == scratchIdleIndex ? scratchStateName : tailWagStateName;
-        yield return PlayOneShotAnimation(stateHash, stateName, idleIndex, duration);
+        AudioClip idleAudioClip = idleIndex == scratchIdleIndex ? scratchAndShakingClip : null;
+        yield return PlayOneShotAnimation(stateHash, stateName, idleIndex, duration, idleAudioClip);
     }
 
     private Animator ResolveAnimator()
@@ -1069,6 +1093,11 @@ public class DogRoomAgent : MonoBehaviour
 
     private IEnumerator TravelTo(Vector3 worldPosition, float timeout, DogMovementPace pace, bool stopWhenSocialPaused, float reachedDistance, bool preciseArrival, bool ignoreCrowding)
     {
+        yield return TravelTo(worldPosition, timeout, pace, stopWhenSocialPaused, reachedDistance, preciseArrival, ignoreCrowding, true);
+    }
+
+    private IEnumerator TravelTo(Vector3 worldPosition, float timeout, DogMovementPace pace, bool stopWhenSocialPaused, float reachedDistance, bool preciseArrival, bool ignoreCrowding, bool reserveDestination)
+    {
         if (!TryEnsureOnNavMesh(true))
         {
             yield break;
@@ -1080,7 +1109,7 @@ public class DogRoomAgent : MonoBehaviour
             yield break;
         }
 
-        if (!TryReserveDestination(roomPoint))
+        if (reserveDestination && !TryReserveDestination(roomPoint))
         {
             if (!TryFindNearbyComfortablePoint(roomPoint, out roomPoint) || !TryReserveDestination(roomPoint))
             {
@@ -1874,65 +1903,69 @@ public class DogRoomAgent : MonoBehaviour
     {
         IsBusy = true;
         isToyRoutineActive = true;
+        EndActiveToyCameraFocuses();
 
-        if (toy == null)
+        try
         {
-            FinishToyRoutine();
-            yield break;
-        }
-
-        if (IsPawHitRollToy(toy))
-        {
-            yield return PawHitRollToyRoutine(toy);
-            FinishToyRoutine();
-            yield break;
-        }
-
-        Vector3 approachPoint;
-        if (!TryGetToyApproachPoint(toy, out approachPoint))
-        {
-            FinishToyRoutine();
-            yield break;
-        }
-
-        yield return TravelTo(approachPoint, toyApproachTimeout, DogMovementPace.Walk, true);
-        if (socialPaused || toy == null)
-        {
-            FinishToyRoutine();
-            yield break;
-        }
-
-        StopAgent();
-        yield return FaceWorldPoint(toy.position, toyFaceDuration);
-        if (!IsToyWithinPickupDistance(toy))
-        {
-            FinishToyRoutine();
-            yield break;
-        }
-
-        yield return PlayPickupToy(toy.gameObject);
-
-        if (HasHeldToy)
-        {
-            yield return PlayToyBurstIfAllowed();
-        }
-
-        if (HasHeldToy && carryToyToNewSpot)
-        {
-            Vector3 carryDestination;
-            if (TryGetRoamPoint(out carryDestination))
+            if (toy == null)
             {
-                yield return TravelTo(carryDestination, 0f, DogMovementPace.Walk, true);
+                yield break;
+            }
+
+            activeToyCameraFocusId = BeginDogCameraFocus(toy, DogCameraFocusPriority.AmbientToy);
+
+            if (IsPawHitRollToy(toy))
+            {
+                yield return PawHitRollToyRoutine(toy);
+                yield break;
+            }
+
+            Vector3 approachPoint;
+            if (!TryGetToyApproachPoint(toy, out approachPoint))
+            {
+                yield break;
+            }
+
+            yield return TravelTo(approachPoint, toyApproachTimeout, DogMovementPace.Walk, true);
+            if (socialPaused || toy == null)
+            {
+                yield break;
+            }
+
+            StopAgent();
+            yield return FaceWorldPoint(toy.position, toyFaceDuration);
+            if (!IsToyWithinPickupDistance(toy))
+            {
+                yield break;
+            }
+
+            yield return PlayPickupToy(toy.gameObject);
+
+            if (HasHeldToy)
+            {
+                yield return PlayToyBurstIfAllowed();
+            }
+
+            if (HasHeldToy && carryToyToNewSpot)
+            {
+                Vector3 carryDestination;
+                if (TryGetRoamPoint(out carryDestination))
+                {
+                    yield return TravelTo(carryDestination, 0f, DogMovementPace.Walk, true);
+                }
+            }
+
+            if (HasHeldToy)
+            {
+                yield return new WaitForSeconds(Random.Range(minToyCarryDuration, maxToyCarryDuration));
+                yield return PlayPutDownToy();
             }
         }
-
-        if (HasHeldToy)
+        finally
         {
-            yield return new WaitForSeconds(Random.Range(minToyCarryDuration, maxToyCarryDuration));
-            yield return PlayPutDownToy();
+            EndActiveToyCameraFocuses();
+            FinishToyRoutine();
         }
-
-        FinishToyRoutine();
     }
 
     private IEnumerator FetchToyRoutine(GameObject toy, Transform returnTarget, System.Action onCompleted)
@@ -1957,6 +1990,9 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         Transform toyTransform = toy.transform;
+        EndActiveFetchCameraFocus();
+        activeFetchCameraFocusId = BeginDogCameraFocus(toyTransform, DogCameraFocusPriority.Fetch);
+
         Vector3 approachPoint;
         if (TryGetToyApproachPoint(toyTransform, out approachPoint))
         {
@@ -2027,6 +2063,7 @@ public class DogRoomAgent : MonoBehaviour
 
     private void FinishFetchToyRoutine(bool completed, System.Action onCompleted)
     {
+        EndActiveFetchCameraFocus();
         DropHeldToyImmediately();
         ReleaseClaimedToy();
         nextAllowedToyPickupTime = Time.time + minimumSecondsBetweenToyPickups;
@@ -2089,44 +2126,56 @@ public class DogRoomAgent : MonoBehaviour
         if (hasChasePartner)
         {
             chasePartner.PauseForSocial();
+            activeToyPairCameraFocusId = BeginDogCameraFocus(chasePartner.transform, DogCameraFocusPriority.AmbientToy);
         }
 
-        int runCount = Random.Range(Mathf.Max(1, minToyPlayRuns), Mathf.Max(minToyPlayRuns, maxToyPlayRuns) + 1);
-        for (int i = 0; i < runCount; i++)
+        try
         {
-            Vector3 runPoint;
-            if (!TryGetToyPlayRunPoint(out runPoint))
+            int runCount = Random.Range(Mathf.Max(1, minToyPlayRuns), Mathf.Max(minToyPlayRuns, maxToyPlayRuns) + 1);
+            for (int i = 0; i < runCount; i++)
             {
-                continue;
-            }
-
-            Coroutine partnerMove = null;
-            if (hasChasePartner && chasePartner != null)
-            {
-                Vector3 partnerPoint;
-                if (TryGetChasePartnerPoint(chasePartner, runPoint, out partnerPoint))
+                Vector3 runPoint;
+                if (!TryGetToyPlayRunPoint(out runPoint))
                 {
-                    partnerMove = StartCoroutine(chasePartner.MoveNear(partnerPoint, toyPlayRunTimeout, DogMovementPace.Run));
+                    continue;
+                }
+
+                Coroutine partnerMove = null;
+                if (hasChasePartner && chasePartner != null)
+                {
+                    Vector3 partnerPoint;
+                    if (TryGetChasePartnerPoint(chasePartner, runPoint, out partnerPoint))
+                    {
+                        partnerMove = StartCoroutine(chasePartner.MoveNear(partnerPoint, toyPlayRunTimeout, DogMovementPace.Run));
+                    }
+                }
+
+                yield return TravelToIgnoringCrowding(runPoint, toyPlayRunTimeout, DogMovementPace.Run, true);
+
+                if (partnerMove != null)
+                {
+                    yield return partnerMove;
                 }
             }
 
-            yield return TravelToIgnoringCrowding(runPoint, toyPlayRunTimeout, DogMovementPace.Run, true);
-
-            if (partnerMove != null)
+            if (hasChasePartner && chasePartner != null)
             {
-                yield return partnerMove;
+                yield return FaceTarget(chasePartner.transform, toyFaceDuration);
+                yield return chasePartner.FaceTarget(transform, toyFaceDuration);
+                Coroutine wagPartner = StartCoroutine(chasePartner.PlayTailWag());
+                Coroutine wagHolder = StartCoroutine(PlayTailWag());
+                yield return wagPartner;
+                yield return wagHolder;
             }
         }
-
-        if (hasChasePartner && chasePartner != null)
+        finally
         {
-            yield return FaceTarget(chasePartner.transform, toyFaceDuration);
-            yield return chasePartner.FaceTarget(transform, toyFaceDuration);
-            Coroutine wagPartner = StartCoroutine(chasePartner.PlayTailWag());
-            Coroutine wagHolder = StartCoroutine(PlayTailWag());
-            yield return wagPartner;
-            yield return wagHolder;
-            chasePartner.StartRoaming();
+            EndDogCameraFocus(activeToyPairCameraFocusId);
+            activeToyPairCameraFocusId = 0;
+            if (hasChasePartner && chasePartner != null && chasePartner.isActiveAndEnabled)
+            {
+                chasePartner.StartRoaming();
+            }
         }
     }
 
@@ -2434,15 +2483,30 @@ public class DogRoomAgent : MonoBehaviour
             return;
         }
 
+        PawPalToyRuntimeMetadata metadata = toy.GetComponentInParent<PawPalToyRuntimeMetadata>();
         Rigidbody body = toy.GetComponentInParent<Rigidbody>();
+        bool needsLargeToySetup = body == null || metadata == null;
+        if (metadata == null && PawPalToyRuntimeMetadata.IsPawHitRollToyName(toy.name))
+        {
+            metadata = toy.gameObject.AddComponent<PawPalToyRuntimeMetadata>();
+        }
+
+        if (needsLargeToySetup && metadata != null)
+        {
+            metadata.Initialize(string.Empty, PawPalToyInteractionMode.PawHitRoll);
+            metadata.ConfigureLargeToyPhysicsAndNavigation();
+        }
+
+        Transform toyRoot = metadata != null ? metadata.transform : toy;
+        body = toyRoot.GetComponentInParent<Rigidbody>();
         if (body == null)
         {
-            body = toy.GetComponentInChildren<Rigidbody>();
+            body = toyRoot.GetComponentInChildren<Rigidbody>();
         }
 
         if (body == null)
         {
-            body = toy.gameObject.AddComponent<Rigidbody>();
+            body = toyRoot.gameObject.AddComponent<Rigidbody>();
         }
 
         body.isKinematic = false;
@@ -2461,13 +2525,13 @@ public class DogRoomAgent : MonoBehaviour
         awayFromDog.Normalize();
         Vector3 sideDirection = transform.right * (useLeftPaw ? -1f : 1f);
         Vector3 impulseDirection = (awayFromDog + sideDirection * Mathf.Max(0f, bigBallSideImpulseBias)).normalized;
-        body.AddForce(impulseDirection * Mathf.Max(0f, bigBallHitImpulse), ForceMode.Impulse);
+        body.AddForce(impulseDirection * Mathf.Max(0f, bigBallHitImpulse * BigBallHitImpulseScale), ForceMode.Impulse);
         PlayBallBounceAudio(GetBigBallWorldCenter(toy));
 
         Vector3 torqueAxis = Vector3.Cross(Vector3.up, impulseDirection);
         if (torqueAxis.sqrMagnitude > 0.001f)
         {
-            body.AddTorque(torqueAxis.normalized * Mathf.Max(0f, bigBallHitTorque), ForceMode.Impulse);
+            body.AddTorque(torqueAxis.normalized * Mathf.Max(0f, bigBallHitTorque * BigBallHitTorqueScale), ForceMode.Impulse);
         }
     }
 
@@ -2899,6 +2963,82 @@ public class DogRoomAgent : MonoBehaviour
         IsBusy = false;
     }
 
+    private int BeginDogCameraFocus(Transform secondaryTarget, DogCameraFocusPriority priority)
+    {
+        if (!focusCameraDuringToyInteractions)
+        {
+            return 0;
+        }
+
+        DogCycleCamera dogCamera = ResolveDogCamera();
+        if (dogCamera == null)
+        {
+            return 0;
+        }
+
+        if (secondaryTarget != null && secondaryTarget != transform)
+        {
+            return dogCamera.BeginPairFocus(transform, secondaryTarget, priority, toyCameraFocusOffset);
+        }
+
+        return dogCamera.BeginFocus(transform, priority, toyCameraFocusOffset);
+    }
+
+    private void EndDogCameraFocus(int focusId)
+    {
+        if (focusId == 0)
+        {
+            return;
+        }
+
+        DogCycleCamera dogCamera = ResolveDogCamera();
+        if (dogCamera != null)
+        {
+            dogCamera.EndFocus(focusId);
+        }
+    }
+
+    private void EndActiveFetchCameraFocus()
+    {
+        EndDogCameraFocus(activeFetchCameraFocusId);
+        activeFetchCameraFocusId = 0;
+    }
+
+    private void EndActiveToyCameraFocuses()
+    {
+        EndDogCameraFocus(activeToyPairCameraFocusId);
+        activeToyPairCameraFocusId = 0;
+        EndDogCameraFocus(activeToyCameraFocusId);
+        activeToyCameraFocusId = 0;
+    }
+
+    private void EndActiveDogCameraFocuses()
+    {
+        EndActiveFetchCameraFocus();
+        EndActiveToyCameraFocuses();
+    }
+
+    private DogCycleCamera ResolveDogCamera()
+    {
+        if (resolvedDogCamera != null)
+        {
+            return resolvedDogCamera;
+        }
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera != null)
+        {
+            resolvedDogCamera = mainCamera.GetComponent<DogCycleCamera>();
+            if (resolvedDogCamera != null)
+            {
+                return resolvedDogCamera;
+            }
+        }
+
+        resolvedDogCamera = FindFirstObjectByType<DogCycleCamera>();
+        return resolvedDogCamera;
+    }
+
     private void ReleaseClaimedToy()
     {
         if (claimedToy == null)
@@ -3081,6 +3221,21 @@ public class DogRoomAgent : MonoBehaviour
         if (toyPickupClip == null)
         {
             toyPickupClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorToyPickupAudioAssetPath);
+        }
+
+        if (sniffingClip == null)
+        {
+            sniffingClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorSniffingAudioAssetPath);
+        }
+
+        if (scratchAndShakingClip == null)
+        {
+            scratchAndShakingClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorScratchAndShakingAudioAssetPath);
+        }
+
+        if (shakingX3Clip == null)
+        {
+            shakingX3Clip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorShakingX3AudioAssetPath);
         }
 #endif
     }
@@ -3300,16 +3455,17 @@ public class DogRoomAgent : MonoBehaviour
         int importedIndex = optionIndex - stateCount;
         if (useImportedStandingIdleClipsInEditor && importedIndex < ImportedStandingIdleClipSuffixes.Length)
         {
+            string idleSuffix = ImportedStandingIdleClipSuffixes[importedIndex];
             AnimationClip clip;
-            if (TryGetImportedStandingIdleClip(ImportedStandingIdleClipSuffixes[importedIndex], out clip))
+            if (TryGetImportedStandingIdleClip(idleSuffix, out clip))
             {
-                yield return PlayImportedStandingIdleClip(clip, duration, false);
+                yield return PlayImportedStandingIdleClip(clip, duration, false, GetImportedStandingIdleAudioClip(idleSuffix));
                 yield break;
             }
         }
     }
 
-    private IEnumerator PlayImportedStandingIdleClip(AnimationClip clip, float duration, bool loop)
+    private IEnumerator PlayImportedStandingIdleClip(AnimationClip clip, float duration, bool loop, AudioClip startAudioClip)
     {
         if (clip == null)
         {
@@ -3321,6 +3477,7 @@ public class DogRoomAgent : MonoBehaviour
         yield return WaitForLocomotionToSettle();
         animator.SetBool(MoveHash, false);
         SetNeutralIdle();
+        PlaySpatialOneShot(startAudioClip, transform.position, idleActionVolume);
 
         float targetDuration = loop
             ? Mathf.Max(0.05f, duration)
@@ -3329,6 +3486,22 @@ public class DogRoomAgent : MonoBehaviour
 
         SetNeutralIdle();
         isPlayingOneShotAnimation = false;
+    }
+
+    private AudioClip GetImportedStandingIdleAudioClip(string suffix)
+    {
+        if (string.Equals(suffix, "Idle_3", System.StringComparison.Ordinal))
+        {
+            return shakingX3Clip;
+        }
+
+        if (string.Equals(suffix, "Idle_4", System.StringComparison.Ordinal)
+            || string.Equals(suffix, "Idle_7", System.StringComparison.Ordinal))
+        {
+            return sniffingClip;
+        }
+
+        return null;
     }
 
     private IEnumerator PlayImportedIdleFiveSequence(float duration)
@@ -3370,12 +3543,18 @@ public class DogRoomAgent : MonoBehaviour
 
     private IEnumerator PlayOneShotAnimation(int stateHash, string stateName, int fallbackIdleIndex, float duration)
     {
+        yield return PlayOneShotAnimation(stateHash, stateName, fallbackIdleIndex, duration, null);
+    }
+
+    private IEnumerator PlayOneShotAnimation(int stateHash, string stateName, int fallbackIdleIndex, float duration, AudioClip startAudioClip)
+    {
         isPlayingOneShotAnimation = true;
         StopAgent();
         yield return WaitForLocomotionToSettle();
 
         animator.SetBool(MoveHash, false);
         SetNeutralIdle();
+        PlaySpatialOneShot(startAudioClip, transform.position, idleActionVolume);
 
         if (stateHash != 0)
         {

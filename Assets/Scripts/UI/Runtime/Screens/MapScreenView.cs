@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -77,6 +76,7 @@ public class MapScreenView : AppScreenViewBase
     private static readonly Color32 WalkGreenDark = new Color32(20, 167, 47, 255);
     private static readonly Color32 EncounterCoral = new Color32(234, 130, 108, 255);
     private static readonly Color32 TransparentHit = new Color32(255, 255, 255, 1);
+    private static readonly Vector2 SelectorArrowSize = new Vector2(16f, 24f);
 
     private static readonly ActivityProgressData[] GuildActivities =
     {
@@ -150,9 +150,8 @@ public class MapScreenView : AppScreenViewBase
     private RectTransform socialAddFriendRoot;
     private RectTransform socialEnterClubRoot;
     private TextMeshProUGUI competitionDogNameLabel;
-    private readonly List<TrainerLevelWidgetView> trainerLevelWidgets = new List<TrainerLevelWidgetView>();
-
     private MapMode currentMode;
+    private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
     {
@@ -248,18 +247,14 @@ public class MapScreenView : AppScreenViewBase
 
         if (exactFrame != null)
         {
-            exactFrame.anchorMin = new Vector2(0.5f, 1f);
-            exactFrame.anchorMax = new Vector2(0.5f, 1f);
-            exactFrame.pivot = new Vector2(0.5f, 1f);
-            exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-            exactFrame.anchoredPosition = Vector2.zero;
+            frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame);
+            ApplyResponsivePositions();
         }
     }
 
     private void BuildBaseState(RectTransform parent)
     {
         CreateBackgroundImage(parent, "MapMainBackground", "UI/Figma/Map/map_main_background", -46f, 0f, 524f, 786f);
-        CreateTrainerLevel(parent, 109f, 0f);
 
         CreateLocationHotspot(parent, "CompetitionCenter", 76f, 130f, 175f, 86f, "Competition\ncenter", "icon_trophy_brand", 36f, delegate
         {
@@ -301,7 +296,6 @@ public class MapScreenView : AppScreenViewBase
     private void BuildWalkState(RectTransform parent)
     {
         CreateBackgroundImage(parent, "WalkBackground", "UI/Figma/Map/map_walk_background", -65f, 0f, 524f, 786f);
-        CreateTrainerLevel(parent, 109f, 0f);
 
         Image path = CreateImageNode(parent, "WalkPath", UiTheme.RoundedTenSprite, new Color32(255, 148, 148, 255), 102f, 504f, 14f, 133f);
         path.type = Image.Type.Sliced;
@@ -329,7 +323,6 @@ public class MapScreenView : AppScreenViewBase
     private void BuildCompetitionState(RectTransform parent)
     {
         CreateBackgroundImage(parent, "CompetitionBackground", "UI/Figma/Map/competition_center_background", 0f, 0f, 393f, 786f);
-        CreateTrainerLevel(parent, 109f, 0f);
 
         RectTransform panel = CreateNode("CompetitionPanel", parent, 21f, 165f, 350f, 385f);
         Image panelFill = panel.gameObject.AddComponent<Image>();
@@ -544,9 +537,82 @@ public class MapScreenView : AppScreenViewBase
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
-        rect.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
+        rect.sizeDelta = new Vector2(UiTheme.ReferenceWidth, GetFrameHeight());
         rect.anchoredPosition = Vector2.zero;
         return rect;
+    }
+
+    private void ApplyResponsivePositions()
+    {
+        float frameHeight = GetFrameHeight();
+        float visibleHeight = GetVisibleFrameHeight();
+        ApplyRootSize(baseRoot, frameHeight);
+        ApplyRootSize(walkRoot, frameHeight);
+        ApplyRootSize(competitionRoot, frameHeight);
+        ApplyRootSize(kennelAdoptRoot, frameHeight);
+        ApplyRootSize(kennelReleaseRoot, frameHeight);
+        ApplyRootSize(overlayLayer, frameHeight);
+
+        SetNodeY(baseRoot, "HomeHotspot", visibleHeight - 64f - 94f);
+        SetNodeY(baseRoot, "WalkButton", visibleHeight - 73f - 14f);
+        SetNodeY(baseRoot, "SocialButton", visibleHeight - 55f - 23f);
+
+        SetNodeY(walkRoot, "WalkHomeHotspot", visibleHeight - 64f - 129f);
+        SetNodeY(walkRoot, "WalkButton", visibleHeight - 73f - 14f);
+
+        SetBackgroundHeight(baseRoot, "MapMainBackground", frameHeight);
+        SetBackgroundHeight(walkRoot, "WalkBackground", frameHeight);
+        SetBackgroundHeight(competitionRoot, "CompetitionBackground", frameHeight);
+
+        SetNodeY(overlayLayer, "SocialSheet", visibleHeight - 618f - 15f);
+    }
+
+    private float GetFrameHeight()
+    {
+        return frameLayout.LogicalHeight > 0f ? frameLayout.LogicalHeight : UiTheme.ReferenceContentHeight;
+    }
+
+    private float GetVisibleFrameHeight()
+    {
+        return frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
+    }
+
+    private static void ApplyRootSize(RectTransform root, float height)
+    {
+        if (root != null)
+        {
+            root.sizeDelta = new Vector2(UiTheme.ReferenceWidth, height);
+        }
+    }
+
+    private static void SetNodeY(RectTransform parent, string name, float y)
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        Transform child = parent.Find(name);
+        RectTransform rect = child as RectTransform;
+        if (rect != null)
+        {
+            rect.anchoredPosition = new Vector2(rect.anchoredPosition.x, -Mathf.Max(0f, y));
+        }
+    }
+
+    private static void SetBackgroundHeight(RectTransform parent, string name, float height)
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        Transform child = parent.Find(name);
+        RectTransform rect = child as RectTransform;
+        if (rect != null)
+        {
+            rect.sizeDelta = new Vector2(rect.sizeDelta.x, height);
+        }
     }
 
     private void SetMode(MapMode mode)
@@ -614,14 +680,6 @@ public class MapScreenView : AppScreenViewBase
     private void ToggleSocialEnterClub()
     {
         SetMode(currentMode == MapMode.SocialEnterClub ? MapMode.Social : MapMode.SocialEnterClub);
-    }
-
-    private void CreateTrainerLevel(RectTransform parent, float x, float y)
-    {
-        RectTransform trainerRect = CreateNode("TrainerLevel", parent, x, y, 175f, 76f);
-        TrainerLevelWidgetView trainer = trainerRect.gameObject.AddComponent<TrainerLevelWidgetView>();
-        trainer.Initialize(sprites);
-        trainerLevelWidgets.Add(trainer);
     }
 
     private void CreateLocationHotspot(RectTransform parent, string name, float x, float y, float width, float height, string labelText, string iconName, float iconSize, UnityEngine.Events.UnityAction onClick)
@@ -856,9 +914,8 @@ public class MapScreenView : AppScreenViewBase
         arrow.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         arrow.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         arrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.sizeDelta = new Vector2(12f, 24f);
+        arrow.rectTransform.sizeDelta = SelectorArrowSize;
         arrow.rectTransform.anchoredPosition = Vector2.zero;
-        arrow.rectTransform.localRotation = Quaternion.Euler(0f, 0f, previousDog ? 90f : -90f);
         UiFactory.AddButton(hitArea.gameObject, delegate
         {
             if (onClick != null)
@@ -881,15 +938,6 @@ public class MapScreenView : AppScreenViewBase
             return;
         }
 
-        for (int i = 0; i < trainerLevelWidgets.Count; i++)
-        {
-            TrainerLevelWidgetView trainerWidget = trainerLevelWidgets[i];
-            if (trainerWidget != null)
-            {
-                trainerWidget.SetState(runtime.TrainerState.Level, runtime.GetTrainerLevelProgress01());
-            }
-        }
-
         if (competitionDogNameLabel != null)
         {
             PawPalDogState activeDog = runtime.ActiveDog;
@@ -903,6 +951,7 @@ public class MapScreenView : AppScreenViewBase
         if (runtime != null)
         {
             runtime.SelectPreviousDog();
+            DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
         }
     }
 
@@ -912,6 +961,7 @@ public class MapScreenView : AppScreenViewBase
         if (runtime != null)
         {
             runtime.SelectNextDog();
+            DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
         }
     }
 

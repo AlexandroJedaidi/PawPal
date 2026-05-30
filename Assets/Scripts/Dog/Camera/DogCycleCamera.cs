@@ -2,10 +2,22 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+public enum DogCameraFocusPriority
+{
+    AmbientToy = 10,
+    Fetch = 20,
+    NeedInteraction = 30,
+    SocialInteraction = 40
+}
 
 [DisallowMultipleComponent]
 public class DogCycleCamera : MonoBehaviour
 {
+    private const float MinimumSmartAutoSwitchInterval = 12f;
+    private static readonly List<RaycastResult> UiRaycastResults = new List<RaycastResult>();
+
     [SerializeField] private DogRoomAgent[] dogs;
     [SerializeField] private float switchInterval = 5f;
     [SerializeField] private float runtimeSelectionHoldDuration = 5f;
@@ -36,6 +48,11 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private float minimumZoomCooldown = 8f;
     [SerializeField] private Vector3 zoomHeadFocusOffset = new Vector3(0f, 0.03f, 0f);
 
+    [Header("Smart Focus")]
+    [SerializeField] private float minimumAutoSwitchInterval = 12f;
+    [SerializeField] private float focusReleaseLingerDuration = 0.35f;
+    [SerializeField] private float postFocusSwitchCooldown = 3f;
+
     private Camera attachedCamera;
     private Vector3 fixedPosition;
     private int activeIndex;
@@ -56,12 +73,26 @@ public class DogCycleCamera : MonoBehaviour
     private bool mouseDragActive;
     private int activeTouchFingerId = -1;
     private Vector2 lastManualPointerPosition;
-    private bool interactionFocusActive;
-    private Transform interactionFocusTarget;
-    private Transform interactionFocusSecondTarget;
-    private Vector3 interactionFocusOffset;
     private bool zoomFocusActive;
+    private int legacyInteractionFocusId;
+    private int nextFocusClaimId = 1;
+    private int activeFocusClaimId;
+    private float postFocusHoldUntil;
+    private readonly List<DogCameraFocusClaim> focusClaims = new List<DogCameraFocusClaim>();
     private readonly Dictionary<DogRoomAgent, Transform> headTargetsByDog = new Dictionary<DogRoomAgent, Transform>();
+
+    private sealed class DogCameraFocusClaim
+    {
+        public int Id;
+        public Transform Target;
+        public Transform SecondTarget;
+        public Vector3 Offset;
+        public DogCameraFocusPriority Priority;
+        public DogRoomAgent PrimaryDog;
+        public float StartedAt;
+        public bool Released;
+        public float ReleaseUntil;
+    }
 
     public Transform ActiveTarget
     {
@@ -70,6 +101,74 @@ public class DogCycleCamera : MonoBehaviour
             DogRoomAgent dog = GetActiveDog();
             return dog != null ? dog.transform : null;
         }
+    }
+
+    public static bool TryFocusRuntimeActiveDogFromSelection()
+    {
+        PawPalGameRuntime runtimeInstance = PawPalGameRuntime.Instance;
+        Camera mainCamera = Camera.main;
+        DogCycleCamera dogCamera = null;
+
+        if (mainCamera != null)
+        {
+            dogCamera = mainCamera.GetComponent<DogCycleCamera>();
+        }
+
+        if (dogCamera == null)
+        {
+            dogCamera = FindFirstObjectByType<DogCycleCamera>();
+        }
+
+        if (dogCamera == null && mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneDogs())
+        {
+            dogCamera = mainCamera.gameObject.AddComponent<DogCycleCamera>();
+        }
+
+        if (dogCamera != null)
+        {
+            dogCamera.FocusRuntimeActiveDogFromSelection();
+            return true;
+        }
+
+        CameraFollow legacyCamera = mainCamera != null ? mainCamera.GetComponent<CameraFollow>() : null;
+        if (legacyCamera != null && runtimeInstance != null && legacyCamera.target != null && legacyCamera.target.Length > 0)
+        {
+            legacyCamera.index = Mathf.Clamp(runtimeInstance.ActiveDogIndex, 0, legacyCamera.target.Length - 1);
+            return true;
+        }
+
+        return false;
+    }
+
+    public void FocusRuntimeActiveDogFromSelection()
+    {
+        if (runtime == null)
+        {
+            runtime = PawPalGameRuntime.Instance;
+        }
+
+        if (runtime == null || runtime.ActiveDog == null)
+        {
+            return;
+        }
+
+        focusClaims.Clear();
+        activeFocusClaimId = 0;
+        legacyInteractionFocusId = 0;
+        manualLookHoldUntil = 0f;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        switchTimer = 0f;
+        postFocusHoldUntil = Time.time + Mathf.Max(0f, postFocusSwitchCooldown);
+        runtimeSelectionHoldUntil = Time.time + Mathf.Max(runtimeSelectionHoldDuration, switchBlendDuration + 0.25f);
+        StopZoomForFocus();
+        SyncToRuntimeActiveDog(true);
+    }
+
+    private static bool HasSceneDogs()
+    {
+        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        return agents != null && agents.Length > 0;
     }
 
     private void Awake()
@@ -110,6 +209,9 @@ public class DogCycleCamera : MonoBehaviour
             zoomRoutine = null;
         }
 
+        focusClaims.Clear();
+        activeFocusClaimId = 0;
+        legacyInteractionFocusId = 0;
         zoomFocusActive = false;
 
         if (attachedCamera != null && baseFieldOfView > 0f)
@@ -127,12 +229,6 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
-        if (interactionFocusActive)
-        {
-            UpdateInteractionFocus();
-            return;
-        }
-
         HandleManualLookInput();
         if (IsManualLookActive())
         {
@@ -146,15 +242,30 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
+        DogCameraFocusClaim focusClaim = GetBestFocusClaim();
+        if (focusClaim != null)
+        {
+            UpdateClaimedFocus(focusClaim);
+            return;
+        }
+
+        if (activeFocusClaimId != 0)
+        {
+            ClearActiveFocusClaim();
+        }
+
         bool usingRuntimeSelection = runtime != null && runtime.ActiveDog != null && Time.time < runtimeSelectionHoldUntil;
         if (!usingRuntimeSelection)
         {
-            switchTimer += Time.deltaTime;
-            if (switchTimer >= switchInterval)
+            if (Time.time >= postFocusHoldUntil)
             {
-                switchTimer = 0f;
-                SwitchToIndex(NextValidIndex(activeIndex + 1), true);
-                TryStartZoom();
+                switchTimer += Time.deltaTime;
+                if (switchTimer >= GetEffectiveSwitchInterval())
+                {
+                    switchTimer = 0f;
+                    SwitchToIndex(NextValidIndex(activeIndex + 1), true);
+                    TryStartZoom();
+                }
             }
         }
         else
@@ -186,35 +297,272 @@ public class DogCycleCamera : MonoBehaviour
 
     public void BeginInteractionFocus(Transform target, Vector3 offset)
     {
-        if (target == null)
+        if (legacyInteractionFocusId != 0)
         {
-            return;
+            EndFocus(legacyInteractionFocusId);
         }
 
-        BeginInteractionFocusInternal(target, null, offset);
+        legacyInteractionFocusId = BeginFocus(target, DogCameraFocusPriority.NeedInteraction, offset);
     }
 
     public void BeginPairInteractionFocus(Transform firstTarget, Transform secondTarget, Vector3 offset)
     {
-        if (firstTarget == null || secondTarget == null)
+        if (legacyInteractionFocusId != 0)
         {
-            return;
+            EndFocus(legacyInteractionFocusId);
         }
 
-        BeginInteractionFocusInternal(firstTarget, secondTarget, offset);
+        legacyInteractionFocusId = BeginPairFocus(firstTarget, secondTarget, DogCameraFocusPriority.SocialInteraction, offset);
     }
 
-    private void BeginInteractionFocusInternal(Transform target, Transform secondTarget, Vector3 offset)
+    public int BeginFocus(Transform target, DogCameraFocusPriority priority, Vector3 offset)
     {
-        interactionFocusActive = true;
-        interactionFocusTarget = target;
-        interactionFocusSecondTarget = secondTarget;
-        interactionFocusOffset = offset;
+        if (target == null)
+        {
+            return 0;
+        }
+
+        return BeginFocusInternal(target, null, priority, offset);
+    }
+
+    public int BeginPairFocus(Transform firstTarget, Transform secondTarget, DogCameraFocusPriority priority, Vector3 offset)
+    {
+        if (firstTarget == null || secondTarget == null)
+        {
+            return 0;
+        }
+
+        return BeginFocusInternal(firstTarget, secondTarget, priority, offset);
+    }
+
+    private int BeginFocusInternal(Transform target, Transform secondTarget, DogCameraFocusPriority priority, Vector3 offset)
+    {
+        DogCameraFocusClaim claim = new DogCameraFocusClaim
+        {
+            Id = nextFocusClaimId++,
+            Target = target,
+            SecondTarget = secondTarget,
+            Offset = offset,
+            Priority = priority,
+            PrimaryDog = ResolveFocusDog(target, secondTarget),
+            StartedAt = Time.time
+        };
+
+        if (nextFocusClaimId == int.MaxValue)
+        {
+            nextFocusClaimId = 1;
+        }
+        else if (nextFocusClaimId <= 0)
+        {
+            nextFocusClaimId = 1;
+        }
+
+        focusClaims.Add(claim);
         manualLookHoldUntil = 0f;
         mouseDragActive = false;
         activeTouchFingerId = -1;
         switchTimer = 0f;
+        postFocusHoldUntil = Time.time + Mathf.Max(0f, postFocusSwitchCooldown);
+        StopZoomForFocus();
 
+        if (claim.PrimaryDog != null)
+        {
+            SelectRuntimeDogForAgent(claim.PrimaryDog);
+        }
+
+        return claim.Id;
+    }
+
+    public void EndFocus(int focusId)
+    {
+        if (focusId <= 0)
+        {
+            return;
+        }
+
+        for (int i = focusClaims.Count - 1; i >= 0; i--)
+        {
+            DogCameraFocusClaim claim = focusClaims[i];
+            if (claim == null || claim.Id != focusId)
+            {
+                continue;
+            }
+
+            if (focusReleaseLingerDuration <= 0f || !IsFocusClaimValid(claim))
+            {
+                focusClaims.RemoveAt(i);
+            }
+            else
+            {
+                claim.Released = true;
+                claim.ReleaseUntil = Time.time + Mathf.Max(0f, focusReleaseLingerDuration);
+            }
+
+            switchTimer = 0f;
+            postFocusHoldUntil = Time.time + Mathf.Max(0f, postFocusSwitchCooldown);
+            return;
+        }
+    }
+
+    public void EndInteractionFocus()
+    {
+        if (legacyInteractionFocusId <= 0)
+        {
+            return;
+        }
+
+        EndFocus(legacyInteractionFocusId);
+        legacyInteractionFocusId = 0;
+    }
+
+    private void UpdateClaimedFocus(DogCameraFocusClaim claim)
+    {
+        if (!IsFocusClaimValid(claim))
+        {
+            return;
+        }
+
+        if (activeFocusClaimId != claim.Id)
+        {
+            PrepareFocusClaimBlend(claim);
+            activeFocusClaimId = claim.Id;
+        }
+
+        if (keepInitialPosition)
+        {
+            transform.position = fixedPosition;
+        }
+
+        Vector3 focusPoint = GetSmoothedFocusPoint(GetFocusClaimPoint(claim) + claim.Offset);
+        Vector3 toTarget = focusPoint - transform.position;
+        if (toTarget.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSmooth);
+    }
+
+    private void PrepareFocusClaimBlend(DogCameraFocusClaim claim)
+    {
+        if (!hasFocusPoint)
+        {
+            DogRoomAgent activeDog = GetActiveDog();
+            currentFocusPoint = activeDog != null ? GetCameraFocusPoint(activeDog) : GetFocusClaimPoint(claim) + claim.Offset;
+            hasFocusPoint = true;
+        }
+
+        switchStartFocusPoint = currentFocusPoint;
+        switchBlendTimer = 0f;
+    }
+
+    private void ClearActiveFocusClaim()
+    {
+        activeFocusClaimId = 0;
+        switchTimer = 0f;
+        postFocusHoldUntil = Time.time + Mathf.Max(0f, postFocusSwitchCooldown);
+        SyncToRuntimeActiveDog(true);
+    }
+
+    private Vector3 GetFocusClaimPoint(DogCameraFocusClaim claim)
+    {
+        if (claim.Target != null && claim.SecondTarget != null)
+        {
+            return Vector3.Lerp(claim.Target.position, claim.SecondTarget.position, 0.5f);
+        }
+
+        if (claim.Target != null)
+        {
+            return claim.Target.position;
+        }
+
+        return claim.SecondTarget.position;
+    }
+
+    private DogCameraFocusClaim GetBestFocusClaim()
+    {
+        RemoveExpiredFocusClaims();
+
+        DogCameraFocusClaim bestActiveClaim = null;
+        DogCameraFocusClaim bestReleasedClaim = null;
+        for (int i = 0; i < focusClaims.Count; i++)
+        {
+            DogCameraFocusClaim claim = focusClaims[i];
+            if (!IsFocusClaimValid(claim))
+            {
+                continue;
+            }
+
+            if (claim.Released)
+            {
+                if (IsBetterFocusClaim(claim, bestReleasedClaim))
+                {
+                    bestReleasedClaim = claim;
+                }
+
+                continue;
+            }
+
+            if (IsBetterFocusClaim(claim, bestActiveClaim))
+            {
+                bestActiveClaim = claim;
+            }
+        }
+
+        return bestActiveClaim != null ? bestActiveClaim : bestReleasedClaim;
+    }
+
+    private void RemoveExpiredFocusClaims()
+    {
+        for (int i = focusClaims.Count - 1; i >= 0; i--)
+        {
+            DogCameraFocusClaim claim = focusClaims[i];
+            if (claim == null || !IsFocusClaimValid(claim) || (claim.Released && Time.time > claim.ReleaseUntil))
+            {
+                focusClaims.RemoveAt(i);
+            }
+        }
+    }
+
+    private static bool IsFocusClaimValid(DogCameraFocusClaim claim)
+    {
+        return claim != null && (claim.Target != null || claim.SecondTarget != null);
+    }
+
+    private static bool IsBetterFocusClaim(DogCameraFocusClaim candidate, DogCameraFocusClaim currentBest)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        if (currentBest == null)
+        {
+            return true;
+        }
+
+        if (candidate.Priority != currentBest.Priority)
+        {
+            return candidate.Priority > currentBest.Priority;
+        }
+
+        return candidate.StartedAt >= currentBest.StartedAt;
+    }
+
+    private DogRoomAgent ResolveFocusDog(Transform target, Transform secondTarget)
+    {
+        DogRoomAgent dog = ResolveDogFromTransform(target);
+        return dog != null ? dog : ResolveDogFromTransform(secondTarget);
+    }
+
+    private static DogRoomAgent ResolveDogFromTransform(Transform target)
+    {
+        return target != null ? target.GetComponentInParent<DogRoomAgent>() : null;
+    }
+
+    private void StopZoomForFocus()
+    {
         if (zoomRoutine != null)
         {
             StopCoroutine(zoomRoutine);
@@ -229,57 +577,9 @@ public class DogCycleCamera : MonoBehaviour
         }
     }
 
-    public void EndInteractionFocus()
+    private float GetEffectiveSwitchInterval()
     {
-        if (!interactionFocusActive)
-        {
-            return;
-        }
-
-        interactionFocusActive = false;
-        interactionFocusTarget = null;
-        interactionFocusSecondTarget = null;
-        switchTimer = 0f;
-        SyncToRuntimeActiveDog(true);
-    }
-
-    private void UpdateInteractionFocus()
-    {
-        if (interactionFocusTarget == null && interactionFocusSecondTarget == null)
-        {
-            EndInteractionFocus();
-            return;
-        }
-
-        if (keepInitialPosition)
-        {
-            transform.position = fixedPosition;
-        }
-
-        Vector3 focusPoint = GetInteractionFocusPoint() + interactionFocusOffset;
-        Vector3 toTarget = focusPoint - transform.position;
-        if (toTarget.sqrMagnitude < 0.001f)
-        {
-            return;
-        }
-
-        Quaternion targetRotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSmooth);
-    }
-
-    private Vector3 GetInteractionFocusPoint()
-    {
-        if (interactionFocusTarget != null && interactionFocusSecondTarget != null)
-        {
-            return Vector3.Lerp(interactionFocusTarget.position, interactionFocusSecondTarget.position, 0.5f);
-        }
-
-        if (interactionFocusTarget != null)
-        {
-            return interactionFocusTarget.position;
-        }
-
-        return interactionFocusSecondTarget.position;
+        return Mathf.Max(Mathf.Max(0.1f, switchInterval), Mathf.Max(MinimumSmartAutoSwitchInterval, minimumAutoSwitchInterval));
     }
 
     private void HandleManualLookInput()
@@ -303,7 +603,7 @@ public class DogCycleCamera : MonoBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (IsPointerOverUi())
+            if (IsPointerOverBlockingUi(Input.mousePosition))
             {
                 mouseDragActive = false;
                 return;
@@ -346,7 +646,7 @@ public class DogCycleCamera : MonoBehaviour
             Touch touch = Input.GetTouch(i);
             if (activeTouchFingerId < 0)
             {
-                if (touch.phase != TouchPhase.Began || IsPointerOverUi(touch.fingerId))
+                if (touch.phase != TouchPhase.Began || IsPointerOverBlockingUi(touch.position))
                 {
                     continue;
                 }
@@ -376,7 +676,7 @@ public class DogCycleCamera : MonoBehaviour
 
     private void BeginManualLook(Vector2 pointerPosition)
     {
-        EnsureManualLookAnglesInitialized();
+        CaptureManualLookAnglesFromTransform();
         lastManualPointerPosition = pointerPosition;
         manualLookHoldUntil = Time.time + Mathf.Max(0f, manualLookHoldDuration);
         switchTimer = 0f;
@@ -406,6 +706,11 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
+        CaptureManualLookAnglesFromTransform();
+    }
+
+    private void CaptureManualLookAnglesFromTransform()
+    {
         Vector3 euler = transform.rotation.eulerAngles;
         manualLookYaw = euler.y;
         manualLookPitch = NormalizePitchAngle(euler.x);
@@ -427,14 +732,77 @@ public class DogCycleCamera : MonoBehaviour
         return angle;
     }
 
-    private static bool IsPointerOverUi()
+    private static bool IsPointerOverBlockingUi(Vector2 screenPosition)
     {
-        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
+        {
+            return false;
+        }
+
+        PointerEventData eventData = new PointerEventData(eventSystem)
+        {
+            position = screenPosition
+        };
+
+        UiRaycastResults.Clear();
+        eventSystem.RaycastAll(eventData, UiRaycastResults);
+        for (int i = 0; i < UiRaycastResults.Count; i++)
+        {
+            GameObject target = UiRaycastResults[i].gameObject;
+            if (IsBlockingUiTarget(target))
+            {
+                UiRaycastResults.Clear();
+                return true;
+            }
+        }
+
+        UiRaycastResults.Clear();
+        return false;
     }
 
-    private static bool IsPointerOverUi(int pointerId)
+    private static bool IsBlockingUiTarget(GameObject target)
     {
-        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(pointerId);
+        if (target == null)
+        {
+            return false;
+        }
+
+        if (target.GetComponentInParent<Selectable>() != null)
+        {
+            return true;
+        }
+
+        if (target.GetComponentInParent<ScrollRect>() != null)
+        {
+            return true;
+        }
+
+        if (ExecuteEvents.GetEventHandler<IPointerClickHandler>(target) != null
+            || ExecuteEvents.GetEventHandler<IBeginDragHandler>(target) != null
+            || ExecuteEvents.GetEventHandler<IDragHandler>(target) != null
+            || ExecuteEvents.GetEventHandler<IScrollHandler>(target) != null)
+        {
+            return true;
+        }
+
+        return IsModalBlocker(target.transform);
+    }
+
+    private static bool IsModalBlocker(Transform target)
+    {
+        Transform current = target;
+        while (current != null)
+        {
+            if (current.name.IndexOf("ModalBlocker", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 
     private void SwitchToIndex(int nextIndex)
@@ -496,6 +864,44 @@ public class DogCycleCamera : MonoBehaviour
         }
 
         runtime.SelectDogIndex(dogIndex, false);
+    }
+
+    private void SelectRuntimeDogForAgent(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        if (runtime == null)
+        {
+            runtime = PawPalGameRuntime.Instance;
+        }
+
+        if (runtime == null)
+        {
+            return;
+        }
+
+        if (dog.HasExplicitDogId && runtime.SelectDogById(dog.DogId, false))
+        {
+            return;
+        }
+
+        DogRoomAgent[] resolvedDogs = GetResolvedDogs();
+        if (resolvedDogs == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < resolvedDogs.Length; i++)
+        {
+            if (resolvedDogs[i] == dog)
+            {
+                runtime.SelectDogIndex(i, false);
+                return;
+            }
+        }
     }
 
     private Vector3 GetSmoothedFocusPoint(Vector3 targetFocusPoint)

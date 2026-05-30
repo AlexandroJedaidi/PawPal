@@ -17,6 +17,10 @@ public static class UiTheme
 {
     public const float ReferenceWidth = 393f;
     public const float ReferenceHeight = 852f;
+    public const float ReferenceNavHeight = 66f;
+    public const float ReferenceContentHeight = ReferenceHeight - ReferenceNavHeight;
+    public const float MinimumHudVisualScale = 0.9f;
+    public const float MaximumHudVisualScale = 1f;
 
     public static readonly Color32 BackgroundCream = new Color32(251, 246, 232, 255);
     public static readonly Color32 CardWhite = new Color32(255, 255, 255, 255);
@@ -70,6 +74,12 @@ public static class UiTheme
     private static Sprite inventoryCardLoopSprite;
     private static Sprite inventoryCardCharmSprite;
     private static Sprite inventoryCardGetMoreSprite;
+
+    public static float GetHudVisualScale(float logicalWidth)
+    {
+        float widthScale = logicalWidth > 0f ? logicalWidth / ReferenceWidth : 1f;
+        return Mathf.Clamp(widthScale, MinimumHudVisualScale, MaximumHudVisualScale);
+    }
 
     public static TMP_FontAsset DefaultFont
     {

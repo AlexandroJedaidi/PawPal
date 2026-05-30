@@ -8,6 +8,8 @@ public class HomeAddonsView : MonoBehaviour
     private const float BaseWidth = 180f;
     private const float BaseHeight = 38f;
     private const float ButtonSize = 38f;
+    private static readonly Vector2 MicIconOffset = Vector2.zero;
+
     private UiSpriteLibrary sprites;
     private Image inventoryBackground;
     private Image inventoryBorder;
@@ -19,19 +21,19 @@ public class HomeAddonsView : MonoBehaviour
         RectTransform root = GetComponent<RectTransform>();
         root.sizeDelta = new Vector2(BaseWidth, BaseHeight);
 
-        CreateAddonButton(root, sprites, "MicButton", "UI/Figma/HomeMain/icon_mic", 0f, 29f, 4.5f, null, false);
-        inventoryBackground = CreateAddonButton(root, sprites, "InventoryButton", "UI/Figma/HomeMain/icon_inventory", 71f, 29f, 4.5f, onInventoryTapped, true);
+        CreateAddonButton(root, sprites, "MicButton", "UI/Figma/HomeMain/icon_mic", 0f, 29f, MicIconOffset, null, false);
+        inventoryBackground = CreateAddonButton(root, sprites, "InventoryButton", "UI/Figma/HomeMain/icon_inventory", 71f, 29f, Vector2.zero, onInventoryTapped, true);
         inventoryIcon = inventoryBackground.transform.Find("Icon").GetComponent<Image>();
         inventoryBorder = UiFactory.CreateImage("SelectedBorder", inventoryBackground.rectTransform, UiTheme.CircleOutlineSprite, UiTheme.NavBrandDark);
         inventoryBorder.type = Image.Type.Simple;
         inventoryBorder.preserveAspect = false;
         inventoryBorder.raycastTarget = false;
         UiFactory.Stretch(inventoryBorder.rectTransform, 0f, 0f, 0f, 0f);
-        CreateAddonButton(root, sprites, "CamButton", "UI/Figma/HomeMain/icon_cam", 142f, 24f, 7f, null, false);
+        CreateAddonButton(root, sprites, "CamButton", "UI/Figma/HomeMain/icon_cam", 142f, 24f, Vector2.zero, null, false);
         SetInventorySelected(false);
     }
 
-    private Image CreateAddonButton(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, float x, float iconSize, float inset, Action onClick, bool inventoryButton)
+    private Image CreateAddonButton(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, float x, float iconSize, Vector2 iconOffset, Action onClick, bool inventoryButton)
     {
         Image background = UiFactory.CreateImage(name, parent, UiTheme.CircleSprite, UiTheme.NavBackgroundCream);
         background.type = Image.Type.Simple;
@@ -50,11 +52,11 @@ public class HomeAddonsView : MonoBehaviour
         Image icon = UiFactory.CreateImage("Icon", background.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
-        icon.rectTransform.anchorMin = new Vector2(0f, 1f);
-        icon.rectTransform.anchorMax = new Vector2(0f, 1f);
-        icon.rectTransform.pivot = new Vector2(0f, 1f);
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
         icon.rectTransform.sizeDelta = new Vector2(iconSize, iconSize);
-        icon.rectTransform.anchoredPosition = new Vector2(inset, -inset);
+        icon.rectTransform.anchoredPosition = iconOffset;
 
         UiFactory.AddButton(background.gameObject, onClick == null ? null : new UnityEngine.Events.UnityAction(onClick));
         return background;

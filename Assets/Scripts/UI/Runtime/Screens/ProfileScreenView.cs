@@ -74,6 +74,8 @@ public class ProfileScreenView : AppScreenViewBase
     };
 
     private RectTransform exactFrame;
+    private RectTransform overviewRect;
+    private ScrollRect screenScrollRect;
     private TextMeshProUGUI progressHeaderLabel;
     private Image trainerProgressFill;
     private TextMeshProUGUI trainerLevelLabel;
@@ -87,6 +89,7 @@ public class ProfileScreenView : AppScreenViewBase
     private readonly List<GameObject> activityCardObjects = new List<GameObject>();
     private readonly List<MilestoneLevelView> milestoneLevelViews = new List<MilestoneLevelView>();
     private readonly List<MilestoneRewardView> milestoneRewardViews = new List<MilestoneRewardView>();
+    private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
     {
@@ -118,6 +121,13 @@ public class ProfileScreenView : AppScreenViewBase
         RectTransform root = GetComponent<RectTransform>();
         UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
 
+        Image fullBackground = root.gameObject.AddComponent<Image>();
+        fullBackground.sprite = UiTheme.WhiteSprite;
+        fullBackground.type = Image.Type.Simple;
+        fullBackground.preserveAspect = false;
+        fullBackground.color = UiTheme.NavBackgroundCream;
+        fullBackground.raycastTarget = true;
+
         exactFrame = UiFactory.CreateRect("ProfileMainFrame", root);
         exactFrame.anchorMin = new Vector2(0.5f, 1f);
         exactFrame.anchorMax = new Vector2(0.5f, 1f);
@@ -131,22 +141,31 @@ public class ProfileScreenView : AppScreenViewBase
         rootBackground.preserveAspect = false;
         rootBackground.color = UiTheme.NavBackgroundCream;
 
-        RectTransform overview = UiFactory.CreateRect("Overview", exactFrame);
-        overview.anchorMin = new Vector2(0f, 1f);
-        overview.anchorMax = new Vector2(0f, 1f);
-        overview.pivot = new Vector2(0f, 1f);
-        overview.sizeDelta = new Vector2(379f, 786f);
-        overview.anchoredPosition = new Vector2(7f, 0f);
+        overviewRect = UiFactory.CreateRect("Overview", exactFrame);
+        overviewRect.anchorMin = new Vector2(0f, 1f);
+        overviewRect.anchorMax = new Vector2(0f, 1f);
+        overviewRect.pivot = new Vector2(0f, 1f);
+        overviewRect.sizeDelta = new Vector2(379f, 786f);
+        overviewRect.anchoredPosition = new Vector2(7f, 0f);
 
-        Image overviewImage = overview.gameObject.AddComponent<Image>();
+        Image overviewImage = overviewRect.gameObject.AddComponent<Image>();
         overviewImage.sprite = UiTheme.ProfileOverviewSprite;
         overviewImage.type = Image.Type.Simple;
         overviewImage.preserveAspect = false;
         overviewImage.color = UiTheme.NavBackgroundCream;
 
-        BuildLevelSection(overview);
-        BuildActivitiesSection(overview);
-        BuildStatisticsSection(overview);
+        BuildLevelSection(overviewRect);
+        BuildActivitiesSection(overviewRect);
+        BuildStatisticsSection(overviewRect);
+
+        screenScrollRect = root.gameObject.AddComponent<ScrollRect>();
+        screenScrollRect.viewport = root;
+        screenScrollRect.content = exactFrame;
+        screenScrollRect.horizontal = false;
+        screenScrollRect.vertical = true;
+        screenScrollRect.movementType = ScrollRect.MovementType.Clamped;
+        screenScrollRect.scrollSensitivity = 22f;
+
         RefreshRuntimeState();
     }
 
@@ -157,11 +176,22 @@ public class ProfileScreenView : AppScreenViewBase
 
         if (exactFrame != null)
         {
-            exactFrame.anchorMin = new Vector2(0.5f, 1f);
-            exactFrame.anchorMax = new Vector2(0.5f, 1f);
-            exactFrame.pivot = new Vector2(0.5f, 1f);
-            exactFrame.sizeDelta = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-            exactFrame.anchoredPosition = Vector2.zero;
+            frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame, 887f);
+        }
+
+        if (overviewRect != null)
+        {
+            overviewRect.sizeDelta = new Vector2(379f, frameLayout.LogicalHeight > 0f ? frameLayout.LogicalHeight : 887f);
+        }
+
+        if (screenScrollRect != null)
+        {
+            bool contentOverflows = frameLayout.LogicalHeight > frameLayout.VisibleLogicalHeight + 0.5f;
+            screenScrollRect.vertical = contentOverflows;
+            if (!contentOverflows)
+            {
+                screenScrollRect.verticalNormalizedPosition = 1f;
+            }
         }
     }
 

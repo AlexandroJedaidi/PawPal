@@ -214,6 +214,8 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 {
     private static readonly List<PawPalToyRuntimeMetadata> NavigationBlockers = new List<PawPalToyRuntimeMetadata>();
     private static BoxCollider largeToySupportFloor;
+    private static bool hasLargeToySupportFloorTop;
+    private static float largeToySupportFloorTopY;
     private static float nextSceneLargeToyScanTime;
 
     [SerializeField] private string itemId;
@@ -332,11 +334,18 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         float radius = TryGetToyBlockingBounds(gameObject, out bounds)
             ? Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z))
             : 0.35f;
+        EnsureLargeToyCollider(bounds, radius);
+        BoxCollider supportFloor = EnsureLargeToySupportFloor(bounds);
+        SnapLargeToyOntoSupportFloor(bounds, supportFloor);
+
+        if (TryGetToyBlockingBounds(gameObject, out bounds))
+        {
+            radius = Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z));
+        }
+
         float paddedRadius = radius + 0.28f;
         dogNavigationBlockCenterLocal = transform.InverseTransformPoint(bounds.center);
         SetBlocksDogNavigation(true, paddedRadius);
-        EnsureLargeToyCollider(bounds, radius);
-        EnsureLargeToySupportFloor(bounds);
         PawPalBallBounceAudio.EnsureOn(gameObject);
 
         Rigidbody body = GetComponent<Rigidbody>();
@@ -347,9 +356,9 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 
         body.isKinematic = false;
         body.useGravity = true;
-        body.mass = Mathf.Max(0.65f, body.mass);
-        body.linearDamping = Mathf.Max(0.08f, body.linearDamping);
-        body.angularDamping = Mathf.Max(0.16f, body.angularDamping);
+        body.mass = Mathf.Max(0.9f, body.mass);
+        body.linearDamping = Mathf.Max(0.14f, body.linearDamping);
+        body.angularDamping = Mathf.Max(0.26f, body.angularDamping);
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
         NavMeshObstacle obstacle = GetComponent<NavMeshObstacle>();
@@ -412,7 +421,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         return colliderPlanarRadius >= Mathf.Max(0.08f, visualRadius * 0.55f);
     }
 
-    private static void EnsureLargeToySupportFloor(Bounds toyBounds)
+    private static BoxCollider EnsureLargeToySupportFloor(Bounds toyBounds)
     {
         if (largeToySupportFloor == null)
         {
@@ -420,6 +429,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
             floorObject.hideFlags = HideFlags.HideAndDontSave;
             floorObject.layer = 2;
             largeToySupportFloor = floorObject.AddComponent<BoxCollider>();
+            hasLargeToySupportFloorTop = false;
         }
 
         Bounds supportBounds = toyBounds;
@@ -435,7 +445,14 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 
         float width = Mathf.Max(8f, supportBounds.size.x + 6f);
         float depth = Mathf.Max(8f, supportBounds.size.z + 6f);
-        float floorTopY = toyBounds.min.y - 0.01f;
+        float requestedFloorTopY = Mathf.Max(0f, toyBounds.min.y - 0.01f);
+        if (!hasLargeToySupportFloorTop)
+        {
+            largeToySupportFloorTopY = requestedFloorTopY;
+            hasLargeToySupportFloorTop = true;
+        }
+
+        float floorTopY = largeToySupportFloorTopY;
         float floorThickness = 0.16f;
 
         largeToySupportFloor.transform.position = new Vector3(
@@ -445,6 +462,33 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         largeToySupportFloor.size = new Vector3(width, floorThickness, depth);
         largeToySupportFloor.center = Vector3.zero;
         largeToySupportFloor.enabled = true;
+        return largeToySupportFloor;
+    }
+
+    private void SnapLargeToyOntoSupportFloor(Bounds toyBounds, BoxCollider supportFloor)
+    {
+        if (supportFloor == null || !supportFloor.enabled)
+        {
+            return;
+        }
+
+        float supportTopY = supportFloor.bounds.max.y;
+        float minBottomY = supportTopY + 0.015f;
+        if (toyBounds.min.y >= supportTopY - 0.001f)
+        {
+            return;
+        }
+
+        Vector3 position = transform.position;
+        position.y += minBottomY - toyBounds.min.y;
+        transform.position = position;
+
+        Rigidbody body = GetComponent<Rigidbody>();
+        if (body != null)
+        {
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+        }
     }
 
     public static bool IsDogNavigationPathBlocked(Vector3[] pathCorners, Transform ignoredRoot, float extraPadding)

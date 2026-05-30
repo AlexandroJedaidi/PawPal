@@ -137,7 +137,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.18860924
+      value: 0.144
       objectReference: {fileID: 0}
     - target: {fileID: 2190221253305685752, guid: 5d815177287ed864f8f4c1205ca968bc, type: 3}
       propertyPath: m_LocalPosition.z
@@ -2844,6 +2844,10 @@ MonoBehaviour:
   ballBounceVolume: 0.65
   toyPickupClip: {fileID: 0}
   toyPickupVolume: 0.7
+  sniffingClip: {fileID: 0}
+  scratchAndShakingClip: {fileID: 0}
+  shakingX3Clip: {fileID: 0}
+  idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
 --- !u!114 &3200000005
 MonoBehaviour:
@@ -3007,6 +3011,10 @@ MonoBehaviour:
   ballBounceVolume: 0.65
   toyPickupClip: {fileID: 0}
   toyPickupVolume: 0.7
+  sniffingClip: {fileID: 0}
+  scratchAndShakingClip: {fileID: 0}
+  shakingX3Clip: {fileID: 0}
+  idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
 --- !u!1 &3200000010
 GameObject:
@@ -3084,8 +3092,6 @@ MonoBehaviour:
   ambientCarIntervalSeconds: 60
   barkVolume: 1
   barkSpacing: 0.18
-  barkAudioRepeatCount: 3
-  barkAudioRepeatGap: 0.04
 --- !u!114 &3200000020
 MonoBehaviour:
   m_ObjectHideFlags: 0

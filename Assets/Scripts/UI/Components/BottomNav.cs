@@ -40,12 +40,13 @@ public class BottomNav : MonoBehaviour
 
         contentRoot = UiFactory.CreateRect("ContentRoot", transform);
         tabsRow = UiFactory.CreateRect("TabsRow", contentRoot);
-        rowLayout = UiFactory.AddHorizontalLayout(tabsRow.gameObject, 17f, new RectOffset(0, 0, 0, 0), TextAnchor.MiddleCenter);
+        rowLayout = UiFactory.AddHorizontalLayout(tabsRow.gameObject, 0f, new RectOffset(0, 0, 0, 0), TextAnchor.MiddleCenter);
         rowLayout.childAlignment = TextAnchor.MiddleCenter;
         rowLayout.childControlHeight = true;
         rowLayout.childControlWidth = true;
         rowLayout.childForceExpandHeight = false;
-        rowLayout.childForceExpandWidth = false;
+        rowLayout.childForceExpandWidth = true;
+        rowLayout.enabled = false;
 
         CreateItem(AppScreenId.Home, "Home", "icon_home_brand", "icon_home_white", false, shell, sprites);
         CreateItem(AppScreenId.Shop, "Shop", "icon_shop_brand", "icon_shop_white", false, shell, sprites);
@@ -56,24 +57,18 @@ public class BottomNav : MonoBehaviour
 
     public void ApplyLayout(UiLayoutBucket bucket)
     {
-        RectTransform canvasRect = GetComponentInParent<Canvas>().rootCanvas.GetComponent<RectTransform>();
-        float canvasWidth = Mathf.Max(canvasRect.rect.width, 1f);
-        float canvasHeight = Mathf.Max(canvasRect.rect.height, 1f);
-        float unsafeLeft = Screen.safeArea.xMin * (canvasWidth / Mathf.Max(Screen.width, 1f));
-        float unsafeRight = (Screen.width - Screen.safeArea.xMax) * (canvasWidth / Mathf.Max(Screen.width, 1f));
-        float unsafeBottom = Screen.safeArea.yMin * (canvasHeight / Mathf.Max(Screen.height, 1f));
-        float safeWidth = Mathf.Max(0f, canvasWidth - unsafeLeft - unsafeRight);
-        float scale = Mathf.Min(1f, safeWidth / UiTheme.ReferenceWidth);
+        RectTransform parentRect = rootRect != null ? rootRect.parent as RectTransform : null;
+        float availableWidth = parentRect != null && parentRect.rect.width > 0f ? parentRect.rect.width : UiTheme.ReferenceWidth;
+        float scale = UiTheme.GetHudVisualScale(availableWidth);
 
-        float visualHeight = 66f * scale;
-        float rowWidth = 368f * scale;
+        float visualHeight = UiTheme.ReferenceNavHeight * scale;
         float rowHeight = 60f * scale;
         float shadowHeight = 4f * scale;
-        float spacing = 17f * scale;
+        float slotWidth = items.Count > 0 ? availableWidth / items.Count : availableWidth;
 
         CurrentHeight = visualHeight;
-        UiFactory.AnchorBottomStretch(rootRect, -unsafeLeft, -unsafeBottom, -unsafeRight, visualHeight + unsafeBottom);
-        UiFactory.AnchorBottomStretch(backgroundRect, 0f, unsafeBottom, 0f, visualHeight);
+        UiFactory.AnchorBottomStretch(rootRect, 0f, 0f, 0f, visualHeight);
+        UiFactory.AnchorBottomStretch(backgroundRect, 0f, 0f, 0f, visualHeight);
 
         RectTransform shadowRect = topShadow.rectTransform;
         shadowRect.anchorMin = new Vector2(0f, 1f);
@@ -82,17 +77,30 @@ public class BottomNav : MonoBehaviour
         shadowRect.offsetMin = new Vector2(0f, 0f);
         shadowRect.offsetMax = new Vector2(0f, shadowHeight);
 
-        UiFactory.AnchorBottomStretch(contentRoot, 0f, unsafeBottom, 0f, visualHeight);
+        UiFactory.AnchorBottomStretch(contentRoot, 0f, 0f, 0f, visualHeight);
         tabsRow.anchorMin = new Vector2(0.5f, 0.5f);
         tabsRow.anchorMax = new Vector2(0.5f, 0.5f);
         tabsRow.pivot = new Vector2(0.5f, 0.5f);
-        tabsRow.sizeDelta = new Vector2(rowWidth, rowHeight);
+        tabsRow.sizeDelta = new Vector2(availableWidth, rowHeight);
         tabsRow.anchoredPosition = Vector2.zero;
-        rowLayout.spacing = spacing;
+        tabsRow.localScale = Vector3.one;
+        if (rowLayout != null)
+        {
+            rowLayout.enabled = false;
+        }
 
         for (int i = 0; i < items.Count; i++)
         {
-            items[i].ApplyLayout(scale);
+            RectTransform itemRect = items[i].GetComponent<RectTransform>();
+            if (itemRect != null)
+            {
+                itemRect.anchorMin = new Vector2(0.5f, 0.5f);
+                itemRect.anchorMax = new Vector2(0.5f, 0.5f);
+                itemRect.pivot = new Vector2(0.5f, 0.5f);
+                itemRect.anchoredPosition = new Vector2((-availableWidth * 0.5f) + slotWidth * (i + 0.5f), 0f);
+            }
+
+            items[i].ApplyLayout(scale, slotWidth);
         }
     }
 
