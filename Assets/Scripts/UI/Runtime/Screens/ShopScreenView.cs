@@ -27,6 +27,32 @@ public class ShopScreenView : AppScreenViewBase
         Empty
     }
 
+    private enum CatalogScrollTarget
+    {
+        All,
+        Breeds,
+        Food,
+        Toys,
+        Accessories,
+        Clothes,
+        Beds
+    }
+
+    private sealed class CatalogCategoryTile
+    {
+        public CatalogScrollTarget Target;
+        public Image Fill;
+        public Image Border;
+        public Image Icon;
+        public TextMeshProUGUI Label;
+        public string SelectedIconName;
+        public string UnselectedIconName;
+    }
+
+    private const float ShopViewportTop = 162f;
+    private const float CatalogTopOffset = 410f;
+    private const float CatalogBottomPadding = 24f;
+
     private static readonly Color32 SupportFill = new Color32(241, 236, 226, 255);
     private static readonly Color32 SupportShadow = new Color32(236, 223, 200, 255);
     private static readonly Color32 CtaBlue = new Color32(50, 187, 255, 255);
@@ -35,6 +61,19 @@ public class ShopScreenView : AppScreenViewBase
     private static readonly Color32 ComingSoonGrey = new Color32(163, 163, 163, 255);
     private static readonly Color32 ComingSoonLight = new Color32(220, 220, 220, 255);
     private static readonly Color32 TransparentHit = new Color32(255, 255, 255, 1);
+    private static readonly Color32 CatalogPanelFill = new Color32(255, 250, 239, 255);
+    private static readonly Color32 CatalogPanelBorder = new Color32(238, 219, 188, 255);
+    private static readonly Color32 CatalogDivider = new Color32(238, 219, 188, 255);
+    private static readonly Color32 CategoryTileFill = new Color32(255, 252, 245, 255);
+    private static readonly Color32 CategoryTileShadow = new Color32(229, 207, 178, 255);
+    private static readonly Color32 ItemCardBorder = new Color32(231, 215, 188, 255);
+    private static readonly Color32 ItemCardShadow = new Color32(208, 188, 154, 255);
+    private static readonly Color32 OfferCardFill = new Color32(247, 241, 232, 255);
+    private static readonly Color32 OfferCardBorder = new Color32(235, 221, 202, 255);
+    private static readonly Color32 OfferCardShadow = new Color32(189, 162, 128, 58);
+    private static readonly Color32 OfferAccent = new Color32(210, 112, 86, 255);
+    private static readonly Color32 OfferTimerFill = new Color32(249, 232, 222, 255);
+    private static readonly Color32 OfferBodyText = new Color32(70, 54, 46, 255);
     private static readonly Rect StandardShopImageRect = new Rect(15.5f, 15f, 84f, 84f);
 
     private static readonly Dictionary<string, Sprite> RuntimeSpriteCache = new Dictionary<string, Sprite>();
@@ -43,6 +82,7 @@ public class ShopScreenView : AppScreenViewBase
     private RectTransform exactFrame;
     private RectTransform shopViewport;
     private RectTransform scrollContent;
+    private ScrollRect shopScrollRect;
     private RectTransform floatingPanelRoot;
     private RectTransform buyPointsPanel;
     private RectTransform modalLayer;
@@ -56,6 +96,9 @@ public class ShopScreenView : AppScreenViewBase
     private FloatingPanelState floatingPanelState;
     private ModalState modalState;
     private ResponsiveFigmaFrameLayout frameLayout;
+    private CatalogScrollTarget selectedCatalogTarget = CatalogScrollTarget.All;
+    private readonly Dictionary<CatalogScrollTarget, float> catalogScrollTargets = new Dictionary<CatalogScrollTarget, float>();
+    private readonly List<CatalogCategoryTile> categoryTiles = new List<CatalogCategoryTile>();
     private int lastShopRevision = -1;
     private string selectedCatalogItemId = string.Empty;
     private string lastPurchasedCatalogItemId = string.Empty;
@@ -237,7 +280,7 @@ public class ShopScreenView : AppScreenViewBase
 
     private void BuildScrollableContent(RectTransform parent)
     {
-        shopViewport = CreateNode("ShopViewport", parent, 6f, 162f, 382f, 627f);
+        shopViewport = CreateNode("ShopViewport", parent, 6f, ShopViewportTop, 382f, 627f);
         Image viewportHit = shopViewport.gameObject.AddComponent<Image>();
         viewportHit.color = new Color(1f, 1f, 1f, 0.002f);
         viewportHit.raycastTarget = true;
@@ -247,19 +290,19 @@ public class ShopScreenView : AppScreenViewBase
         scrollContent.anchorMin = new Vector2(0f, 1f);
         scrollContent.anchorMax = new Vector2(0f, 1f);
         scrollContent.pivot = new Vector2(0f, 1f);
-        scrollContent.sizeDelta = new Vector2(382f, 1752f);
+        scrollContent.sizeDelta = new Vector2(382f, CatalogTopOffset + 1307f + CatalogBottomPadding);
         scrollContent.anchoredPosition = Vector2.zero;
 
-        ScrollRect scrollRect = shopViewport.gameObject.AddComponent<ScrollRect>();
-        scrollRect.viewport = shopViewport;
-        scrollRect.content = scrollContent;
-        scrollRect.horizontal = false;
-        scrollRect.vertical = true;
-        scrollRect.movementType = ScrollRect.MovementType.Clamped;
-        scrollRect.scrollSensitivity = 22f;
+        shopScrollRect = shopViewport.gameObject.AddComponent<ScrollRect>();
+        shopScrollRect.viewport = shopViewport;
+        shopScrollRect.content = scrollContent;
+        shopScrollRect.horizontal = false;
+        shopScrollRect.vertical = true;
+        shopScrollRect.movementType = ScrollRect.MovementType.Clamped;
+        shopScrollRect.scrollSensitivity = 22f;
 
         BuildSpecialOfferSection(scrollContent);
-        catalogSectionRoot = CreateNode("CatalogSectionRoot", scrollContent, 0f, 445f, 382f, 1307f);
+        catalogSectionRoot = CreateNode("CatalogSectionRoot", scrollContent, 0f, CatalogTopOffset, 382f, 1307f);
         RebuildCatalogSections();
         ApplyViewportLayout();
     }
@@ -272,34 +315,24 @@ public class ShopScreenView : AppScreenViewBase
         }
 
         float frameHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
-        float viewportTop = 162f;
+        float viewportTop = ShopViewportTop;
         float viewportHeight = Mathf.Max(220f, frameHeight - viewportTop);
         shopViewport.sizeDelta = new Vector2(382f, viewportHeight);
         shopViewport.anchoredPosition = new Vector2(6f, -viewportTop);
+        UpdateScrollContentHeight();
     }
 
     private void BuildSpecialOfferSection(RectTransform parent)
     {
-        BuildSectionHeader(parent, "SpecialOfferHeader", 0f, 0f, 382f, 24f, "Special offer", null, 0f, 16, UiTheme.NavExtraBoldFont);
+        BuildSpecialOfferHeader(parent);
 
-        RectTransform primary = CreateNode("PrimaryOffer", parent, 0f, 37f, 382f, 176f);
+        RectTransform primary = CreateNode("PrimaryOffer", parent, 0f, 76f, 382f, 152f);
         BuildPrimaryOffer(primary);
 
-        RectTransform starter = CreateNode("StarterPackOffer", parent, 0f, 226f, 212f, 164f);
-        BuildSpecialOfferCard(
-            starter,
-            "Starter pack",
-            204f,
-            204f,
-            "240",
-            "UI/Figma/Shop/offer_puppy_left",
-            new Rect(27f, 42f, 74.47718f, 87.66422f),
-            "UI/Figma/Shop/starter_pack_toy",
-            new Rect(99.61368f, 54.63922f, 85.3733f, 42.13074f),
-            "Clothing",
-            new Rect(86.06926f, 96.76996f, 58.46215f, 18.53753f));
+        RectTransform starter = CreateNode("StarterPackOffer", parent, 0f, 248f, 184f, 132f);
+        BuildSpecialOfferCard(starter, "Starter Pack", "Essentials for your new pawfriend", "-20%", "240", "UI/Generated/ShopOffers/special_offer_starter_pack");
 
-        RectTransform random = CreateNode("RandomOffer", parent, 218f, 226f, 164f, 164f);
+        RectTransform random = CreateNode("RandomOffer", parent, 198f, 248f, 184f, 132f);
         BuildRandomOfferCard(random);
     }
 
@@ -311,19 +344,28 @@ public class ShopScreenView : AppScreenViewBase
             return;
         }
 
+        catalogScrollTargets.Clear();
+        categoryTiles.Clear();
+
         RectTransform section = CreateNode("ItemsAll", parent, 0f, 0f, 382f, 1307f);
-        BuildSectionHeader(section, "CategoriesHeader", 0f, 0f, 382f, 24f, "Categories", null, 0f, 16, UiTheme.NavExtraBoldFont);
+        BuildCatalogTitleHeader(section, "CategoriesHeader", 0f, 0f, 382f, 24f, "Categories");
         BuildCategoryRow(section);
 
-        float currentY = 112f;
-        currentY = BuildRuntimeProductSection(section, "DogsSection", currentY, 72f, "Dogs", "icon_dog_white", 24f, new Rect(8f, 4f, 34f, 31f), 382f, 147f, PawPalItemCategory.Dogs);
-        currentY = BuildRuntimeProductSection(section, "FoodSection", currentY, 73f, "Food", "icon_foodsupply_white", 32f, new Rect(8f, 2f, 36f, 36f), 382f, 147f, PawPalItemCategory.Food);
-        currentY = BuildRuntimeProductSection(section, "ToysSection", currentY, 71f, "Toys", "icon_toys_white", 36.676f, new Rect(6.4f, 1f, 38f, 38f), 382f, 267f, PawPalItemCategory.Toys);
-        currentY = BuildRuntimeProductSection(section, "CollarsSection", currentY, 170f, "Collars & Leashes", "icon_collar_white", 40f, new Rect(5.6f, 0f, 40f, 40f), 382f, 147f, PawPalItemCategory.Collars);
-        currentY = BuildRuntimeProductSection(section, "ClothingSection", currentY, 101f, "Clothing", "icon_clothing_white", 33f, new Rect(8.2f, 3f, 34f, 34f), 382f, 147f, PawPalItemCategory.Clothing);
-        currentY = BuildRuntimeProductSection(section, "FurnitureSection", currentY, 110f, "Furniture", "icon_dogbed_white", 35f, new Rect(7f, 2f, 37f, 37f), 382f, 147f, PawPalItemCategory.Furniture);
+        catalogScrollTargets[CatalogScrollTarget.All] = 0f;
 
-        section.sizeDelta = new Vector2(382f, currentY + 24f);
+        float currentY = 128f;
+        currentY = BuildRuntimeProductSection(section, "BreedsSection", currentY, "Breeds", "icon_dog_white", new Rect(7f, 5f, 25f, 24f), PawPalItemCategory.Dogs, CatalogScrollTarget.Breeds);
+        currentY = BuildRuntimeProductSection(section, "FoodSection", currentY, "Food", "icon_foodsupply_white", new Rect(5f, 3f, 29f, 29f), PawPalItemCategory.Food, CatalogScrollTarget.Food);
+        currentY = BuildRuntimeProductSection(section, "ToysSection", currentY, "Toys", "icon_toys_white", new Rect(4f, 2f, 31f, 31f), PawPalItemCategory.Toys, CatalogScrollTarget.Toys);
+        currentY = BuildRuntimeProductSection(section, "AccessoriesSection", currentY, "Accessories", "icon_collar_white", new Rect(3f, 1f, 33f, 33f), PawPalItemCategory.Collars, CatalogScrollTarget.Accessories);
+        currentY = BuildRuntimeProductSection(section, "ClothesSection", currentY, "Clothes", "icon_clothing_white", new Rect(5f, 4f, 29f, 29f), PawPalItemCategory.Clothing, CatalogScrollTarget.Clothes);
+        currentY = BuildRuntimeProductSection(section, "BedsSection", currentY, "Beds", "icon_dogbed_white", new Rect(4f, 3f, 31f, 31f), PawPalItemCategory.Furniture, CatalogScrollTarget.Beds);
+
+        float catalogHeight = currentY + 8f;
+        section.sizeDelta = new Vector2(382f, catalogHeight);
+        parent.sizeDelta = new Vector2(382f, catalogHeight);
+        RefreshCategoryTileSelection();
+        UpdateScrollContentHeight();
     }
 
     private void BuildFloatingPanels(RectTransform parent)
@@ -354,158 +396,186 @@ public class ShopScreenView : AppScreenViewBase
 
     private void BuildPrimaryOffer(RectTransform parent)
     {
-        Image borderBack = UiFactory.CreateImage("BorderBack", parent, GetRoundedRectSprite(380, 161, 10f, 3f, false), UiTheme.NavBrandDark);
-        borderBack.type = Image.Type.Sliced;
-        borderBack.preserveAspect = false;
-        SetTopLeft(borderBack.rectTransform, 1.00262f, 15f, 379.99475f, 161f);
+        CreateOfferCardSurface(parent, 382f, 152f, 10f);
+        CreateDiscountBadge(parent, "-30%", 23f, 24f, 46f, 23f);
 
-        Image outerBorder = UiFactory.CreateImage("OuterBorder", parent, GetRoundedRectSprite(382, 161, 10f, 3f, false), UiTheme.NavBrand);
-        outerBorder.type = Image.Type.Sliced;
-        outerBorder.preserveAspect = false;
-        SetTopLeft(outerBorder.rectTransform, 0f, 12f, 382f, 161f);
+        TextMeshProUGUI title = CreateText(parent, "Title", "Husky Puppy", 20, UiTheme.BodyText, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        SetTopLeft(title.rectTransform, 23f, 58f, 150f, 26f);
 
-        Image innerFill = UiFactory.CreateImage("InnerFill", parent, GetRoundedRectSprite(374, 152, 6f, 0f, true), Color.white);
-        innerFill.type = Image.Type.Sliced;
-        innerFill.preserveAspect = false;
-        SetTopLeft(innerFill.rectTransform, 4.01049f, 18f, 373.979f, 152f);
+        TextMeshProUGUI description = CreateText(parent, "Description", "Get an adorable Husky puppy and 4 coat variations!", 13, OfferBodyText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
+        description.textWrappingMode = TextWrappingModes.Normal;
+        SetTopLeft(description.rectTransform, 23f, 91f, 146f, 42f);
 
-        Image titleBar = UiFactory.CreateImage("TitleBar", parent, GetTopRoundedSprite(375, 20, 6f), CtaBlue);
-        titleBar.type = Image.Type.Sliced;
-        titleBar.preserveAspect = false;
-        SetTopLeft(titleBar.rectTransform, 3.5092f, 18f, 374.98163f, 20f);
+        Image art = UiFactory.CreateImage("HeroArt", parent, sprites.GetResourceSprite("UI/Generated/ShopOffers/special_offer_husky_hero"), Color.white);
+        art.type = Image.Type.Simple;
+        art.preserveAspect = true;
+        art.raycastTarget = false;
+        SetTopLeft(art.rectTransform, 118f, 16f, 252f, 112f);
 
-        TextMeshProUGUI title = CreateText(parent, "Title", "Husky Puppy", 15, Color.white, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(title.rectTransform, 3.5092f, 18f, 374.98163f, 20f);
-
-        Image timerBg = UiFactory.CreateImage("TimerBg", parent, GetRoundedRectSprite(97, 28, 5f, 1f, true), UiTheme.NavBrand);
-        timerBg.type = Image.Type.Sliced;
-        timerBg.preserveAspect = false;
-        SetTopLeft(timerBg.rectTransform, 284.90628f, 0f, 97.09371f, 28f);
-        Outline timerBorder = timerBg.gameObject.AddComponent<Outline>();
-        timerBorder.effectColor = UiTheme.NavBackgroundCream;
-        timerBorder.effectDistance = Vector2.zero;
-
-        Image timerIcon = UiFactory.CreateImage("TimerIcon", parent, sprites.GetIcon("icon_clock"), Color.white);
-        timerIcon.type = Image.Type.Simple;
-        timerIcon.preserveAspect = true;
-        timerIcon.raycastTarget = false;
-        SetTopLeft(timerIcon.rectTransform, 289.90628f, 5f, 18f, 18f);
-
-        TextMeshProUGUI timerText = CreateText(parent, "TimerText", "22h 48m", 15, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(timerText.rectTransform, 312.90628f, 3f, 64f, 22f);
-
-        Image puppyLeft = UiFactory.CreateImage("PuppyLeft", parent, sprites.GetResourceSprite("UI/Figma/Shop/offer_puppy_left"), Color.white);
-        puppyLeft.type = Image.Type.Simple;
-        puppyLeft.preserveAspect = false;
-        puppyLeft.raycastTarget = false;
-        SetTopLeft(puppyLeft.rectTransform, 59.33504f, 46f, 75.02695f, 99.16666f);
-
-        Image puppyRight = UiFactory.CreateImage("PuppyRight", parent, sprites.GetResourceSprite("UI/Figma/Shop/offer_puppies_right"), Color.white);
-        puppyRight.type = Image.Type.Simple;
-        puppyRight.preserveAspect = false;
-        puppyRight.raycastTarget = false;
-        SetTopLeft(puppyRight.rectTransform, 145.47711f, 46f, 172.28413f, 99.16666f);
-
-        CreatePointsPill(parent, "PrimaryPrice", 168.68806f, 146f, 52.96021f, 22f, "700");
+        CreatePointsPill(parent, "PrimaryPrice", 23f, 122f, 60f, 22f, "700");
+        CreateOfferCardBorder(parent, 382f, 152f, 10f);
     }
 
     private void BuildSpecialOfferCard(
         RectTransform parent,
         string title,
-        float titleWidth,
-        float fillWidth,
+        string description,
+        string discount,
         string points,
-        string leftImageResource,
-        Rect leftImageRect,
-        string rightImageResource,
-        Rect rightImageRect,
-        string caption,
-        Rect captionRect)
+        string artResource)
     {
-        Image borderBack = UiFactory.CreateImage("BorderBack", parent, GetRoundedRectSprite(211, 161, 10f, 3f, false), UiTheme.NavBrandDark);
-        borderBack.type = Image.Type.Sliced;
-        borderBack.preserveAspect = false;
-        SetTopLeft(borderBack.rectTransform, 0.56f, 3f, 210.887f, 161f);
+        CreateOfferCardSurface(parent, 184f, 132f, 10f);
+        CreateDiscountBadge(parent, discount, 15f, 19f, 38f, 21f);
 
-        Image outerBorder = UiFactory.CreateImage("OuterBorder", parent, GetRoundedRectSprite(212, 161, 10f, 3f, false), UiTheme.NavBrand);
-        outerBorder.type = Image.Type.Sliced;
-        outerBorder.preserveAspect = false;
-        SetTopLeft(outerBorder.rectTransform, 0f, 0f, 212f, 161f);
+        TextMeshProUGUI titleText = CreateText(parent, "Title", title, 15, UiTheme.BodyText, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        SetTopLeft(titleText.rectTransform, 15f, 53f, 84f, 20f);
 
-        Image innerFill = UiFactory.CreateImage("InnerFill", parent, GetRoundedRectSprite(204, 152, 6f, 0f, true), Color.white);
-        innerFill.type = Image.Type.Sliced;
-        innerFill.preserveAspect = false;
-        SetTopLeft(innerFill.rectTransform, 4f, 6f, 204f, 152f);
+        TextMeshProUGUI descriptionText = CreateText(parent, "Description", description, 11, OfferBodyText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
+        descriptionText.textWrappingMode = TextWrappingModes.Normal;
+        SetTopLeft(descriptionText.rectTransform, 15f, 77f, 82f, 36f);
 
-        Image titleBar = UiFactory.CreateImage("TitleBar", parent, GetTopRoundedSprite(204, 20, 6f), CtaBlue);
-        titleBar.type = Image.Type.Sliced;
-        titleBar.preserveAspect = false;
-        SetTopLeft(titleBar.rectTransform, 4f, 6f, fillWidth, 20f);
+        Image art = UiFactory.CreateImage("Art", parent, sprites.GetResourceSprite(artResource), Color.white);
+        art.type = Image.Type.Simple;
+        art.preserveAspect = true;
+        art.raycastTarget = false;
+        SetTopLeft(art.rectTransform, 82f, 29f, 88f, 72f);
 
-        TextMeshProUGUI titleText = CreateText(parent, "Title", title, 15, Color.white, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(titleText.rectTransform, 4f, 6f, titleWidth, 20f);
-
-        Image leftImage = UiFactory.CreateImage("LeftArt", parent, sprites.GetResourceSprite(leftImageResource), Color.white);
-        leftImage.type = Image.Type.Simple;
-        leftImage.preserveAspect = false;
-        leftImage.raycastTarget = false;
-        SetTopLeft(leftImage.rectTransform, leftImageRect.x, leftImageRect.y, leftImageRect.width, leftImageRect.height);
-
-        Image rightImage = UiFactory.CreateImage("RightArt", parent, sprites.GetResourceSprite(rightImageResource), Color.white);
-        rightImage.type = Image.Type.Simple;
-        rightImage.preserveAspect = false;
-        rightImage.raycastTarget = false;
-        SetTopLeft(rightImage.rectTransform, rightImageRect.x, rightImageRect.y, rightImageRect.width, rightImageRect.height);
-
-        TextMeshProUGUI captionText = CreateText(parent, "Caption", caption, 13, UiTheme.NavBrand, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(captionText.rectTransform, captionRect.x, captionRect.y, captionRect.width, captionRect.height);
-
-        CreatePointsPill(parent, "Price", 79f, 134f, 54f, 22f, points);
+        CreatePointsPill(parent, "Price", 15f, 106f, 58f, 22f, points);
+        CreateOfferCardBorder(parent, 184f, 132f, 10f);
     }
 
     private void BuildRandomOfferCard(RectTransform parent)
     {
-        Image borderBack = UiFactory.CreateImage("BorderBack", parent, GetRoundedRectSprite(163, 161, 10f, 3f, false), UiTheme.NavBrandDark);
-        borderBack.type = Image.Type.Sliced;
-        borderBack.preserveAspect = false;
-        SetTopLeft(borderBack.rectTransform, 0.43044f, 3f, 163.13911f, 161f);
+        BuildSpecialOfferCard(parent, "Random Box", "A mystery box filled with fun surprises", "-10%", "180", "UI/Generated/ShopOffers/special_offer_random_box");
+    }
 
-        Image outerBorder = UiFactory.CreateImage("OuterBorder", parent, GetRoundedRectSprite(164, 161, 10f, 3f, false), UiTheme.NavBrand);
-        outerBorder.type = Image.Type.Sliced;
-        outerBorder.preserveAspect = false;
-        SetTopLeft(outerBorder.rectTransform, 0f, 0f, 164f, 161f);
+    private void BuildSpecialOfferHeader(RectTransform parent)
+    {
+        TextMeshProUGUI title = CreateText(parent, "SpecialOfferTitle", "Special Offer", 22, UiTheme.BodyText, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        SetTopLeft(title.rectTransform, 12f, 0f, 142f, 30f);
 
-        Image innerFill = UiFactory.CreateImage("InnerFill", parent, GetRoundedRectSprite(156, 152, 6f, 0f, true), Color.white);
-        innerFill.type = Image.Type.Sliced;
-        innerFill.preserveAspect = false;
-        SetTopLeft(innerFill.rectTransform, 4f, 6f, 156f, 152f);
+        Image paw = UiFactory.CreateImage("SpecialOfferPaw", parent, sprites.GetIcon("icon_paw_brand"), OfferAccent);
+        paw.type = Image.Type.Simple;
+        paw.preserveAspect = true;
+        paw.raycastTarget = false;
+        SetTopLeft(paw.rectTransform, 154f, 5f, 18f, 18f);
 
-        Image titleBar = UiFactory.CreateImage("TitleBar", parent, GetTopRoundedSprite(156, 20, 6f), CtaBlue);
-        titleBar.type = Image.Type.Sliced;
-        titleBar.preserveAspect = false;
-        SetTopLeft(titleBar.rectTransform, 4f, 6f, 156f, 20f);
+        TextMeshProUGUI subtitle = CreateText(parent, "SpecialOfferSubtitle", "Limited time deals for your pawfriends", 13, OfferBodyText, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
+        SetTopLeft(subtitle.rectTransform, 12f, 32f, 245f, 20f);
 
-        TextMeshProUGUI title = CreateText(parent, "Title", "Random", 15, Color.white, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(title.rectTransform, 4f, 6f, 156f, 20f);
+        Image timerFill = UiFactory.CreateImage("SpecialOfferTimer", parent, GetRoundedRectSprite(100, 24, 12f, 0f, true), OfferTimerFill);
+        timerFill.type = Image.Type.Sliced;
+        timerFill.preserveAspect = false;
+        timerFill.raycastTarget = false;
+        SetTopLeft(timerFill.rectTransform, 274f, 4f, 100f, 24f);
 
-        Image lootbox = UiFactory.CreateImage("Lootbox", parent, sprites.GetResourceSprite("UI/Figma/Shop/random_lootbox"), Color.white);
-        lootbox.type = Image.Type.Simple;
-        lootbox.preserveAspect = false;
-        lootbox.raycastTarget = false;
-        SetTopLeft(lootbox.rectTransform, 31f, 43f, 102f, 86f);
+        Image timerIcon = UiFactory.CreateImage("TimerIcon", parent, sprites.GetIcon("icon_clock"), OfferAccent);
+        timerIcon.type = Image.Type.Simple;
+        timerIcon.preserveAspect = true;
+        timerIcon.raycastTarget = false;
+        SetTopLeft(timerIcon.rectTransform, 282f, 9f, 14f, 14f);
 
-        CreatePointsPill(parent, "Price", 55f, 134f, 54f, 22f, "180");
+        TextMeshProUGUI timerText = CreateText(parent, "TimerText", "22h 48m left", 12, OfferAccent, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        SetTopLeft(timerText.rectTransform, 300f, 6f, 68f, 20f);
+    }
+
+    private void CreateOfferCardSurface(RectTransform parent, float width, float height, float radius)
+    {
+        Image shadow = UiFactory.CreateImage(
+            "Shadow",
+            parent,
+            GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), radius, 0f, true),
+            OfferCardShadow);
+        shadow.type = Image.Type.Sliced;
+        shadow.preserveAspect = false;
+        shadow.raycastTarget = false;
+        SetTopLeft(shadow.rectTransform, 0f, 5f, width, height);
+
+        Image fill = UiFactory.CreateImage(
+            "Fill",
+            parent,
+            GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), radius, 0f, true),
+            OfferCardFill);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        SetTopLeft(fill.rectTransform, 0f, 0f, width, height);
+    }
+
+    private void CreateOfferCardBorder(RectTransform parent, float width, float height, float radius)
+    {
+        Image border = UiFactory.CreateImage(
+            "Border",
+            parent,
+            GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), radius, 1f, false),
+            OfferCardBorder);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        SetTopLeft(border.rectTransform, 0f, 0f, width, height);
+    }
+
+    private void CreateDiscountBadge(RectTransform parent, string discount, float x, float y, float width, float height)
+    {
+        Image badge = UiFactory.CreateImage(
+            "DiscountBadge",
+            parent,
+            GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 6f, 0f, true),
+            OfferAccent);
+        badge.type = Image.Type.Sliced;
+        badge.preserveAspect = false;
+        badge.raycastTarget = false;
+        SetTopLeft(badge.rectTransform, x, y, width, height);
+
+        TextMeshProUGUI label = CreateText(parent, "DiscountText", discount, 12, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(label.rectTransform, x, y, width, height);
+    }
+
+    private void BuildCatalogTitleHeader(RectTransform parent, string name, float x, float y, float width, float height, string title)
+    {
+        RectTransform header = CreateNode(name, parent, x, y, width, height);
+
+        Image leftLine = UiFactory.CreateImage("LeftLine", header, UiTheme.WhiteSprite, CatalogDivider);
+        leftLine.type = Image.Type.Simple;
+        leftLine.preserveAspect = false;
+        leftLine.raycastTarget = false;
+        SetTopLeft(leftLine.rectTransform, 24f, 13f, 94f, 1f);
+
+        Image rightLine = UiFactory.CreateImage("RightLine", header, UiTheme.WhiteSprite, CatalogDivider);
+        rightLine.type = Image.Type.Simple;
+        rightLine.preserveAspect = false;
+        rightLine.raycastTarget = false;
+        SetTopLeft(rightLine.rectTransform, width - 118f, 13f, 94f, 1f);
+
+        Image leftPaw = UiFactory.CreateImage("LeftPaw", header, sprites.GetIcon("icon_paw_brand"), UiTheme.NavBrand);
+        leftPaw.type = Image.Type.Simple;
+        leftPaw.preserveAspect = true;
+        leftPaw.raycastTarget = false;
+        SetTopLeft(leftPaw.rectTransform, 126f, 5f, 16f, 16f);
+
+        TextMeshProUGUI label = CreateText(header, "Label", title, 16, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(label.rectTransform, 146f, 0f, 90f, height);
+
+        Image rightPaw = UiFactory.CreateImage("RightPaw", header, sprites.GetIcon("icon_paw_brand"), UiTheme.NavBrand);
+        rightPaw.type = Image.Type.Simple;
+        rightPaw.preserveAspect = true;
+        rightPaw.raycastTarget = false;
+        SetTopLeft(rightPaw.rectTransform, 240f, 5f, 16f, 16f);
     }
 
     private void BuildCategoryRow(RectTransform parent)
     {
-        RectTransform row = CreateNode("CategoriesRow", parent, 0f, 47f, 382f, 42f);
-        BuildCategoryButton(row, "Dogs", 0f, "icon_dog_white", new Rect(8f, 3.99998f, 34f, 31f));
-        BuildCategoryButton(row, "Food", 66.2f, "icon_foodsupply_white", new Rect(7.8f, 2f, 36f, 36f));
-        BuildCategoryButton(row, "Toys", 132.4f, "icon_toys_white", new Rect(6.4f, 1f, 38f, 38f));
-        BuildCategoryButton(row, "Collar", 198.6f, "icon_collar_white", new Rect(5.6f, 0f, 40f, 40f));
-        BuildCategoryButton(row, "Clothing", 264.8f, "icon_clothing_white", new Rect(8.2f, 3f, 34f, 34f));
-        BuildCategoryButton(row, "Bed", 331f, "icon_dogbed_white", new Rect(7f, 2f, 37f, 37f));
+        RectTransform row = CreateNode("CategoriesRow", parent, 0f, 38f, 382f, 76f);
+        const float tileWidth = 57f;
+        const float tileGap = 6f;
+        const float startX = 5f;
+
+        BuildCategoryButton(row, "All", CatalogScrollTarget.All, startX + (tileWidth + tileGap) * 0f, tileWidth, "All", "icon_dog_white", "icon_dog_brand", new Rect(14f, 9f, 29f, 27f));
+        BuildCategoryButton(row, "Food", CatalogScrollTarget.Food, startX + (tileWidth + tileGap) * 1f, tileWidth, "Food", "icon_foodsupply_white", "icon_foodsupply_brand", new Rect(13f, 7f, 31f, 31f));
+        BuildCategoryButton(row, "Toys", CatalogScrollTarget.Toys, startX + (tileWidth + tileGap) * 2f, tileWidth, "Toys", "icon_toys_white", "icon_toys_brand", new Rect(12f, 6f, 33f, 33f));
+        BuildCategoryButton(row, "Accessories", CatalogScrollTarget.Accessories, startX + (tileWidth + tileGap) * 3f, tileWidth, "Accessories", "icon_collar_white", "icon_collar_brand", new Rect(11f, 4f, 35f, 35f));
+        BuildCategoryButton(row, "Clothes", CatalogScrollTarget.Clothes, startX + (tileWidth + tileGap) * 4f, tileWidth, "Clothes", "icon_clothing_white", "icon_clothing_brand", new Rect(13f, 8f, 31f, 31f));
+        BuildCategoryButton(row, "Beds", CatalogScrollTarget.Beds, startX + (tileWidth + tileGap) * 5f, tileWidth, "Beds", "icon_dogbed_white", "icon_dogbed_brand", new Rect(12f, 7f, 33f, 33f));
     }
 
     private void BuildProductSection(
@@ -546,14 +616,11 @@ public class ShopScreenView : AppScreenViewBase
         RectTransform parent,
         string name,
         float y,
-        float headerWidth,
         string title,
         string headerIcon,
-        float iconSize,
         Rect iconRect,
-        float listWidth,
-        float listHeight,
-        PawPalItemCategory category)
+        PawPalItemCategory category,
+        CatalogScrollTarget scrollTarget)
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime == null)
@@ -568,14 +635,24 @@ public class ShopScreenView : AppScreenViewBase
             items.Add(categoryItems[i]);
         }
 
-        RectTransform section = CreateNode(name, parent, 0f, y, listWidth, listHeight + 13f);
-        RectTransform header = BuildSectionHeader(section, "Header", 0f, 0f, headerWidth, 28f, title, headerIcon, iconSize, 15, UiTheme.NavExtraBoldFont, iconRect);
+        catalogScrollTargets[scrollTarget] = y;
 
-        RectTransform list = CreateNode("List", section, 0f, 13f, listWidth, listHeight);
+        float listWidth = 382f;
+        float listHeight = GetRuntimeProductListHeight(items.Count);
+        RectTransform section = CreateNode(name, parent, 0f, y, listWidth, listHeight + 18f);
+
+        RectTransform list = CreateNode("List", section, 0f, 18f, listWidth, listHeight);
         BuildListPanel(list, listWidth, listHeight);
         BuildRuntimeCategoryCards(list, items, category);
+        RectTransform header = BuildCatalogSectionHeader(section, "Header", title, headerIcon, iconRect);
         header.SetAsLastSibling();
         return y + listHeight + 36f;
+    }
+
+    private static float GetRuntimeProductListHeight(int itemCount)
+    {
+        int rowCount = Mathf.Max(1, Mathf.CeilToInt(itemCount / 3f));
+        return 20f + rowCount * 115f + Mathf.Max(0, rowCount - 1) * 7f + 12f;
     }
 
     private void BuildRuntimeCategoryCards(RectTransform list, List<PawPalCatalogItemDefinition> items, PawPalItemCategory category)
@@ -621,7 +698,7 @@ public class ShopScreenView : AppScreenViewBase
         {
             badgeKind = CardBadgeKind.Price;
             badgeText = item.Price.ToString();
-            badgeWidth = item.Price >= 100 ? 54f : 45f;
+            badgeWidth = 54f;
             onClick = delegate
             {
                 ShowItemDetails(item.Id);
@@ -647,17 +724,17 @@ public class ShopScreenView : AppScreenViewBase
 
     private void BuildListPanel(RectTransform parent, float width, float height)
     {
-        Image fill = UiFactory.CreateImage("Fill", parent, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 10f, 0f, true), SupportFill);
+        Image fill = UiFactory.CreateImage("Fill", parent, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 12f, 0f, true), CatalogPanelFill);
         fill.type = Image.Type.Sliced;
         fill.preserveAspect = false;
         fill.raycastTarget = false;
         SetTopLeft(fill.rectTransform, 0f, 0f, width, height);
         Shadow fillShadow = fill.gameObject.AddComponent<Shadow>();
         fillShadow.effectColor = new Color(SupportShadow.r / 255f, SupportShadow.g / 255f, SupportShadow.b / 255f, 1f);
-        fillShadow.effectDistance = new Vector2(0f, -1f);
+        fillShadow.effectDistance = new Vector2(0f, -2f);
         fillShadow.useGraphicAlpha = false;
 
-        Image border = UiFactory.CreateImage("Border", parent, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 10f, 3f, false), UiTheme.NavBrand);
+        Image border = UiFactory.CreateImage("Border", parent, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 12f, 1.5f, false), CatalogPanelBorder);
         border.type = Image.Type.Sliced;
         border.preserveAspect = false;
         border.raycastTarget = false;
@@ -690,11 +767,7 @@ public class ShopScreenView : AppScreenViewBase
             });
         }
 
-        Image field = UiFactory.CreateImage("Field", card, fieldSprite, Color.white);
-        field.type = Image.Type.Sliced;
-        field.preserveAspect = false;
-        field.raycastTarget = false;
-        SetTopLeft(field.rectTransform, 0f, 0f, 115f, 115f);
+        BuildItemCardSurface(card);
 
         Image titleBar = UiFactory.CreateImage("TitleBar", card, GetTopRoundedSprite(115, 15, 10f), badgeBarColor);
         titleBar.type = Image.Type.Sliced;
@@ -703,6 +776,9 @@ public class ShopScreenView : AppScreenViewBase
         SetTopLeft(titleBar.rectTransform, 0f, 0f, 115f, 15f);
 
         TextMeshProUGUI titleLabel = CreateText(card, "Title", title, 12, titleTextColor, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
+        titleLabel.enableAutoSizing = true;
+        titleLabel.fontSizeMin = 8f;
+        titleLabel.fontSizeMax = 12f;
         SetTopLeft(titleLabel.rectTransform, 0f, 0f, 115f, 15f);
 
         if (!string.IsNullOrEmpty(imageResource))
@@ -720,12 +796,32 @@ public class ShopScreenView : AppScreenViewBase
                 CreatePointsPill(card, "Price", (115f - badgeWidth) * 0.5f, 91f, badgeWidth, 22f, badgeText);
                 break;
             case CardBadgeKind.Owned:
-                CreateOwnedPill(card, "Owned", 32f, 92f, 51f, 20f, badgeText);
+                CreateOwnedPill(card, "Owned", 29f, 92f, 57f, 20f, badgeText);
                 break;
             case CardBadgeKind.Empty:
                 CreateEmptyPill(card, "Empty", 33f, 91f, badgeWidth, 20f);
                 break;
         }
+    }
+
+    private void BuildItemCardSurface(RectTransform card)
+    {
+        Image fill = UiFactory.CreateImage("Field", card, GetRoundedRectSprite(115, 115, 10f, 0f, true), Color.white);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        SetTopLeft(fill.rectTransform, 0f, 0f, 115f, 115f);
+
+        Shadow shadow = fill.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(ItemCardShadow.r / 255f, ItemCardShadow.g / 255f, ItemCardShadow.b / 255f, 0.75f);
+        shadow.effectDistance = new Vector2(0f, -3f);
+        shadow.useGraphicAlpha = false;
+
+        Image border = UiFactory.CreateImage("Frame", card, GetRoundedRectSprite(115, 115, 10f, 1.25f, false), ItemCardBorder);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        SetTopLeft(border.rectTransform, 0f, 0f, 115f, 115f);
     }
 
     private void BuildBuyPointsPanel(RectTransform parent)
@@ -920,11 +1016,7 @@ public class ShopScreenView : AppScreenViewBase
         }
 
         RectTransform card = CreateNode("SuccessItem", parent, x, y, 115f, 115f);
-        Image field = UiFactory.CreateImage("Field", card, GetFieldSpriteForItem(item), Color.white);
-        field.type = Image.Type.Sliced;
-        field.preserveAspect = false;
-        field.raycastTarget = false;
-        SetTopLeft(field.rectTransform, 0f, 0f, 115f, 115f);
+        BuildItemCardSurface(card);
 
         Image titleBar = UiFactory.CreateImage("TitleBar", card, GetTopRoundedSprite(115, 15, 10f), CtaBlue);
         titleBar.type = Image.Type.Sliced;
@@ -933,6 +1025,9 @@ public class ShopScreenView : AppScreenViewBase
         SetTopLeft(titleBar.rectTransform, 0f, 0f, 115f, 15f);
 
         TextMeshProUGUI title = CreateText(card, "Title", item.DisplayName, 12, Color.white, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
+        title.enableAutoSizing = true;
+        title.fontSizeMin = 8f;
+        title.fontSizeMax = 12f;
         SetTopLeft(title.rectTransform, 0f, 0f, 115f, 15f);
 
         Image art = UiFactory.CreateImage("Art", card, sprites.GetResourceSprite(GetSuccessSpritePath(item)), Color.white);
@@ -1009,26 +1104,165 @@ public class ShopScreenView : AppScreenViewBase
         return header;
     }
 
-    private void BuildCategoryButton(RectTransform parent, string name, float x, string iconName, Rect iconRect)
+    private RectTransform BuildCatalogSectionHeader(RectTransform parent, string name, string title, string iconName, Rect iconRect)
     {
-        RectTransform buttonRoot = CreateNode(name, parent, x, 0f, 51f, 42f);
-        Image fill = UiFactory.CreateImage("Fill", buttonRoot, GetRoundedRectSprite(51, 42, 10f, 0f, true), UiTheme.NavBrand);
-        fill.type = Image.Type.Sliced;
-        fill.preserveAspect = false;
-        fill.raycastTarget = false;
-        SetTopLeft(fill.rectTransform, 0f, 0f, 51f, 42f);
+        RectTransform header = CreateNode(name, parent, 16f, 0f, 240f, 40f);
 
-        Image underline = UiFactory.CreateImage("Underline", buttonRoot, GetRoundedRectSprite(51, 42, 10f, 2f, false), UiTheme.NavBrandDark);
-        underline.type = Image.Type.Sliced;
-        underline.preserveAspect = false;
-        underline.raycastTarget = false;
-        SetTopLeft(underline.rectTransform, 0f, 0f, 51f, 42f);
+        Image badge = UiFactory.CreateImage("Badge", header, UiTheme.CircleSprite, UiTheme.NavBrand);
+        badge.type = Image.Type.Simple;
+        badge.preserveAspect = false;
+        badge.raycastTarget = false;
+        SetTopLeft(badge.rectTransform, 0f, 0f, 38f, 38f);
 
-        Image icon = UiFactory.CreateImage("Icon", buttonRoot, sprites.GetIcon(iconName), Color.white);
+        Image icon = UiFactory.CreateImage("Icon", header, sprites.GetIcon(iconName), Color.white);
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
         icon.raycastTarget = false;
         SetTopLeft(icon.rectTransform, iconRect.x, iconRect.y, iconRect.width, iconRect.height);
+
+        TextMeshProUGUI label = CreateText(header, "Label", title, 16, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        SetTopLeft(label.rectTransform, 50f, 6f, 180f, 25f);
+        return header;
+    }
+
+    private void BuildCategoryButton(
+        RectTransform parent,
+        string name,
+        CatalogScrollTarget target,
+        float x,
+        float width,
+        string labelText,
+        string selectedIconName,
+        string unselectedIconName,
+        Rect iconRect)
+    {
+        RectTransform buttonRoot = CreateNode(name, parent, x, 0f, width, 74f);
+
+        Image fill = UiFactory.CreateImage("Fill", buttonRoot, GetRoundedRectSprite(Mathf.RoundToInt(width), 66, 10f, 0f, true), CategoryTileFill);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        SetTopLeft(fill.rectTransform, 0f, 0f, width, 66f);
+        Shadow shadow = fill.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(CategoryTileShadow.r / 255f, CategoryTileShadow.g / 255f, CategoryTileShadow.b / 255f, 1f);
+        shadow.effectDistance = new Vector2(0f, -2f);
+        shadow.useGraphicAlpha = false;
+
+        Image border = UiFactory.CreateImage("Border", buttonRoot, GetRoundedRectSprite(Mathf.RoundToInt(width), 66, 10f, 1.4f, false), CatalogPanelBorder);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        SetTopLeft(border.rectTransform, 0f, 0f, width, 66f);
+
+        Image icon = UiFactory.CreateImage("Icon", buttonRoot, sprites.GetIcon(unselectedIconName), Color.white);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        SetTopLeft(icon.rectTransform, iconRect.x, iconRect.y, iconRect.width, iconRect.height);
+
+        TextMeshProUGUI label = CreateText(buttonRoot, "Label", labelText, 11, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 8f;
+        label.fontSizeMax = 11f;
+        SetTopLeft(label.rectTransform, 3f, 47f, width - 6f, 17f);
+
+        categoryTiles.Add(new CatalogCategoryTile
+        {
+            Target = target,
+            Fill = fill,
+            Border = border,
+            Icon = icon,
+            Label = label,
+            SelectedIconName = selectedIconName,
+            UnselectedIconName = unselectedIconName
+        });
+
+        UiFactory.AddButton(buttonRoot.gameObject, delegate
+        {
+            ScrollToCatalogTarget(target);
+        });
+    }
+
+    private void RefreshCategoryTileSelection()
+    {
+        for (int i = 0; i < categoryTiles.Count; i++)
+        {
+            CatalogCategoryTile tile = categoryTiles[i];
+            if (tile == null || tile.Fill == null || tile.Border == null || tile.Icon == null || tile.Label == null)
+            {
+                continue;
+            }
+
+            bool selected = tile.Target == selectedCatalogTarget;
+            tile.Fill.color = selected ? UiTheme.NavBrand : CategoryTileFill;
+            tile.Border.color = selected ? UiTheme.NavBrandDark : CatalogPanelBorder;
+            tile.Icon.sprite = sprites.GetIcon(selected ? tile.SelectedIconName : tile.UnselectedIconName);
+            tile.Icon.color = Color.white;
+            tile.Label.color = selected ? Color.white : UiTheme.NavBrandDark;
+        }
+    }
+
+    private void ScrollToCatalogTarget(CatalogScrollTarget target)
+    {
+        selectedCatalogTarget = target;
+        RefreshCategoryTileSelection();
+
+        if (scrollContent == null)
+        {
+            return;
+        }
+
+        float targetY;
+        if (!catalogScrollTargets.TryGetValue(target, out targetY))
+        {
+            targetY = 0f;
+        }
+
+        float catalogTop = catalogSectionRoot != null ? -catalogSectionRoot.anchoredPosition.y : 0f;
+        float desiredY = catalogTop + targetY;
+        float clampedY = Mathf.Clamp(desiredY, 0f, GetMaxScrollOffset());
+
+        if (shopScrollRect != null)
+        {
+            shopScrollRect.StopMovement();
+        }
+
+        scrollContent.anchoredPosition = new Vector2(0f, clampedY);
+        Canvas.ForceUpdateCanvases();
+    }
+
+    private float GetMaxScrollOffset()
+    {
+        if (scrollContent == null || shopViewport == null)
+        {
+            return 0f;
+        }
+
+        float contentHeight = scrollContent.sizeDelta.y;
+        float viewportHeight = shopViewport.sizeDelta.y;
+        return Mathf.Max(0f, contentHeight - viewportHeight);
+    }
+
+    private void UpdateScrollContentHeight()
+    {
+        if (scrollContent == null)
+        {
+            return;
+        }
+
+        float contentHeight = scrollContent.sizeDelta.y;
+        if (catalogSectionRoot != null)
+        {
+            float catalogTop = -catalogSectionRoot.anchoredPosition.y;
+            contentHeight = catalogTop + catalogSectionRoot.sizeDelta.y + CatalogBottomPadding;
+        }
+
+        if (shopViewport != null)
+        {
+            contentHeight = Mathf.Max(contentHeight, shopViewport.sizeDelta.y);
+        }
+
+        scrollContent.sizeDelta = new Vector2(382f, contentHeight);
     }
 
     private TextMeshProUGUI BuildBigPointsPill(RectTransform parent, float x, float y, float width, float height, string text)
@@ -1148,32 +1382,39 @@ public class ShopScreenView : AppScreenViewBase
     {
         RectTransform pillRoot = CreateNode(name, parent, x, y, width, height);
 
+        float pillWidth = Mathf.Max(20f, width - 10f);
+        Image fill = UiFactory.CreateImage("Fill", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), 20, 10f, 0f, true), Color.white);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        SetTopLeft(fill.rectTransform, 10f, 1f, pillWidth, 20f);
+
+        Image border = UiFactory.CreateImage("Border", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(pillWidth), 20, 10f, 1f, false), CtaBlueDark);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        SetTopLeft(border.rectTransform, 10f, 1f, pillWidth, 20f);
+
+        TextMeshProUGUI label = CreateText(pillRoot, "Value", value, 13, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.MidlineRight);
+        SetTopLeft(label.rectTransform, 24f, 1f, Mathf.Max(10f, width - 28f), 20f);
+
         Image circle = UiFactory.CreateImage("Circle", pillRoot, UiTheme.CircleSprite, CtaBlue);
         circle.type = Image.Type.Simple;
         circle.preserveAspect = false;
         circle.raycastTarget = false;
         SetTopLeft(circle.rectTransform, 0f, 0f, 22f, 22f);
 
+        Image circleBorder = UiFactory.CreateImage("CircleBorder", pillRoot, GetRoundedRectSprite(22, 22, 11f, 1f, false), CtaBlueDark);
+        circleBorder.type = Image.Type.Sliced;
+        circleBorder.preserveAspect = false;
+        circleBorder.raycastTarget = false;
+        SetTopLeft(circleBorder.rectTransform, 0f, 0f, 22f, 22f);
+
         Image paw = UiFactory.CreateImage("Paw", pillRoot, sprites.GetIcon("icon_paw_white"), Color.white);
         paw.type = Image.Type.Simple;
         paw.preserveAspect = true;
         paw.raycastTarget = false;
         SetTopLeft(paw.rectTransform, 2f, 2f, 18f, 18f);
-
-        Image fill = UiFactory.CreateImage("Fill", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 10f, 0f, true), Color.white);
-        fill.type = Image.Type.Sliced;
-        fill.preserveAspect = false;
-        fill.raycastTarget = false;
-        SetTopLeft(fill.rectTransform, 10f, 1f, width - 10f, height - 2f);
-
-        Image border = UiFactory.CreateImage("Border", pillRoot, GetRoundedRectSprite(Mathf.RoundToInt(width), Mathf.RoundToInt(height), 10f, 1f, false), CtaBlueDark);
-        border.type = Image.Type.Sliced;
-        border.preserveAspect = false;
-        border.raycastTarget = false;
-        SetTopLeft(border.rectTransform, 10f, 1f, width - 10f, height - 2f);
-
-        TextMeshProUGUI label = CreateText(pillRoot, "Value", value, 13, CtaBlue, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(label.rectTransform, 24f, 1f, width - 24f, 20f);
     }
 
     private void CreateOwnedPill(RectTransform parent, string name, float x, float y, float width, float height, string value)
@@ -1368,7 +1609,7 @@ public class ShopScreenView : AppScreenViewBase
             return 51f;
         }
 
-        return item.Price >= 100 ? 54f : 45f;
+        return 54f;
     }
 
     private string GetSuccessSpritePath(PawPalCatalogItemDefinition item)
@@ -1418,12 +1659,6 @@ public class ShopScreenView : AppScreenViewBase
                 return CreateTintedFieldSprite("shop_turbo_roll_field", new Color32(168, 184, 223, 140), new Color32(85, 120, 201, 26));
             case "toy_star_ball":
                 return CreateTintedFieldSprite("shop_star_ball_field", new Color32(235, 229, 174, 140), new Color32(219, 209, 103, 26));
-            case "collar_ocean_band":
-                return CreateTintedFieldSprite("shop_ocean_band_field", new Color32(156, 169, 194, 140), new Color32(62, 90, 142, 26));
-            case "collar_maple_loop":
-                return CreateTintedFieldSprite("shop_maple_loop_field", new Color32(230, 213, 183, 140), new Color32(209, 178, 120, 26));
-            case "collar_cherry_charm":
-                return CreateTintedFieldSprite("shop_cherry_charm_field", new Color32(186, 185, 184, 140), new Color32(122, 122, 122, 26));
             default:
                 return CreateStandardFieldSprite("shop_" + item.Id + "_field", new Color32(255, 245, 228, 26), new Color32(255, 245, 228, 26));
         }
@@ -1441,33 +1676,9 @@ public class ShopScreenView : AppScreenViewBase
 
     private Vector2 GetShopCardPosition(PawPalItemCategory category, int index)
     {
-        switch (category)
-        {
-            case PawPalItemCategory.Toys:
-                switch (index)
-                {
-                    case 0: return new Vector2(10f, 20f);
-                    case 1: return new Vector2(132f, 20f);
-                    case 2: return new Vector2(254f, 20f);
-                    case 3: return new Vector2(10f, 142f);
-                    default: return new Vector2(-1f, -1f);
-                }
-            case PawPalItemCategory.Collars:
-                switch (index)
-                {
-                    case 0: return new Vector2(10f, 20f);
-                    case 1: return new Vector2(132f, 20f);
-                    case 2: return new Vector2(254f, 20f);
-                    default: return new Vector2(-1f, -1f);
-                }
-            default:
-                switch (index)
-                {
-                    case 0: return new Vector2(10f, 20f);
-                    case 1: return new Vector2(132f, 20f);
-                    default: return new Vector2(-1f, -1f);
-                }
-        }
+        int column = index % 3;
+        int row = index / 3;
+        return new Vector2(10f + column * 122f, 20f + row * 122f);
     }
 
     private static void ClearChildren(RectTransform parent)

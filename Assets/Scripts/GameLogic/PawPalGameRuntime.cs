@@ -728,9 +728,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private const float EnergyDrainPerHour = 0.025f;
     private const string SaveFileName = "pawpal_profile_v1.json";
     private const string StarterDogId = "pepper";
-    private const string StarterCollarItemId = "collar_ocean_band";
+    private const string StarterCollarItemId = "collar_simple_c2";
     private const string BasicFoodItemId = "food_basic";
     private const string PremiumFoodItemId = "food_premium";
+    private const string DownloadedShopSpriteRoot = "UI/Downloaded/Shop/";
 
     private static readonly Quaternion DefaultCollarRotation = new Quaternion(-0.000001496502f, 0.97860277f, 0.2057589f, 7.7398e-10f);
     private static readonly Vector3 DefaultCollarPosition = new Vector3(0f, 0.0171f, 0f);
@@ -1706,8 +1707,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             DisabledInShop = true,
             DisabledReason = "Dog breeds are not purchasable in this milestone.",
             Description = "A playful premium dog breed with high energy and strong mobility.",
-            ShopSpritePath = "UI/Figma/Shop/husky",
-            PreviewSpritePath = "UI/Figma/Shop/husky"
+            ShopSpritePath = DownloadedShopSpriteRoot + "husky",
+            PreviewSpritePath = DownloadedShopSpriteRoot + "husky"
         });
 
         AddCatalogItem(new PawPalCatalogItemDefinition
@@ -1757,89 +1758,20 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             InventoryCardTheme = InventoryCardTheme.Roll
         });
 
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "toy_bubble_bone",
-            DisplayName = "Bubble Bone",
-            Category = PawPalItemCategory.Toys,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 150,
-            StarterOwned = true,
-            StarterQuantity = 1,
-            Description = "An owned starter toy. Tapping it in inventory spawns a room toy for the dogs to discover.",
-            ShopSpritePath = "UI/Figma/Shop/bubble_bone",
-            GeneratedShopSpritePath = "UI/Generated/Shop/toy_bubble_bone",
-            PreviewSpritePath = "UI/Figma/Shop/bubble_bone_preview",
-            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Bone_1",
-            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
-            InventorySpritePath = "UI/Figma/HomeInventory/item_bone",
-            InventoryCardTheme = InventoryCardTheme.Bone,
-            RoomPrefabResourcePath = "PawPal/RoomPrefabs/Bone_1",
-            ToyTint = new Color(0.88f, 0.34f, 0.58f, 1f)
-        });
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_bone_1", "Golden Bone", "bone_1", "PawPal/RoomPrefabs/Bone_1", InventoryCardTheme.Bone, PawPalToyInteractionMode.CarryInMouth, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_bone_2", "Rose Bone", "bone_2", string.Empty, InventoryCardTheme.Bone, PawPalToyInteractionMode.CarryInMouth, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_1", "Lime Ball", "ball_1", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_2", "Rally Ball", "ball_2", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_3", "Sunny Ball", "ball_3", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_1", "Stripe Ball", "big_ball_1", "PawPal/RoomPrefabs/Big_ball_1", InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_2", "Sunset Ball", "big_ball_2", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_3", "Forest Ball", "big_ball_3", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_4", "Blush Ball", "big_ball_4", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
 
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "toy_bouncy_ball",
-            DisplayName = "Bouncy Ball",
-            Category = PawPalItemCategory.Toys,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 150,
-            Description = "A room ball toy that dogs can pick up and move around on their own.",
-            ShopSpritePath = "UI/Figma/Shop/bouncy_ball",
-            GeneratedShopSpritePath = "UI/Generated/Shop/toy_bouncy_ball",
-            PreviewSpritePath = "UI/Figma/Shop/bouncy_ball",
-            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
-            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
-            InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
-            InventoryCardTheme = InventoryCardTheme.Ball,
-            RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
-            ToyInteractionMode = PawPalToyInteractionMode.PawHitRoll,
-            ToyTint = new Color(0.82f, 0.84f, 0.24f, 1f)
-        });
-
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "toy_turbo_roll",
-            DisplayName = "Turbo Roll",
-            Category = PawPalItemCategory.Toys,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 150,
-            Description = "A rolling toy that drops into the room with physics and gives the dogs another object to chase.",
-            ShopSpritePath = "UI/Figma/Shop/turbo_roll",
-            GeneratedShopSpritePath = "UI/Generated/Shop/toy_turbo_roll",
-            PreviewSpritePath = "UI/Figma/Shop/turbo_roll",
-            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Wheel",
-            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
-            InventorySpritePath = "UI/Figma/HomeInventory/item_roll",
-            InventoryCardTheme = InventoryCardTheme.Roll,
-            RoomPrefabResourcePath = "PawPal/RoomPrefabs/Wheel",
-            ToyTint = new Color(0.40f, 0.60f, 0.86f, 1f)
-        });
-
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "toy_star_ball",
-            DisplayName = "Star Ball",
-            Category = PawPalItemCategory.Toys,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 150,
-            Description = "A second ball-style toy tier that uses the same room ball family in this milestone.",
-            ShopSpritePath = "UI/Figma/Shop/star_toy",
-            GeneratedShopSpritePath = "UI/Generated/Shop/toy_star_ball",
-            PreviewSpritePath = "UI/Figma/Shop/star_toy",
-            PreviewPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
-            PreviewMode = PawPalShopPreviewMode.StandaloneModel,
-            InventorySpritePath = "UI/Figma/HomeInventory/item_ball",
-            InventoryCardTheme = InventoryCardTheme.Ball,
-            RoomPrefabResourcePath = "PawPal/RoomPrefabs/Big_ball_1",
-            ToyInteractionMode = PawPalToyInteractionMode.PawHitRoll,
-            ToyTint = new Color(0.93f, 0.83f, 0.36f, 1f)
-        });
-
-        AddCatalogItem(BuildCollarDefinition("collar_ocean_band", "Ocean Band", 50, "UI/Figma/HomeInventory/item_band", "PawPal/Accessories/CollarSimple_C2", InventoryCardTheme.Band, true, Color.white));
-        AddCatalogItem(BuildCollarDefinition("collar_maple_loop", "Maple Loop", 50, "UI/Figma/Shop/maple_loop", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Loop, false, new Color(0.78f, 0.64f, 0.50f, 1f)));
-        AddCatalogItem(BuildCollarDefinition("collar_cherry_charm", "Cherry Charm", 150, "UI/Figma/Shop/cherry_charm", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Charm, false, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c1", "Ruby Band", DownloadedShopSpriteRoot + "collarsimple_c1", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Band, false, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c2", "Ocean Band", 50, DownloadedShopSpriteRoot + "collarsimple_c2", "PawPal/Accessories/CollarSimple_C2", InventoryCardTheme.Band, true, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c3", "Forest Band", DownloadedShopSpriteRoot + "collarsimple_c3", "PawPal/Accessories/CollarSimple_C3", InventoryCardTheme.Band, false, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_standard", "Shadow Loop", DownloadedShopSpriteRoot + "collar", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Loop, false, Color.white));
 
         AddCatalogItem(new PawPalCatalogItemDefinition
         {
@@ -1862,12 +1794,75 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Category = PawPalItemCategory.Furniture,
             CurrencyType = PawPalCurrencyType.Premium,
             Price = 350,
+            AppearsInShop = false,
             AppearsInInventory = false,
             DisabledInShop = true,
             DisabledReason = "Furniture stays visible but disabled in this milestone.",
             Description = "Furniture purchasing is intentionally deferred.",
             PreviewMode = PawPalShopPreviewMode.SpriteOnly
         });
+
+        AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_1_color_1", "Slate Bed", "bed_1_color_1"));
+        AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_1_color_2", "Denim Bed", "bed_1_color_2"));
+        AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_2_color_1", "Pawprint Bed", "bed_2_color_1"));
+        AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_2_color_2", "Sage Bed", "bed_2_color_2"));
+    }
+
+    private PawPalCatalogItemDefinition BuildDownloadedToyDefinition(
+        string id,
+        string displayName,
+        string spriteName,
+        string roomPrefabResourcePath,
+        InventoryCardTheme inventoryCardTheme,
+        PawPalToyInteractionMode interactionMode,
+        Color toyTint)
+    {
+        string spritePath = DownloadedShopSpriteRoot + spriteName;
+        bool hasRoomPrefab = !string.IsNullOrEmpty(roomPrefabResourcePath);
+        return new PawPalCatalogItemDefinition
+        {
+            Id = id,
+            DisplayName = displayName,
+            Category = PawPalItemCategory.Toys,
+            CurrencyType = PawPalCurrencyType.Premium,
+            Price = 150,
+            AppearsInInventory = hasRoomPrefab,
+            Description = hasRoomPrefab
+                ? "A room toy that can be spawned from the Home inventory after purchase."
+                : "A toy from the game asset set. Room spawning is deferred until its prefab is added to Resources.",
+            ShopSpritePath = spritePath,
+            PreviewSpritePath = spritePath,
+            PreviewPrefabResourcePath = roomPrefabResourcePath,
+            PreviewMode = hasRoomPrefab ? PawPalShopPreviewMode.StandaloneModel : PawPalShopPreviewMode.SpriteOnly,
+            InventorySpritePath = hasRoomPrefab ? spritePath : string.Empty,
+            InventoryCardTheme = inventoryCardTheme,
+            RoomPrefabResourcePath = roomPrefabResourcePath,
+            ToyInteractionMode = interactionMode,
+            ToyTint = toyTint
+        };
+    }
+
+    private PawPalCatalogItemDefinition BuildDownloadedFurnitureDefinition(string id, string displayName, string spriteName)
+    {
+        string spritePath = DownloadedShopSpriteRoot + spriteName;
+        return new PawPalCatalogItemDefinition
+        {
+            Id = id,
+            DisplayName = displayName,
+            Category = PawPalItemCategory.Furniture,
+            CurrencyType = PawPalCurrencyType.Premium,
+            Price = 350,
+            AppearsInInventory = false,
+            Description = "A dog bed from the game asset set for the shop Beds category.",
+            ShopSpritePath = spritePath,
+            PreviewSpritePath = spritePath,
+            PreviewMode = PawPalShopPreviewMode.SpriteOnly
+        };
+    }
+
+    private PawPalCatalogItemDefinition BuildCollarDefinition(string id, string displayName, string shopSpritePath, string collarPrefabResourcePath, InventoryCardTheme inventoryCardTheme, bool starterOwned, Color collarTint)
+    {
+        return BuildCollarDefinition(id, displayName, 75, shopSpritePath, collarPrefabResourcePath, inventoryCardTheme, starterOwned, collarTint);
     }
 
     private PawPalCatalogItemDefinition BuildCollarDefinition(string id, string displayName, int price, string shopSpritePath, string collarPrefabResourcePath, InventoryCardTheme inventoryCardTheme, bool starterOwned, Color collarTint)
@@ -2774,6 +2769,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             EnsureDogEquipmentState(dogs[i].Id);
         }
 
+        bool migratedEquipment = MigrateLegacyEquipmentReferences();
+
         dailyTasks.Clear();
         actionProgress.Clear();
         for (int i = 0; i < saveData.DailyTasks.Count; i++)
@@ -2792,10 +2789,31 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         inventoryRevision++;
         shopRevision++;
 
-        if (backfilledDogNeeds)
+        if (backfilledDogNeeds || migratedEquipment)
         {
             SaveProfile();
         }
+    }
+
+    private bool MigrateLegacyEquipmentReferences()
+    {
+        bool changed = false;
+        for (int i = 0; i < dogEquipment.Count; i++)
+        {
+            PawPalDogEquipmentState state = dogEquipment[i];
+            if (state == null)
+            {
+                continue;
+            }
+
+            if (string.Equals(state.EquippedCollarItemId, "collar_ocean_band", StringComparison.Ordinal))
+            {
+                state.EquippedCollarItemId = StarterCollarItemId;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private void RestoreTrainerMilestoneState(PawPalSaveData saveData)

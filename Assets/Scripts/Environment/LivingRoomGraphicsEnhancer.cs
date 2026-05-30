@@ -18,6 +18,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField] private bool applyOnEnable = true;
     [SerializeField] private bool configureMainCamera = true;
     [SerializeField] private bool configureRenderSettings = true;
+    [SerializeField] private bool configureSkybox = true;
     [SerializeField] private bool configurePostProcessing = true;
     [SerializeField] private bool configureReflectionProbe = true;
     [SerializeField] private bool configureQualityInPlayMode = true;
@@ -45,6 +46,12 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField] private Color ambientSky = new Color(0.70f, 0.72f, 0.72f);
     [SerializeField] private Color ambientEquator = new Color(0.45f, 0.43f, 0.39f);
     [SerializeField] private Color ambientGround = new Color(0.14f, 0.13f, 0.12f);
+
+    [Header("Skybox")]
+    [SerializeField] private Color skyboxTint = new Color(0.42f, 0.70f, 1f);
+    [SerializeField] private Color skyboxGroundColor = new Color(0.32f, 0.47f, 0.60f);
+    [SerializeField, Range(0f, 8f)] private float skyboxExposure = 1.08f;
+    [SerializeField, Range(0f, 5f)] private float skyboxAtmosphereThickness = 0.85f;
 
     [Header("Look")]
     [SerializeField] private float exposure = -0.08f;
@@ -89,6 +96,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     };
 
     private Volume lookVolume;
+    private Material runtimeSkyboxMaterial;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void BootstrapInPlayMode()
@@ -142,6 +150,8 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         sunShadowNormalBias = Mathf.Max(0f, sunShadowNormalBias);
         windowFillIntensity = Mathf.Max(0f, windowFillIntensity);
         sofaFillIntensity = Mathf.Max(0f, sofaFillIntensity);
+        skyboxExposure = Mathf.Max(0f, skyboxExposure);
+        skyboxAtmosphereThickness = Mathf.Max(0f, skyboxAtmosphereThickness);
         playModeShadowDistance = Mathf.Max(1f, playModeShadowDistance);
     }
 #endif
@@ -203,6 +213,74 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         RenderSettings.ambientIntensity = ambientIntensity;
         RenderSettings.reflectionIntensity = reflectionIntensity;
         RenderSettings.reflectionBounces = 1;
+
+        if (configureSkybox)
+        {
+            ConfigureSkybox();
+        }
+    }
+
+    private void ConfigureSkybox()
+    {
+        Material skybox = ResolveRuntimeSkyboxMaterial();
+        if (skybox == null)
+        {
+            return;
+        }
+
+        SetMaterialColor(skybox, "_SkyTint", skyboxTint);
+        SetMaterialColor(skybox, "_Tint", skyboxTint);
+        SetMaterialColor(skybox, "_Color", skyboxTint);
+        SetMaterialColor(skybox, "_GroundColor", skyboxGroundColor);
+        SetMaterialFloat(skybox, "_Exposure", skyboxExposure);
+        SetMaterialFloat(skybox, "_AtmosphereThickness", skyboxAtmosphereThickness);
+
+        RenderSettings.skybox = skybox;
+        DynamicGI.UpdateEnvironment();
+    }
+
+    private Material ResolveRuntimeSkyboxMaterial()
+    {
+        if (runtimeSkyboxMaterial != null && runtimeSkyboxMaterial.shader != null)
+        {
+            return runtimeSkyboxMaterial;
+        }
+
+        Material sourceSkybox = RenderSettings.skybox;
+        if (sourceSkybox != null && sourceSkybox.shader != null)
+        {
+            runtimeSkyboxMaterial = new Material(sourceSkybox);
+        }
+        else
+        {
+            Shader proceduralSkybox = Shader.Find("Skybox/Procedural");
+            if (proceduralSkybox == null)
+            {
+                return null;
+            }
+
+            runtimeSkyboxMaterial = new Material(proceduralSkybox);
+        }
+
+        runtimeSkyboxMaterial.name = "PawPal Blue Skybox";
+        runtimeSkyboxMaterial.hideFlags = HideFlags.DontSave;
+        return runtimeSkyboxMaterial;
+    }
+
+    private void SetMaterialColor(Material material, string propertyName, Color value)
+    {
+        if (material.HasProperty(propertyName))
+        {
+            material.SetColor(propertyName, value);
+        }
+    }
+
+    private void SetMaterialFloat(Material material, string propertyName, float value)
+    {
+        if (material.HasProperty(propertyName))
+        {
+            material.SetFloat(propertyName, value);
+        }
     }
 
     private void ConfigureSun()
@@ -311,6 +389,12 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             if (!IsSceneObject(camera) || !camera.enabled)
             {
                 continue;
+            }
+
+            if (configureSkybox)
+            {
+                camera.clearFlags = CameraClearFlags.Skybox;
+                camera.backgroundColor = skyboxTint;
             }
 
             camera.allowHDR = true;
