@@ -83,6 +83,7 @@ public static class UiFactory
             button.onClick.AddListener(onClick);
         }
 
+        PawPalUiAudio.AttachTo(button);
         return button;
     }
 

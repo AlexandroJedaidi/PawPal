@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: Corgi
+  m_EditorClassIdentifier: 
+  PetId: corgi
+  DisplayName: Corgi
+  Species: 0
+  BreedName: Corgi
+  Description: A charming breed known for agility and intelligence, the Corgi is a playful companion with a soft, curly coat.
+  BasePrefab: {fileID: 100100000, guid: 1039512ad94f0cb4f9e3103daf3518ff, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 1.05, z: -2.65}
+  HomeCameraOffset: {x: 0, y: 0.95, z: -2.75}
+  RoamRadius: 3.2
+  AnimationSet: {fileID: 11400000, guid: 8eee034bb13a4cb092b41888a538ee51, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: 2d122574c1c3464aadefe22ac2660c68, type: 2}
+  - {fileID: 11400000, guid: 6cb9afe3645c4a8dae3dda7cddd01bbf, type: 2}
+  - {fileID: 11400000, guid: ede19d96503c48b28d33c28a90a82df4, type: 2}

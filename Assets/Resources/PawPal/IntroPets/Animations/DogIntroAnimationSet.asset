@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1623bb6896e34bf28fd9803fd3b45acc, type: 3}
+  m_Name: DogIntroAnimationSet
+  m_EditorClassIdentifier: 
+  RuntimeController: {fileID: 9100000, guid: 7e16e3a9d97c76744b4829c3ae01af06, type: 2}
+  IdleClip: {fileID: 0}
+  WalkClip: {fileID: 0}
+  SelectedClip: {fileID: 0}
+  IdleStateName: Idle1
+  WalkStateName: Locomotion
+  SelectedStateName: 
+  MoveBoolParameter: Move
+  SpeedFloatParameter: Speed
+  IdleIndexParameter: IdleIndex
+  SelectedIdleIndex: 1
+  SelectedTriggerParameter: 

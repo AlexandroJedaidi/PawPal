@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: Pug
+  m_EditorClassIdentifier: 
+  PetId: pug
+  DisplayName: Pug
+  Species: 0
+  BreedName: Pug
+  Description: Compact and expressive, the Pug is a social companion with a bold little stride and a fondness for attention.
+  BasePrefab: {fileID: 100100000, guid: cfadbb8d6aecd964a85c68c5e653c0af, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 0.95, z: -2.45}
+  HomeCameraOffset: {x: 0, y: 0.85, z: -2.55}
+  RoamRadius: 2.8
+  AnimationSet: {fileID: 11400000, guid: 8eee034bb13a4cb092b41888a538ee51, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: da3be8d1132e4edf83c7d8ffa30926ba, type: 2}
+  - {fileID: 11400000, guid: ecc3fb2d13564c56b72da8bd629fa93f, type: 2}
+  - {fileID: 11400000, guid: 9d709f9ad7114f328e0d14edb59a5c78, type: 2}

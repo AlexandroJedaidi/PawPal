@@ -28,11 +28,6 @@ public class InventoryNameBarView : MonoBehaviour
         background.preserveAspect = false;
         background.color = UiTheme.NavBackgroundCream;
 
-        CreateBorder(root, "TopBorder", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, 1f), Vector2.zero);
-        CreateBorder(root, "LeftBorder", new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(1f, 0f), Vector2.zero);
-        CreateBorder(root, "RightBorder", new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), new Vector2(1f, 0f), Vector2.zero);
-        CreateBorder(root, "BottomBorder", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 1f), Vector2.zero);
-
         RectTransform row = UiFactory.CreateRect("Frame_Name", root);
         row.anchorMin = new Vector2(0f, 1f);
         row.anchorMax = new Vector2(0f, 1f);
@@ -43,18 +38,6 @@ public class InventoryNameBarView : MonoBehaviour
         CreateArrow(row, sprites, "BackArrow", "UI/Figma/HomeMain/button_back", new Vector2(6f, -12f), true);
         CreateNameField(row);
         CreateArrow(row, sprites, "ForwardArrow", "UI/Figma/HomeMain/button_forward", new Vector2(229f, -12f), false);
-    }
-
-    private static void CreateBorder(RectTransform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 sizeDelta, Vector2 anchoredPosition)
-    {
-        Image border = UiFactory.CreateImage(name, parent, UiTheme.WhiteSprite, UiTheme.NavBrand);
-        border.type = Image.Type.Simple;
-        border.preserveAspect = false;
-        border.rectTransform.anchorMin = anchorMin;
-        border.rectTransform.anchorMax = anchorMax;
-        border.rectTransform.pivot = pivot;
-        border.rectTransform.sizeDelta = sizeDelta;
-        border.rectTransform.anchoredPosition = anchoredPosition;
     }
 
     private void CreateArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, bool previousDog)
@@ -102,7 +85,7 @@ public class InventoryNameBarView : MonoBehaviour
         field.rectTransform.anchorMax = new Vector2(0f, 1f);
         field.rectTransform.pivot = new Vector2(0f, 1f);
         field.rectTransform.sizeDelta = new Vector2(182f, 24f);
-        field.rectTransform.anchoredPosition = new Vector2(26.5f, 0f);
+        field.rectTransform.anchoredPosition = new Vector2(27f, 0f);
 
         Image outline = UiFactory.CreateImage("Outline", field.rectTransform, UiTheme.DogDetailsFieldOutlineSprite, UiTheme.NavBrand);
         outline.type = Image.Type.Sliced;

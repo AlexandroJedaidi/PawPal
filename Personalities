@@ -1,0 +1,173 @@
+Core rule
+
+Personality should affect behavior weights, not lock the player out of content.
+
+So instead of:
+
+“This dog cannot make friends.”
+
+Use:
+
+“This dog is less likely to enjoy first meetings, but can still become friends over time.”
+
+This keeps every dog lovable and prevents players from feeling punished for picking a cute dog.
+
+PawFriends Personality System
+Recommended personalities
+
+Use 9 personalities:
+
+Personality	Main fantasy
+Relaxed	Slow, cozy, loves resting
+Gentle	Quiet, obedient, cautious
+Energetic	Active, fast, always moving
+Loyal	Owner-focused, affectionate
+Curious	Sniffs, explores, finds things
+Clever	Learns fast, needs variety
+Social	Loves dogs and strangers
+Playful	Toys, games, park energy
+Mischievous	Cute chaos, digging, surprises
+
+This gives enough variety without becoming confusing.
+
+How each personality affects gameplay
+Personality	Home behavior	Walk behavior	Other dogs	Training	Needs/items
+Relaxed	Sleeps often, rests on furniture, moves slowly around room	Shorter stamina, slower walking, more rest pauses	Neutral, avoids hyper dogs	Learns slower but calmly	Hunger/thirst decrease slower
+Gentle	Quiet, barks less, stays calm	Easy to control, fewer leash pulls	Cautious at first, rarely starts conflict	Stable learner, fewer mistakes	Lower stress, likes calm petting
+Energetic	Walks around often, fidgets, asks for activity	Higher stamina, fewer rest stops, faster pace	Excited greetings, can overwhelm shy dogs	Good at sports/activity tasks	Gets hungry, thirsty, dirty faster
+Loyal	Follows owner, asks for pets, stays nearby	Stays close, easier to guide	Less interested in random dogs	Bonds fast with owner, learns better when praised	Needs more attention
+Curious	Investigates furniture, toys, food, decorations	More sniff stops, more detours, higher present chance	Neutral but distracted	Gets bored by repetition	Finds more items, loses interest in same toy faster
+Clever	Watches owner, reacts quickly, head-tilt behavior	Good route focus, fewer pointless stops	Selective with dogs	Learns tricks fastest, but dislikes repeated drills	Needs mental stimulation
+Social	Reacts to visitors, likes household pets	Higher dog encounter chance, pulls toward others	Best at befriending dogs	Slower focus when distracted	Can receive bonus gifts from encounters
+Playful	Brings toys, asks to play, barks happily	Loves parks, play stops, fetch-like events	Gets along with playful dogs	Learns better through toy-based training	Gets dirty faster, likes toy rewards
+Mischievous	Hides toys, knocks things, digs, creates cute mess	More digging/sniffing events, harder to control	Mixed reactions, very expressive	More mistakes, but fun animations	Higher rare-present chance, gets dirty fastest
+Walk-feature behavior
+
+For your walk system, personality should mainly affect:
+
+Stamina / route length
+How often the dog stops
+Chance of presents
+Chance and quality of dog encounters
+How locations behave
+Walk modifiers
+Personality	Walk stamina	Stops during walk	Present chance	Dog encounter chance	Leash control
+Relaxed	-10%	High rest stops	-5%	Normal	Good
+Gentle	Normal	Low	Normal	-5%	Very good
+Energetic	+20%	Low rest stops	Normal	+10%	Medium
+Loyal	+5%	Low	Normal	-15%	Good
+Curious	Normal	High sniff stops	+25%	Normal	Medium
+Clever	+5%	Medium	+10%	Normal	Good
+Social	+10%	Medium greeting stops	+10%	+30%	Medium
+Playful	+10%	Medium play stops	+10%	+15%	Medium
+Mischievous	+5%	High dig stops	+20% rare chance	+5%	Low
+
+Important: these should be soft modifiers, not extreme. Around 5–25% is enough.
+
+Map-location effects
+
+Personality should make map locations feel more alive.
+
+Location	Personality bonus examples
+Home	Relaxed rests better, Loyal gains more bond from petting
+Dog Park	Social, Playful, Energetic get better events
+Kennel	Social bonds faster, Gentle gets cautious-friendly interactions
+Competition Center	Clever and Energetic perform better
+Shop	Curious reacts to new items, Playful reacts to toys
+Random street spots	Curious/Mischievous find more presents
+
+Example:
+
+A Curious dog walking through the park might stop to sniff a bush and find a present.
+A Social dog in the same spot might instead run toward another dog.
+A Relaxed dog might sit down for a short rest animation.
+
+Same route, different personality outcome.
+
+Present system by personality
+
+Presents should not be totally random. Personality can influence what the dog finds.
+
+Personality	More likely to find
+Relaxed	Cozy furniture, blankets, cushions
+Gentle	Care items, brushes, calm accessories
+Energetic	Sport toys, balls, agility items
+Loyal	Owner-themed accessories, collars
+Curious	Random collectibles, unusual items
+Clever	Training items, trick rewards
+Social	Gifts after dog encounters
+Playful	Toys, plushies, fetch items
+Mischievous	Rare junk, surprise boxes, dirty/funny items
+
+This makes item rewards feel connected to the dog.
+
+Dog encounter behavior
+
+When meeting another dog, personality should affect the interaction.
+
+Personality	Encounter style
+Relaxed	Calm sniff, may lose interest
+Gentle	Shy greeting, slow friendship
+Energetic	Excited jump/play, may overwhelm calm dogs
+Loyal	Stays near owner, less interested
+Curious	Sniffs the other dog and surroundings
+Clever	Observes first, reacts based on other dog
+Social	Runs up happily, best friendship chance
+Playful	Invites play quickly
+Mischievous	Teases, barks, playful chaos
+Simple compatibility logic
+
+Use personality compatibility for encounter outcomes:
+
+Pairing	Result
+Social + almost anyone	High friendship chance
+Playful + Energetic	Great play interaction
+Gentle + Relaxed	Calm positive interaction
+Curious + Clever	Good neutral interaction
+Mischievous + Gentle	Lower first-meeting chance
+Loyal + Social	Mixed: social dog wants play, loyal dog prefers owner
+Energetic + Relaxed	Mixed: one wants movement, one wants calm
+
+This can generate small text like:
+
+“Pepper was curious about Milo.”
+“Bella wanted to play, but Luna was a little shy.”
+“Rocky and Max became friends quickly!”
+
+Training behavior
+
+Training should not just be “fast/slow.” It should change how the dog likes to learn.
+
+Personality	Training effect
+Relaxed	Slower, but low frustration
+Gentle	Reliable, fewer mistakes
+Energetic	Learns active tricks faster, loses focus if waiting
+Loyal	Learns better after petting/praise
+Curious	Learns better with variety, worse with repetition
+Clever	Fastest learner, but gets bored quickly
+Social	Distracted around dogs/visitors
+Playful	Learns better through toy rewards
+Mischievous	More failed attempts, but special funny animations
+
+This makes training feel personal without making one personality obviously best.
+
+Needs behavior
+
+Keep this subtle.
+
+Personality	Need behavior
+Relaxed	Hunger/thirst/activity drain slower
+Gentle	Mood stays stable longer
+Energetic	Activity drains faster, hunger/thirst faster
+Loyal	Attention drains faster
+Curious	Boredom rises faster if nothing changes
+Clever	Needs mental stimulation
+Social	Mood drops faster when alone
+Playful	Fun need drops faster
+Mischievous	Hygiene drops faster
+
+For your current UI, I would replace the placeholder Energy with:
+
+Stamina
+
+Then personality modifies stamina behavior.

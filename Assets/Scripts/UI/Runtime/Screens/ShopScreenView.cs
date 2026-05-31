@@ -1019,6 +1019,7 @@ public class ShopScreenView : AppScreenViewBase
             {
                 lastPurchasedCatalogItemId = item.Id;
                 modalState = ModalState.ItemSuccess;
+                PawPalUiAudio.PlaySuccessPopup();
                 RebuildModalPanels();
                 RefreshState();
             }

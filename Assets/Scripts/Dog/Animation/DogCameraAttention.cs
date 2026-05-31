@@ -25,6 +25,7 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float safeHorizontalLookAngle = 30f;
     [SerializeField] private bool yawOnlyLook = true;
     [SerializeField] private float blendSpeed = 4f;
+    [SerializeField] private float lookPointSmoothTime = 0.08f;
     [SerializeField] private float bodyTurnSpeed = 120f;
     [SerializeField] private float bodyAssistVelocityLimit = 0.15f;
     [SerializeField] private bool disableProximityLock = true;
@@ -55,6 +56,8 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float socialDogMaxNeckYaw = 70f;
     [SerializeField] private float socialDogMaxNeckPitch = 50f;
     [SerializeField, Range(0f, 1f)] private float socialDogLookWeight = 1f;
+    [SerializeField] private float socialDogLookBlendSpeed = 2.2f;
+    [SerializeField] private float socialDogLookPointSmoothTime = 0.22f;
     [SerializeField] private bool allowSocialBoneFallbackWithoutRig = true;
     [SerializeField] private bool forceSocialBoneFallback = true;
     [SerializeField] private bool assistSocialBodyTurn = true;
@@ -82,6 +85,12 @@ public class DogCameraAttention : MonoBehaviour
     private bool cameraLookOverrideActive;
     private float cameraLookOverrideUntil;
     private float nextNearbyDogScanTime;
+    private Vector3 smoothedLookPoint;
+    private Vector3 smoothedLookPointVelocity;
+    private Transform smoothedLookTarget;
+    private AttentionTargetType smoothedLookTargetType;
+    private bool smoothedLookWasSocial;
+    private bool hasSmoothedLookPoint;
     private readonly Dictionary<Transform, Transform> cachedHeadTargetsByDog = new Dictionary<Transform, Transform>();
 
     private void Awake()
@@ -155,6 +164,7 @@ public class DogCameraAttention : MonoBehaviour
         cameraLookOverrideUntil = 0f;
         activeTargetType = AttentionTargetType.None;
         activeLookTarget = null;
+        ResetSmoothedLookPoint();
     }
 
     public void BeginSocialDogLook(Transform otherDog)
@@ -245,7 +255,7 @@ public class DogCameraAttention : MonoBehaviour
         }
 
         float desiredWeight = CanLookAtActiveTarget() ? targetWeight : 0f;
-        currentWeight = Mathf.MoveTowards(currentWeight, desiredWeight, Time.deltaTime * blendSpeed);
+        currentWeight = Mathf.MoveTowards(currentWeight, desiredWeight, Time.deltaTime * GetActiveBlendSpeed());
 
         UpdateLookTarget();
 
@@ -320,6 +330,11 @@ public class DogCameraAttention : MonoBehaviour
         Vector3 lookPoint;
         if (!TryGetActiveLookPoint(out lookPoint))
         {
+            if (currentWeight <= 0.01f)
+            {
+                ResetSmoothedLookPoint();
+            }
+
             return;
         }
 
@@ -329,23 +344,31 @@ public class DogCameraAttention : MonoBehaviour
             return;
         }
 
+        Vector3 clampedLookPoint = GetClampedLookPoint(reference.position, toTarget, GetActiveMaxYaw(), GetActiveMaxPitch());
+        Vector3 smoothedTargetPoint = GetSmoothedLookPoint(reference, clampedLookPoint);
+        Vector3 smoothedToTarget = smoothedTargetPoint - reference.position;
+        if (smoothedToTarget.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
         if (activeTargetType == AttentionTargetType.Camera)
         {
-            AssistBodyTurn(toTarget);
+            AssistBodyTurn(smoothedToTarget);
         }
         else if (IsSocialLookActiveForCurrentTarget())
         {
-            AssistSocialBodyTurn(lookPoint);
+            AssistSocialBodyTurn(smoothedTargetPoint);
         }
 
         if (lookProxy != null)
         {
-            lookProxy.position = GetClampedLookPoint(reference.position, toTarget, GetActiveMaxYaw(), GetActiveMaxPitch());
+            lookProxy.position = smoothedTargetPoint;
         }
 
         if (ShouldApplyBoneFallbackLook())
         {
-            ApplyBoneFallbackLook(currentWeight, lookPoint);
+            ApplyBoneFallbackLook(currentWeight, smoothedTargetPoint);
         }
     }
 
@@ -371,6 +394,105 @@ public class DogCameraAttention : MonoBehaviour
             Mathf.Cos(yawRadians) * pitchCos);
 
         return origin + transform.TransformDirection(safeLocalDirection.normalized) * distance;
+    }
+
+    private Vector3 GetSmoothedLookPoint(Transform reference, Vector3 targetPoint)
+    {
+        bool socialLookActive = IsSocialLookActiveForCurrentTarget();
+        bool targetChanged = activeLookTarget != smoothedLookTarget
+            || activeTargetType != smoothedLookTargetType
+            || socialLookActive != smoothedLookWasSocial;
+
+        if (!hasSmoothedLookPoint || (targetChanged && currentWeight <= 0.01f))
+        {
+            smoothedLookPoint = GetNeutralLookPoint(reference, targetPoint);
+            smoothedLookPointVelocity = Vector3.zero;
+            hasSmoothedLookPoint = true;
+        }
+        else if (targetChanged && lookProxy != null)
+        {
+            Vector3 proxyDirection = lookProxy.position - reference.position;
+            if (proxyDirection.sqrMagnitude > 0.001f)
+            {
+                smoothedLookPoint = lookProxy.position;
+                smoothedLookPointVelocity = Vector3.zero;
+            }
+        }
+
+        smoothedLookTarget = activeLookTarget;
+        smoothedLookTargetType = activeTargetType;
+        smoothedLookWasSocial = socialLookActive;
+
+        float smoothTime = GetActiveLookPointSmoothTime();
+        if (smoothTime <= 0f)
+        {
+            smoothedLookPoint = targetPoint;
+            smoothedLookPointVelocity = Vector3.zero;
+            return targetPoint;
+        }
+
+        smoothedLookPoint = Vector3.SmoothDamp(
+            smoothedLookPoint,
+            targetPoint,
+            ref smoothedLookPointVelocity,
+            smoothTime);
+
+        Vector3 smoothedDirection = smoothedLookPoint - reference.position;
+        if (smoothedDirection.sqrMagnitude < 0.001f)
+        {
+            return targetPoint;
+        }
+
+        smoothedLookPoint = GetClampedLookPoint(reference.position, smoothedDirection, GetActiveMaxYaw(), GetActiveMaxPitch());
+        return smoothedLookPoint;
+    }
+
+    private Vector3 GetNeutralLookPoint(Transform reference, Vector3 targetPoint)
+    {
+        Vector3 direction = GetCurrentLookDirection(reference);
+        float distance = Mathf.Max(Vector3.Distance(reference.position, targetPoint), 0.5f);
+        return reference.position + direction * distance;
+    }
+
+    private Vector3 GetCurrentLookDirection(Transform reference)
+    {
+        if (lookProxy != null && currentWeight > 0.01f)
+        {
+            Vector3 proxyDirection = lookProxy.position - reference.position;
+            if (proxyDirection.sqrMagnitude > 0.001f)
+            {
+                return proxyDirection.normalized;
+            }
+        }
+
+        Vector3 forward = transform.forward;
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = Vector3.forward;
+        }
+
+        return forward.normalized;
+    }
+
+    private float GetActiveBlendSpeed()
+    {
+        float activeBlendSpeed = IsSocialLookActiveForCurrentTarget() ? socialDogLookBlendSpeed : blendSpeed;
+        return Mathf.Max(0.01f, activeBlendSpeed);
+    }
+
+    private float GetActiveLookPointSmoothTime()
+    {
+        return Mathf.Max(0f, IsSocialLookActiveForCurrentTarget() ? socialDogLookPointSmoothTime : lookPointSmoothTime);
+    }
+
+    private void ResetSmoothedLookPoint()
+    {
+        hasSmoothedLookPoint = false;
+        smoothedLookPoint = Vector3.zero;
+        smoothedLookPointVelocity = Vector3.zero;
+        smoothedLookTarget = null;
+        smoothedLookTargetType = AttentionTargetType.None;
+        smoothedLookWasSocial = false;
     }
 
     private void AssistBodyTurn(Vector3 toCamera)

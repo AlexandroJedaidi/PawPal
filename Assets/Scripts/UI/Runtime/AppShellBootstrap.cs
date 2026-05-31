@@ -18,6 +18,7 @@ public class AppShellBootstrap : MonoBehaviour
         GameObject bootstrap = new GameObject("AppShellBootstrap");
         DontDestroyOnLoad(bootstrap);
         instance = bootstrap.AddComponent<AppShellBootstrap>();
+        PawPalUiAudio.EnsureInstalled();
     }
 
     private void OnEnable()
@@ -42,17 +43,65 @@ public class AppShellBootstrap : MonoBehaviour
 
     private static void EnsureShellForActiveScene()
     {
+        if (IsIntroPetSelectionScene())
+        {
+            EnsureEventSystem();
+            SetExistingShellVisible(false);
+            return;
+        }
+
         DisableLegacyFigmaUi();
 
         AppShellController existingShell = Object.FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include);
         if (existingShell != null)
         {
+            SetShellVisible(existingShell, true);
             HideRuntimeUiFromSceneView(existingShell.gameObject);
             return;
         }
 
         EnsureEventSystem();
         CreateAppShellCanvas();
+    }
+
+    private static bool IsIntroPetSelectionScene()
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        return scene.name == "IntroPetSelection" || scene.path == "Assets/Scenes/IntroPetSelection.unity";
+    }
+
+    private static void SetExistingShellVisible(bool visible)
+    {
+        AppShellController[] shells = Object.FindObjectsByType<AppShellController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < shells.Length; i++)
+        {
+            SetShellVisible(shells[i], visible);
+        }
+    }
+
+    private static void SetShellVisible(AppShellController shell, bool visible)
+    {
+        if (shell == null)
+        {
+            return;
+        }
+
+        if (!shell.gameObject.activeSelf)
+        {
+            shell.gameObject.SetActive(true);
+        }
+
+        Canvas canvas = shell.GetComponent<Canvas>();
+        if (canvas != null)
+        {
+            canvas.enabled = visible;
+        }
+
+        GraphicRaycaster raycaster = shell.GetComponent<GraphicRaycaster>();
+        if (raycaster != null)
+        {
+            raycaster.enabled = visible;
+        }
     }
 
     private static void DisableLegacyFigmaUi()

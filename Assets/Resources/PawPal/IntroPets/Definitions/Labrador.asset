@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: Labrador
+  m_EditorClassIdentifier: 
+  PetId: labrador
+  DisplayName: Labrador
+  Species: 0
+  BreedName: Labrador
+  Description: Renowned for strength and friendliness, Labradors are versatile companions with a sleek build and a love for the outdoors.
+  BasePrefab: {fileID: 100100000, guid: 8927e3ba894d64c4b95360c3300bdbd1, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 1.25, z: -3.15}
+  HomeCameraOffset: {x: 0, y: 1.05, z: -3.1}
+  RoamRadius: 3.6
+  AnimationSet: {fileID: 11400000, guid: 8eee034bb13a4cb092b41888a538ee51, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: 781002351a4e45e0bd92bfce61fda73d, type: 2}
+  - {fileID: 11400000, guid: 2615d1e5da3e481f8b38c4cad55b5a1b, type: 2}
+  - {fileID: 11400000, guid: 50e9b800ccb64d8b95c3b52ddad5ed0d, type: 2}

@@ -1388,7 +1388,7 @@ Terrain:
   m_SplatMapDistance: 1000
   m_HeightmapMinimumLODSimplification: 0
   m_HeightmapMaximumLOD: 0
-  m_ShadowCastingMode: 2
+  m_ShadowCastingMode: 1
   m_DrawHeightmap: 1
   m_DrawInstanced: 0
   m_DrawTreesAndFoliage: 1
@@ -3314,8 +3314,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   m_Version: 3
   m_UsePipelineSettings: 1
   m_AdditionalLightsShadowResolutionTier: 2
@@ -3596,7 +3596,7 @@ Transform:
   m_GameObject: {fileID: 550098874}
   serializedVersion: 2
   m_LocalRotation: {x: -0.11841653, y: -0.38091338, z: 0.031965245, w: 0.9164392}
-  m_LocalPosition: {x: 0.019, y: 0.0138, z: -0.0101}
+  m_LocalPosition: {x: 0.0188, y: 0.0204, z: -0.0043}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5051,8 +5051,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 700573927}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.12167905, y: -0.7684706, z: 0.15349928, w: 0.6091676}
-  m_LocalPosition: {x: 2.6399713, y: 3.111, z: 0.20675075}
+  m_LocalRotation: {x: 0.12237658, y: -0.76881295, z: 0.15466842, w: 0.6082995}
+  m_LocalPosition: {x: 2.5933754, y: 3.111, z: 0.20675075}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5563,7 +5563,7 @@ Transform:
   m_GameObject: {fileID: 763385787}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.025319338, y: 1.5609999, z: -0.111365795}
+  m_LocalPosition: {x: -0.000004529953, y: 1.5609999, z: -0.111365795}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5584,7 +5584,7 @@ ReflectionProbe:
   m_TimeSlicingMode: 1
   m_Resolution: 128
   m_UpdateFrequency: 0
-  m_BoxSize: {x: 6.8253617, y: 4.252, z: 6.9623294}
+  m_BoxSize: {x: 6.774714, y: 4.252, z: 6.9623294}
   m_BoxOffset: {x: 0, y: 0, z: 0}
   m_NearClip: 0.3
   m_FarClip: 1000
@@ -6016,8 +6016,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: bb5f5122f8bbad445aa34d4d094c253f, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   opacity: 0.42
   scaleMultiplier: {x: 1.35, y: 0.82}
   yOffset: 0.035
@@ -9211,7 +9211,7 @@ Transform:
   m_GameObject: {fileID: 1230461715}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.7101091, y: 2.6609998, z: 0.5248672}
+  m_LocalPosition: {x: 0.679214, y: 2.6609998, z: 0.5248672}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -14028,7 +14028,7 @@ Terrain:
   m_SplatMapDistance: 1000
   m_HeightmapMinimumLODSimplification: 0
   m_HeightmapMaximumLOD: 0
-  m_ShadowCastingMode: 2
+  m_ShadowCastingMode: 1
   m_DrawHeightmap: 1
   m_DrawInstanced: 0
   m_DrawTreesAndFoliage: 1
@@ -14794,6 +14794,7 @@ MonoBehaviour:
   minimumMovementCommitDuration: 0.75
   crowdedMovementAbortDuration: 0.55
   agentRadiusFromPersonalSpace: 0.36
+  preventDogDogPhysicsPush: 1
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
   tailWagIdleIndex: 1
@@ -14912,8 +14913,20 @@ MonoBehaviour:
   sniffingClip: {fileID: 0}
   scratchAndShakingClip: {fileID: 0}
   shakingX3Clip: {fileID: 0}
+  pantingClip: {fileID: 0}
+  pantingVolume: 0.42
+  annoyedClip: {fileID: 0}
+  annoyedVolume: 0.58
+  whiningClip: {fileID: 0}
+  whiningVolume: 0.5
   idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
+  ambientPantingIntervalRange: {x: 20, y: 32}
+  interactionPantingIntervalRange: {x: 7, y: 13}
+  whiningIntervalRange: {x: 24, y: 42}
+  interactionAnnoyedBaseChance: 0.55
+  interactionAnnoyedBaseCooldown: 7
+  minimumSecondsBetweenVocals: 0.9
 --- !u!114 &3200000005
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14966,6 +14979,7 @@ MonoBehaviour:
   minimumMovementCommitDuration: 0.75
   crowdedMovementAbortDuration: 0.55
   agentRadiusFromPersonalSpace: 0.36
+  preventDogDogPhysicsPush: 1
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
   tailWagIdleIndex: 1
@@ -15084,8 +15098,20 @@ MonoBehaviour:
   sniffingClip: {fileID: 0}
   scratchAndShakingClip: {fileID: 0}
   shakingX3Clip: {fileID: 0}
+  pantingClip: {fileID: 0}
+  pantingVolume: 0.42
+  annoyedClip: {fileID: 0}
+  annoyedVolume: 0.58
+  whiningClip: {fileID: 0}
+  whiningVolume: 0.5
   idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
+  ambientPantingIntervalRange: {x: 20, y: 32}
+  interactionPantingIntervalRange: {x: 7, y: 13}
+  whiningIntervalRange: {x: 24, y: 42}
+  interactionAnnoyedBaseChance: 0.55
+  interactionAnnoyedBaseCooldown: 7
+  minimumSecondsBetweenVocals: 0.9
 --- !u!1 &3200000010
 GameObject:
   m_ObjectHideFlags: 0
@@ -15158,9 +15184,12 @@ MonoBehaviour:
   corgiBarkClip: {fileID: 0}
   backgroundMusicClip: {fileID: 0}
   ambientCarClip: {fileID: 0}
+  ambientBirdsClip: {fileID: 0}
   backgroundMusicVolume: 0.25
   ambientCarVolume: 0.35
+  ambientBirdsVolume: 0.14
   ambientCarIntervalSeconds: 60
+  ambientBirdsCooldownSeconds: 15
   barkVolume: 1
   barkSpacing: 0.18
 --- !u!114 &3200000020
@@ -15214,6 +15243,9 @@ MonoBehaviour:
   photoPinchZoomSensitivity: 0.004
   photoMinFieldOfView: 28
   photoHeadFocusOffset: {x: 0, y: 0.04, z: 0}
+  interactionCameraPositionOffset: {x: 0, y: -0.22, z: 0}
+  interactionHeadFocusOffset: {x: 0, y: -0.04, z: 0}
+  interactionFieldOfView: 0
 --- !u!114 &3200000021
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -15237,6 +15269,7 @@ MonoBehaviour:
   safeHorizontalLookAngle: 30
   yawOnlyLook: 1
   blendSpeed: 4
+  lookPointSmoothTime: 0.08
   bodyTurnSpeed: 120
   bodyAssistVelocityLimit: 0.15
   disableProximityLock: 1
@@ -15263,6 +15296,8 @@ MonoBehaviour:
   socialDogMaxNeckYaw: 70
   socialDogMaxNeckPitch: 50
   socialDogLookWeight: 1
+  socialDogLookBlendSpeed: 2.2
+  socialDogLookPointSmoothTime: 0.22
   allowSocialBoneFallbackWithoutRig: 1
   forceSocialBoneFallback: 1
   assistSocialBodyTurn: 1
@@ -15293,6 +15328,7 @@ MonoBehaviour:
   safeHorizontalLookAngle: 30
   yawOnlyLook: 1
   blendSpeed: 4
+  lookPointSmoothTime: 0.08
   bodyTurnSpeed: 120
   bodyAssistVelocityLimit: 0.15
   disableProximityLock: 1
@@ -15319,6 +15355,8 @@ MonoBehaviour:
   socialDogMaxNeckYaw: 70
   socialDogMaxNeckPitch: 50
   socialDogLookWeight: 1
+  socialDogLookBlendSpeed: 2.2
+  socialDogLookPointSmoothTime: 0.22
   allowSocialBoneFallbackWithoutRig: 1
   forceSocialBoneFallback: 1
   assistSocialBodyTurn: 1

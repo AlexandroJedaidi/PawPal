@@ -197,7 +197,8 @@ public static class PawPalWalkRouteGraph
         }
 
         plan.RouteDistance = CalculateDistance(routePoints);
-        plan.StaminaCost = plan.RouteDistance;
+        plan.BaseStaminaCost = plan.RouteDistance;
+        plan.StaminaCost = plan.BaseStaminaCost;
         AddPlannedStops(plan, routePoints);
         return plan;
     }

@@ -28,29 +28,26 @@ public sealed class PawPalVoiceInputSnapshot
     public bool IsBusy;
     public bool HasMicrophone;
     public float LastConfidence;
+    public bool IsMicEnabled;
+    public int LearnedTrickCount;
 }
+
+public delegate PawPalVoiceCommandExecutionResult PawPalVoiceCommandExecutionHandler(PawPalResolvedVoiceCommand command);
 
 [DisallowMultipleComponent]
 public sealed class PawPalVoiceInputController : MonoBehaviour
 {
-    private const PawPalVoiceTrick V1Trick = PawPalVoiceTrick.Sit;
-
-    [SerializeField] private int requiredSamples = 3;
-    [SerializeField] private int maxStoredSamples = 5;
-    [SerializeField] private int recordingFrequency = 16000;
-    [SerializeField] private float recordingSeconds = 1.25f;
-    [SerializeField, Range(0.1f, 1f)] private float nameMatchThreshold = 0.68f;
-    // Sit is a short, one-syllable command and only runs after the dog name gate succeeds.
-    [SerializeField, Range(0.1f, 1f)] private float trickMatchThreshold = 0.42f;
-
     private readonly PawPalVoiceInputSnapshot snapshot = new PawPalVoiceInputSnapshot();
-    private PawPalVoiceProfileStore profileStore;
+
     private DogVoiceCommandDirector commandDirector;
-    private Coroutine activeRoutine;
-    private string activeDeviceName;
-    private bool isRecording;
+    private IPawPalVoiceCommandService voiceService;
+    private PawPalVoiceCommandCatalog commandCatalog;
+    private Coroutine stateRoutine;
+    private bool includeUnlearnedActiveDogTricks;
 
     public event Action StateChanged;
+    public event Action<string> FeedbackRequested;
+    public event PawPalVoiceCommandExecutionHandler CommandExecutionRequested;
 
     public PawPalVoiceInputSnapshot Snapshot
     {
@@ -61,16 +58,25 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         }
     }
 
+    public bool IsMicEnabled
+    {
+        get { return snapshot.IsMicEnabled; }
+    }
+
     public void Initialize(DogVoiceCommandDirector voiceCommandDirector)
     {
         commandDirector = voiceCommandDirector;
-        EnsureStore();
-        SetSnapshot(PawPalVoiceInputMode.Idle, "Voice is ready.", false, 0f);
+        voiceService = PawPalVoiceCommandServiceFactory.Create(this);
+        RefreshCommandCatalog();
+        SetSnapshot(PawPalVoiceInputMode.Idle, "Microphone is off.", false, 0f, false);
     }
 
-    private void Awake()
+    private void Update()
     {
-        EnsureStore();
+        if (voiceService != null)
+        {
+            voiceService.Tick();
+        }
     }
 
     private void OnDisable()
@@ -78,45 +84,87 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         CancelActiveOperation(false);
     }
 
-    public void RefreshForActiveDog()
+    public void ToggleMic()
     {
-        string message = snapshot.Message;
-        if (string.IsNullOrEmpty(message))
+        SetMicEnabled(!snapshot.IsMicEnabled);
+    }
+
+    public void SetMicEnabled(bool enabled)
+    {
+        if (enabled == snapshot.IsMicEnabled)
         {
-            message = "Voice is ready.";
+            if (enabled)
+            {
+                RefreshCommandCatalog();
+            }
+
+            return;
         }
 
-        SetSnapshot(snapshot.Mode, message, snapshot.IsBusy, snapshot.LastConfidence);
+        if (enabled)
+        {
+            if (stateRoutine != null)
+            {
+                return;
+            }
+
+            SetSnapshot(PawPalVoiceInputMode.ListeningName, "Starting microphone.", true, snapshot.LastConfidence, true);
+            stateRoutine = StartCoroutine(EnableMicRoutine());
+            return;
+        }
+
+        CancelActiveOperation();
+    }
+
+    public void RefreshCommandCatalog()
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        string activeDogId = runtime != null && runtime.ActiveDog != null ? runtime.ActiveDog.Id : string.Empty;
+        commandCatalog = PawPalVoiceCommandCatalogBuilder.Build(runtime != null ? runtime.Dogs : null, activeDogId, includeUnlearnedActiveDogTricks);
+
+        if (voiceService != null)
+        {
+            voiceService.ConfigurePhrases(commandCatalog != null ? commandCatalog.Phrases : new string[0]);
+        }
+
+        RefreshSnapshotCounts();
+        RaiseStateChanged();
+    }
+
+    public void SetInteractionTrainingCommandsEnabled(bool enabled)
+    {
+        if (includeUnlearnedActiveDogTricks == enabled)
+        {
+            return;
+        }
+
+        includeUnlearnedActiveDogTricks = enabled;
+        RefreshCommandCatalog();
+    }
+
+    public void RefreshForActiveDog()
+    {
+        RefreshCommandCatalog();
     }
 
     public void BeginTeachName()
     {
-        if (activeRoutine != null)
-        {
-            return;
-        }
-
-        activeRoutine = StartCoroutine(TeachNameRoutine());
+        SetMicEnabled(true);
     }
 
     public void BeginTeachSit()
     {
-        if (activeRoutine != null)
-        {
-            return;
-        }
+        SetMicEnabled(true);
+    }
 
-        activeRoutine = StartCoroutine(TeachTrickRoutine(V1Trick));
+    public void BeginTeachTrick(PawPalTrickId trickId)
+    {
+        SetMicEnabled(true);
     }
 
     public void BeginListen()
     {
-        if (activeRoutine != null)
-        {
-            return;
-        }
-
-        activeRoutine = StartCoroutine(ListenRoutine());
+        SetMicEnabled(true);
     }
 
     public void CancelActiveOperation()
@@ -124,317 +172,118 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         CancelActiveOperation(true);
     }
 
-    private IEnumerator TeachNameRoutine()
+#if UNITY_IOS && !UNITY_EDITOR
+    public void OnPawPalIosVoicePermission(string payload)
     {
-        PawPalDogState dog;
-        if (!TryGetActiveDog(out dog))
+        PawPalIosVoiceCommandService iosService = voiceService as PawPalIosVoiceCommandService;
+        if (iosService != null)
         {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "No active dog.", false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        PawPalVoiceTemplate template = null;
-        string failureReason = string.Empty;
-        yield return CaptureTemplateRoutine(
-            PawPalVoiceInputMode.TeachingName,
-            "Say " + dog.DisplayName + ".",
-            delegate(PawPalVoiceTemplate capturedTemplate, string captureFailure)
-            {
-                template = capturedTemplate;
-                failureReason = captureFailure;
-            });
-
-        if (template == null)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, failureReason, false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        profileStore.AddNameSample(dog.Id, dog.DisplayName, template, maxStoredSamples);
-        int count = profileStore.GetNameSampleCount(dog.Id, dog.DisplayName);
-        bool learned = profileStore.IsDogNameLearned(dog.Id, dog.DisplayName, requiredSamples);
-        string message = learned
-            ? dog.DisplayName + " knows its name."
-            : "Good. " + count + "/" + requiredSamples + " name samples.";
-        SetSnapshot(PawPalVoiceInputMode.Idle, message, false, 0f);
-        activeRoutine = null;
-    }
-
-    private IEnumerator TeachTrickRoutine(PawPalVoiceTrick trick)
-    {
-        PawPalDogState dog;
-        if (!TryGetActiveDog(out dog))
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "No active dog.", false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        if (!profileStore.IsDogNameLearned(dog.Id, dog.DisplayName, requiredSamples))
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "Teach " + dog.DisplayName + " first.", false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        bool wasLearned = profileStore.IsTrickLearned(dog.Id, trick, requiredSamples);
-        PawPalVoiceTemplate template = null;
-        string failureReason = string.Empty;
-        yield return CaptureTemplateRoutine(
-            PawPalVoiceInputMode.TeachingTrick,
-            "Say " + PawPalVoiceProfileStore.GetTrickLabel(trick) + ".",
-            delegate(PawPalVoiceTemplate capturedTemplate, string captureFailure)
-            {
-                template = capturedTemplate;
-                failureReason = captureFailure;
-            });
-
-        if (template == null)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, failureReason, false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        profileStore.AddTrickSample(dog.Id, trick, template, maxStoredSamples);
-        int count = profileStore.GetTrickSampleCount(dog.Id, trick);
-        bool learned = profileStore.IsTrickLearned(dog.Id, trick, requiredSamples);
-        if (!wasLearned && learned && !profileStore.HasTrickRewardGranted(dog.Id, trick))
-        {
-            PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-            if (runtime != null)
-            {
-                runtime.TrainActiveDog();
-            }
-
-            profileStore.MarkTrickRewardGranted(dog.Id, trick);
-        }
-
-        string message = learned
-            ? dog.DisplayName + " learned " + PawPalVoiceProfileStore.GetTrickLabel(trick) + "."
-            : "Good. " + count + "/" + requiredSamples + " sit samples.";
-        SetSnapshot(PawPalVoiceInputMode.Idle, message, false, 0f);
-        activeRoutine = null;
-    }
-
-    private IEnumerator ListenRoutine()
-    {
-        PawPalDogState dog;
-        if (!TryGetActiveDog(out dog))
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "No active dog.", false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        if (!profileStore.IsDogNameLearned(dog.Id, dog.DisplayName, requiredSamples))
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "Teach " + dog.DisplayName + " first.", false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        PawPalVoiceTemplate nameTemplate = null;
-        string failureReason = string.Empty;
-        yield return CaptureTemplateRoutine(
-            PawPalVoiceInputMode.ListeningName,
-            "Say " + dog.DisplayName + ".",
-            delegate(PawPalVoiceTemplate capturedTemplate, string captureFailure)
-            {
-                nameTemplate = capturedTemplate;
-                failureReason = captureFailure;
-            });
-
-        if (nameTemplate == null)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, failureReason, false, 0f);
-            activeRoutine = null;
-            yield break;
-        }
-
-        PawPalVoiceMatchResult nameMatch = profileStore.MatchName(dog.Id, dog.DisplayName, nameTemplate, requiredSamples, nameMatchThreshold);
-        if (!nameMatch.IsMatch)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, dog.DisplayName + " did not catch that.", false, nameMatch.Confidence);
-            activeRoutine = null;
-            yield break;
-        }
-
-        bool dogCalledToCamera = commandDirector != null && commandDirector.TryCallActiveDogToCamera();
-
-        if (!profileStore.IsTrickLearned(dog.Id, V1Trick, requiredSamples))
-        {
-            string nameOnlyMessage = dogCalledToCamera
-                ? dog.DisplayName + " is coming. Teach sit next."
-                : dog.DisplayName + " heard you. Teach sit next.";
-            SetSnapshot(PawPalVoiceInputMode.Idle, nameOnlyMessage, false, nameMatch.Confidence);
-            activeRoutine = null;
-            yield break;
-        }
-
-        if (dogCalledToCamera)
-        {
-            SetSnapshot(PawPalVoiceInputMode.ListeningName, dog.DisplayName + " is coming.", true, nameMatch.Confidence);
-            yield return WaitForVoiceCommandDirector(8f);
-        }
-        else
-        {
-            yield return new WaitForSecondsRealtime(0.2f);
-        }
-
-        PawPalVoiceTemplate trickTemplate = null;
-        yield return CaptureTemplateRoutine(
-            PawPalVoiceInputMode.ListeningTrick,
-            "Say sit.",
-            delegate(PawPalVoiceTemplate capturedTemplate, string captureFailure)
-            {
-                trickTemplate = capturedTemplate;
-                failureReason = captureFailure;
-            });
-
-        if (trickTemplate == null)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, failureReason, false, nameMatch.Confidence);
-            activeRoutine = null;
-            yield break;
-        }
-
-        PawPalVoiceMatchResult trickMatch = profileStore.MatchTrick(dog.Id, V1Trick, trickTemplate, requiredSamples, trickMatchThreshold);
-        if (!trickMatch.IsMatch)
-        {
-            SetSnapshot(PawPalVoiceInputMode.Idle, dog.DisplayName + " did not understand sit.", false, trickMatch.Confidence);
-            activeRoutine = null;
-            yield break;
-        }
-
-        bool performed = commandDirector != null && commandDirector.TryPerformTrick(V1Trick);
-        string finalMessage = performed ? dog.DisplayName + " sits." : dog.DisplayName + " is busy.";
-        SetSnapshot(PawPalVoiceInputMode.Idle, finalMessage, false, trickMatch.Confidence);
-        activeRoutine = null;
-    }
-
-    private IEnumerator WaitForVoiceCommandDirector(float timeout)
-    {
-        float elapsed = 0f;
-        while (commandDirector != null && commandDirector.IsCommandRunning && elapsed < timeout)
-        {
-            elapsed += Time.unscaledDeltaTime;
-            yield return null;
+            iosService.HandleNativePermissionResult(payload);
         }
     }
 
-    private IEnumerator CaptureTemplateRoutine(PawPalVoiceInputMode mode, string prompt, Action<PawPalVoiceTemplate, string> onCompleted)
+    public void OnPawPalIosVoiceRecognized(string transcript)
     {
-        SetSnapshot(mode, prompt, true, snapshot.LastConfidence);
-
-        string unavailableReason = string.Empty;
-        yield return EnsureMicrophoneAvailable(delegate(bool available, string reason)
+        PawPalIosVoiceCommandService iosService = voiceService as PawPalIosVoiceCommandService;
+        if (iosService != null)
         {
-            unavailableReason = available ? string.Empty : reason;
-        });
-
-        if (!string.IsNullOrEmpty(unavailableReason))
-        {
-            SetSnapshot(PawPalVoiceInputMode.Unavailable, unavailableReason, false, 0f);
-            if (onCompleted != null)
-            {
-                onCompleted(null, unavailableReason);
-            }
-            yield break;
-        }
-
-        AudioClip clip = null;
-        int recordedPosition = 0;
-        string captureFailure = string.Empty;
-
-        try
-        {
-            activeDeviceName = Microphone.devices[0];
-            int clipLengthSeconds = Mathf.CeilToInt(Mathf.Max(1f, recordingSeconds + 0.25f));
-            clip = Microphone.Start(activeDeviceName, false, clipLengthSeconds, recordingFrequency);
-            isRecording = clip != null;
-        }
-        catch (Exception exception)
-        {
-            captureFailure = "Microphone failed: " + exception.Message;
-        }
-
-        if (clip == null || !string.IsNullOrEmpty(captureFailure))
-        {
-            isRecording = false;
-            if (onCompleted != null)
-            {
-                onCompleted(null, string.IsNullOrEmpty(captureFailure) ? "Microphone failed." : captureFailure);
-            }
-            yield break;
-        }
-
-        float startTimeout = Time.realtimeSinceStartup + 1f;
-        while (Microphone.GetPosition(activeDeviceName) <= 0 && Time.realtimeSinceStartup < startTimeout)
-        {
-            yield return null;
-        }
-
-        float finishTime = Time.realtimeSinceStartup + recordingSeconds;
-        while (Time.realtimeSinceStartup < finishTime)
-        {
-            yield return null;
-        }
-
-        if (isRecording)
-        {
-            recordedPosition = Microphone.GetPosition(activeDeviceName);
-            Microphone.End(activeDeviceName);
-            isRecording = false;
-        }
-
-        if (recordedPosition <= 0)
-        {
-            if (onCompleted != null)
-            {
-                onCompleted(null, "No voice was recorded.");
-            }
-            yield break;
-        }
-
-        int channels = Mathf.Max(1, clip.channels);
-        float[] samples = new float[recordedPosition * channels];
-        clip.GetData(samples, 0);
-
-        PawPalVoiceTemplate template;
-        string featureFailure;
-        if (!PawPalVoiceFeatureExtractor.TryCreateTemplate(samples, channels, clip.frequency, out template, out featureFailure))
-        {
-            if (onCompleted != null)
-            {
-                onCompleted(null, featureFailure);
-            }
-            yield break;
-        }
-
-        if (onCompleted != null)
-        {
-            onCompleted(template, string.Empty);
+            iosService.HandleNativeRecognizedPhrase(transcript);
         }
     }
 
-    private IEnumerator EnsureMicrophoneAvailable(Action<bool, string> onCompleted)
+    public void OnPawPalIosVoiceFailure(string payload)
     {
-#if !(UNITY_ANDROID && !UNITY_EDITOR)
-        if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+        PawPalIosVoiceCommandService iosService = voiceService as PawPalIosVoiceCommandService;
+        if (iosService != null)
         {
-            yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+            iosService.HandleNativeFailure(payload);
         }
+    }
 #endif
 
+    private IEnumerator EnableMicRoutine()
+    {
+        RefreshCommandCatalog();
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null || runtime.Dogs == null || runtime.Dogs.Count == 0)
+        {
+            HandleTerminalFailure(PawPalVoiceCommandFailureReason.Unsupported, "No dogs are available for voice commands.");
+            stateRoutine = null;
+            yield break;
+        }
+
+        if (voiceService == null || !voiceService.IsAvailable)
+        {
+            HandleTerminalFailure(PawPalVoiceCommandFailureReason.Unsupported, "Voice commands are unavailable on this platform.");
+            stateRoutine = null;
+            yield break;
+        }
+
+        bool hasMicrophoneAccess = false;
+        string microphoneFailure = string.Empty;
+        yield return EnsureMicrophoneAccess(delegate(bool granted, string message)
+        {
+            hasMicrophoneAccess = granted;
+            microphoneFailure = message;
+        });
+
+        if (!hasMicrophoneAccess)
+        {
+            HandleTerminalFailure(
+                string.Equals(microphoneFailure, "No microphone found.", StringComparison.Ordinal)
+                    ? PawPalVoiceCommandFailureReason.NoMicrophone
+                    : PawPalVoiceCommandFailureReason.PermissionDenied,
+                microphoneFailure);
+            stateRoutine = null;
+            yield break;
+        }
+
+        bool permissionGranted = false;
+        string permissionFailure = string.Empty;
+        yield return voiceService.RequestPermission(delegate(bool granted, string message)
+        {
+            permissionGranted = granted;
+            permissionFailure = message;
+        });
+
+        if (!permissionGranted)
+        {
+            HandleTerminalFailure(PawPalVoiceCommandFailureReason.PermissionDenied, string.IsNullOrEmpty(permissionFailure) ? "Speech recognition permission is needed." : permissionFailure);
+            stateRoutine = null;
+            yield break;
+        }
+
+        RefreshCommandCatalog();
+        if (commandCatalog == null || commandCatalog.Phrases.Count == 0)
+        {
+            HandleTerminalFailure(PawPalVoiceCommandFailureReason.UnclearCommand, "No voice commands are available yet.");
+            stateRoutine = null;
+            yield break;
+        }
+
+        if (!voiceService.StartListening(HandleRecognizedPhrase, HandleServiceFailure))
+        {
+            if (snapshot.Mode != PawPalVoiceInputMode.Unavailable)
+            {
+                HandleTerminalFailure(voiceService.LastFailureReason, "Voice commands could not start.");
+            }
+
+            stateRoutine = null;
+            yield break;
+        }
+
+        SetSnapshot(PawPalVoiceInputMode.ListeningName, "Listening for dog names and tricks.", false, snapshot.LastConfidence, true);
+        stateRoutine = null;
+    }
+
+    private IEnumerator EnsureMicrophoneAccess(Action<bool, string> onCompleted)
+    {
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
         {
             Permission.RequestUserPermission(Permission.Microphone);
-            float timeout = Time.realtimeSinceStartup + 5f;
-            while (!Permission.HasUserAuthorizedPermission(Permission.Microphone) && Time.realtimeSinceStartup < timeout)
+            float timeoutAt = Time.realtimeSinceStartup + 5f;
+            while (!Permission.HasUserAuthorizedPermission(Permission.Microphone) && Time.realtimeSinceStartup < timeoutAt)
             {
                 yield return null;
             }
@@ -446,29 +295,37 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
             {
                 onCompleted(false, "Microphone permission is needed.");
             }
+
             yield break;
         }
-#endif
+#else
+        if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+        {
+            yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+        }
 
-#if !(UNITY_ANDROID && !UNITY_EDITOR)
         if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
         {
             if (onCompleted != null)
             {
                 onCompleted(false, "Microphone permission is needed.");
             }
+
             yield break;
         }
 #endif
 
+#if !(UNITY_IOS && !UNITY_EDITOR)
         if (Microphone.devices == null || Microphone.devices.Length == 0)
         {
             if (onCompleted != null)
             {
                 onCompleted(false, "No microphone found.");
             }
+
             yield break;
         }
+#endif
 
         if (onCompleted != null)
         {
@@ -476,50 +333,192 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         }
     }
 
+    private void HandleRecognizedPhrase(PawPalVoiceRecognizedPhrase recognizedPhrase)
+    {
+        if (!snapshot.IsMicEnabled || recognizedPhrase == null)
+        {
+            return;
+        }
+
+        RefreshCommandCatalog();
+        float confidence = Mathf.Clamp01(recognizedPhrase.Confidence01);
+        PawPalResolvedVoiceCommand resolvedCommand = commandCatalog != null ? commandCatalog.Resolve(recognizedPhrase.Transcript) : PawPalResolvedVoiceCommand.None();
+        if (resolvedCommand.Type == PawPalResolvedVoiceCommandType.None)
+        {
+            string feedback = commandCatalog != null ? commandCatalog.GetFeedbackForUnresolvedPhrase(recognizedPhrase.Transcript) : string.Empty;
+            if (string.IsNullOrWhiteSpace(feedback))
+            {
+                feedback = "That voice command is not available yet.";
+            }
+
+            SetSnapshot(PawPalVoiceInputMode.ListeningName, feedback, false, confidence, true);
+            RaiseFeedback(feedback);
+            return;
+        }
+
+        string message;
+        bool success = ExecuteResolvedCommand(resolvedCommand, out message);
+        SetSnapshot(PawPalVoiceInputMode.ListeningName, message, false, confidence, true);
+        if (!success)
+        {
+            RaiseFeedback(message);
+        }
+    }
+
+    private bool ExecuteResolvedCommand(PawPalResolvedVoiceCommand resolvedCommand, out string message)
+    {
+        message = "Voice command failed.";
+        if (resolvedCommand == null)
+        {
+            return false;
+        }
+
+        PawPalVoiceCommandExecutionResult customResult = TryExecuteCustomCommand(resolvedCommand);
+        if (customResult != null && customResult.Handled)
+        {
+            message = string.IsNullOrWhiteSpace(customResult.Message) ? message : customResult.Message;
+            return customResult.Success;
+        }
+
+        switch (resolvedCommand.Type)
+        {
+            case PawPalResolvedVoiceCommandType.CallDog:
+            {
+                bool started = commandDirector != null && commandDirector.TryCallDogToCamera(resolvedCommand.DogId);
+                message = started
+                    ? resolvedCommand.DogName + " is coming."
+                    : resolvedCommand.DogName + " is busy right now.";
+                return started;
+            }
+            case PawPalResolvedVoiceCommandType.PerformTrick:
+            {
+                bool started = commandDirector != null && commandDirector.TryPerformTrick(resolvedCommand.DogId, resolvedCommand.TrickId);
+                string trickLabel = string.IsNullOrWhiteSpace(resolvedCommand.TrickLabel)
+                    ? PawPalTrickCatalog.GetCommandLabel(resolvedCommand.TrickId)
+                    : resolvedCommand.TrickLabel;
+                message = started
+                    ? resolvedCommand.DogName + " does " + trickLabel + "."
+                    : resolvedCommand.DogName + " is busy right now.";
+                return started;
+            }
+            default:
+                return false;
+        }
+    }
+
+    private PawPalVoiceCommandExecutionResult TryExecuteCustomCommand(PawPalResolvedVoiceCommand resolvedCommand)
+    {
+        PawPalVoiceCommandExecutionHandler handler = CommandExecutionRequested;
+        if (handler == null)
+        {
+            return PawPalVoiceCommandExecutionResult.Unhandled();
+        }
+
+        Delegate[] invocationList = handler.GetInvocationList();
+        for (int i = invocationList.Length - 1; i >= 0; i--)
+        {
+            PawPalVoiceCommandExecutionHandler commandHandler = invocationList[i] as PawPalVoiceCommandExecutionHandler;
+            if (commandHandler == null)
+            {
+                continue;
+            }
+
+            PawPalVoiceCommandExecutionResult result = commandHandler(resolvedCommand);
+            if (result != null && result.Handled)
+            {
+                return result;
+            }
+        }
+
+        return PawPalVoiceCommandExecutionResult.Unhandled();
+    }
+
+    private void HandleServiceFailure(PawPalVoiceCommandFailureReason reason, string message)
+    {
+        if (!snapshot.IsMicEnabled && stateRoutine == null)
+        {
+            return;
+        }
+
+        HandleTerminalFailure(reason, message);
+    }
+
+    private void HandleTerminalFailure(PawPalVoiceCommandFailureReason reason, string message)
+    {
+        CancelActiveOperation(false);
+        string resolvedMessage = string.IsNullOrWhiteSpace(message) ? "Voice commands are unavailable." : message;
+        SetSnapshot(PawPalVoiceInputMode.Unavailable, resolvedMessage, false, snapshot.LastConfidence, false);
+        RaiseFeedback(resolvedMessage);
+    }
+
     private void CancelActiveOperation(bool updateSnapshot)
     {
-        if (activeRoutine != null)
+        if (stateRoutine != null)
         {
-            StopCoroutine(activeRoutine);
-            activeRoutine = null;
+            StopCoroutine(stateRoutine);
+            stateRoutine = null;
         }
 
-        if (isRecording && !string.IsNullOrEmpty(activeDeviceName))
+        if (voiceService != null)
         {
-            Microphone.End(activeDeviceName);
+            voiceService.StopListening();
         }
-
-        isRecording = false;
-        activeDeviceName = null;
 
         if (updateSnapshot)
         {
-            SetSnapshot(PawPalVoiceInputMode.Idle, "Voice is ready.", false, snapshot.LastConfidence);
+            SetSnapshot(PawPalVoiceInputMode.Idle, "Microphone is off.", false, snapshot.LastConfidence, false);
         }
-    }
-
-    private bool TryGetActiveDog(out PawPalDogState dog)
-    {
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        dog = runtime != null ? runtime.ActiveDog : null;
-        return dog != null && !string.IsNullOrEmpty(dog.Id);
-    }
-
-    private void EnsureStore()
-    {
-        if (profileStore == null)
+        else
         {
-            profileStore = new PawPalVoiceProfileStore();
+            snapshot.IsMicEnabled = false;
+            snapshot.IsBusy = false;
         }
     }
 
-    private void SetSnapshot(PawPalVoiceInputMode mode, string message, bool isBusy, float confidence)
+    private void SetSnapshot(PawPalVoiceInputMode mode, string message, bool isBusy, float confidence, bool micEnabled)
     {
         snapshot.Mode = mode;
         snapshot.Message = message;
         snapshot.IsBusy = isBusy;
         snapshot.LastConfidence = confidence;
+        snapshot.IsMicEnabled = micEnabled;
         RefreshSnapshotCounts();
+        RaiseStateChanged();
+    }
+
+    private void RefreshSnapshotCounts()
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        PawPalDogState dog = runtime != null ? runtime.ActiveDog : null;
+        snapshot.ActiveDogName = dog != null && !string.IsNullOrWhiteSpace(dog.DisplayName) ? dog.DisplayName : "Dog";
+        snapshot.HasMicrophone = (voiceService != null && voiceService.IsAvailable)
+#if !(UNITY_IOS && !UNITY_EDITOR)
+            || (Microphone.devices != null && Microphone.devices.Length > 0)
+#endif
+            ;
+        snapshot.RequiredSamples = 0;
+        snapshot.NameSampleCount = 0;
+        snapshot.NameLearned = dog != null;
+        snapshot.SitSampleCount = 0;
+        snapshot.SitLearned = runtime != null && runtime.IsActiveDogTrickLearned(PawPalTrickId.Sit);
+        snapshot.LearnedTrickCount = 0;
+        if (dog == null || dog.Tricks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < dog.Tricks.Count; i++)
+        {
+            PawPalDogTrickProgress progress = dog.Tricks[i];
+            if (progress != null && progress.IsLearned)
+            {
+                snapshot.LearnedTrickCount++;
+            }
+        }
+    }
+
+    private void RaiseStateChanged()
+    {
         Action handler = StateChanged;
         if (handler != null)
         {
@@ -527,27 +526,17 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         }
     }
 
-    private void RefreshSnapshotCounts()
+    private void RaiseFeedback(string message)
     {
-        EnsureStore();
-        snapshot.RequiredSamples = Mathf.Max(1, requiredSamples);
-        snapshot.HasMicrophone = Microphone.devices != null && Microphone.devices.Length > 0;
-
-        PawPalDogState dog;
-        if (!TryGetActiveDog(out dog))
+        if (string.IsNullOrWhiteSpace(message))
         {
-            snapshot.ActiveDogName = "Dog";
-            snapshot.NameSampleCount = 0;
-            snapshot.SitSampleCount = 0;
-            snapshot.NameLearned = false;
-            snapshot.SitLearned = false;
             return;
         }
 
-        snapshot.ActiveDogName = dog.DisplayName;
-        snapshot.NameSampleCount = profileStore.GetNameSampleCount(dog.Id, dog.DisplayName);
-        snapshot.SitSampleCount = profileStore.GetTrickSampleCount(dog.Id, V1Trick);
-        snapshot.NameLearned = profileStore.IsDogNameLearned(dog.Id, dog.DisplayName, requiredSamples);
-        snapshot.SitLearned = profileStore.IsTrickLearned(dog.Id, V1Trick, requiredSamples);
+        Action<string> handler = FeedbackRequested;
+        if (handler != null)
+        {
+            handler(message);
+        }
     }
 }

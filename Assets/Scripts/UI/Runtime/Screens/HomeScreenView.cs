@@ -5,6 +5,8 @@ using UnityEngine.UI;
 
 public class HomeScreenView : AppScreenViewBase
 {
+    private const float WhistlePulseDuration = 1f;
+
     private enum HomeDetailMode
     {
         Collapsed,
@@ -29,14 +31,11 @@ public class HomeScreenView : AppScreenViewBase
     private const float InventoryNameBottomOffset = 257f;
     private const float InventoryAddonsBottomOffset = 306f;
     private const float NeedPopupBottomOffset = 130f;
-    private const float VoicePanelX = 58f;
-    private const float VoicePanelY = 394f;
-    private const float VoicePanelWidth = 276f;
-    private const float VoicePanelHeight = 178f;
     private const float BottomHudReferenceHeight = UiTheme.ReferenceContentHeight;
 
     private RectTransform exactFrame;
     private RectTransform bottomHudFrame;
+    private RectTransform topCameraButtonRect;
     private RectTransform addonsRect;
     private RectTransform dogDetailsRect;
     private RectTransform inventoryNameRect;
@@ -47,18 +46,25 @@ public class HomeScreenView : AppScreenViewBase
     private InventoryPanelView inventoryPanel;
     private DogVoiceCommandDirector voiceCommandDirector;
     private PawPalVoiceInputController voiceController;
-    private HomeVoicePanelView voicePanel;
-    private RectTransform voicePanelRect;
+    private PawPalTrainingController trainingController;
+    private PawPalTrainingModeView trainingView;
     private RectTransform needPopup;
     private TextMeshProUGUI needPopupLabel;
     private Coroutine needPopupRoutine;
+    private Coroutine whistlePulseRoutine;
     private HomeDetailMode detailMode;
     private ResponsiveFigmaFrameLayout frameLayout;
-    private bool voiceDogSwitchLockActive;
+    private bool menuDogSwitchLockActive;
+    private bool whistlePulseActive;
 
     protected override bool UseScreenContainer
     {
         get { return false; }
+    }
+
+    public bool IsVoiceMicrophoneEnabled
+    {
+        get { return voiceController != null && voiceController.IsMicEnabled; }
     }
 
     private void OnEnable()
@@ -70,11 +76,21 @@ public class HomeScreenView : AppScreenViewBase
         }
 
         RefreshRuntimeState();
+        RefreshAddonSelection();
     }
 
     private void OnDisable()
     {
-        CloseVoicePanel();
+        ReleaseMenuDogSwitchLock(false);
+        CloseTrainingMode();
+        DisableMicrophoneMode();
+        if (whistlePulseRoutine != null)
+        {
+            StopCoroutine(whistlePulseRoutine);
+            whistlePulseRoutine = null;
+        }
+
+        whistlePulseActive = false;
 
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime != null)
@@ -105,14 +121,20 @@ public class HomeScreenView : AppScreenViewBase
         voiceCommandDirector = gameObject.AddComponent<DogVoiceCommandDirector>();
         voiceController = gameObject.AddComponent<PawPalVoiceInputController>();
         voiceController.Initialize(voiceCommandDirector);
+        voiceController.StateChanged += HandleVoiceControllerStateChanged;
+        voiceController.FeedbackRequested += ShowNeedPopup;
+        voiceController.CommandExecutionRequested += HandleVoiceCommandExecutionRequested;
+
+        BuildTopCameraButton(exactFrame);
 
         addons = CreateNode<HomeAddonsView>("Addons", bottomHudFrame, 107f, BaseAddonsY, 180f, 38f);
-        addons.Initialize(sprites, ToggleVoicePanel, ToggleInventoryPanel, EnterPhotoMode);
+        addons.Initialize(sprites, ToggleMicrophoneMode, ToggleInventoryPanel, EnterDogInteractionByWhistle);
         addonsRect = addons.GetComponent<RectTransform>();
 
         dogDetails = CreateNode<DogDetailsWidgetView>("DogDetails", bottomHudFrame, BasePanelX, BasePanelY, 246f, BasePanelHeight);
         dogDetails.Initialize(sprites, ToggleDetailsPanel);
         dogDetails.BindInteractions(SelectPreviousDog, SelectNextDog, HandleNeedPressed);
+        dogDetails.BindTrickRequested(OpenTrainingForTrick);
         dogDetailsRect = dogDetails.GetComponent<RectTransform>();
 
         inventoryNameBar = CreateNode<InventoryNameBarView>("InventoryNameBar", bottomHudFrame, InventoryRegionX, InventoryRegionY, 255f, 44f);
@@ -125,10 +147,12 @@ public class HomeScreenView : AppScreenViewBase
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
 
-        voicePanel = CreateNode<HomeVoicePanelView>("VoicePanel", bottomHudFrame, VoicePanelX, VoicePanelY, VoicePanelWidth, VoicePanelHeight);
-        voicePanel.Initialize(voiceController, CloseVoicePanel);
-        voicePanelRect = voicePanel.GetComponent<RectTransform>();
-        voicePanel.gameObject.SetActive(false);
+        RectTransform trainingRect = UiFactory.CreateRect("TrainingOverlay", root);
+        UiFactory.Stretch(trainingRect, 0f, 0f, 0f, 0f);
+        trainingView = trainingRect.gameObject.AddComponent<PawPalTrainingModeView>();
+        trainingView.Initialize(sprites);
+        trainingController = gameObject.AddComponent<PawPalTrainingController>();
+        trainingController.Initialize(trainingView);
 
         BuildNeedPopup();
         ApplyDetailMode();
@@ -149,6 +173,20 @@ public class HomeScreenView : AppScreenViewBase
         ApplyDetailMode();
     }
 
+    public void ToggleVoiceMicForInteraction()
+    {
+        CloseTrainingMode();
+        if (voiceController == null)
+        {
+            return;
+        }
+
+        voiceController.ToggleMic();
+        bool interactionMicEnabled = voiceController.IsMicEnabled && shell != null && shell.IsDogInteractionModeActive;
+        voiceController.SetInteractionTrainingCommandsEnabled(interactionMicEnabled);
+        RefreshAddonSelection();
+    }
+
     private T CreateNode<T>(string name, RectTransform parent, float x, float y, float width, float height) where T : Component
     {
         RectTransform rect = UiFactory.CreateRect(name, parent);
@@ -160,84 +198,123 @@ public class HomeScreenView : AppScreenViewBase
         return rect.gameObject.AddComponent<T>();
     }
 
+    private void BuildTopCameraButton(RectTransform parent)
+    {
+        Image button = UiFactory.CreateImage("TopCameraButton", parent, UiTheme.CircleSprite, UiTheme.NavBackgroundCream);
+        button.type = Image.Type.Simple;
+        button.preserveAspect = false;
+        button.rectTransform.anchorMin = new Vector2(1f, 1f);
+        button.rectTransform.anchorMax = new Vector2(1f, 1f);
+        button.rectTransform.pivot = new Vector2(1f, 1f);
+        button.rectTransform.sizeDelta = new Vector2(42f, 42f);
+        button.rectTransform.anchoredPosition = new Vector2(-16f, -18f);
+        topCameraButtonRect = button.rectTransform;
+
+        Shadow shadow = button.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = UiTheme.NavShadow;
+        shadow.effectDistance = new Vector2(0f, -1f);
+        shadow.useGraphicAlpha = true;
+
+        Image icon = UiFactory.CreateImage("Icon", button.rectTransform, sprites.GetResourceSprite("UI/Figma/HomeMain/icon_cam"), Color.white);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = new Vector2(26f, 26f);
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+
+        UiFactory.AddButton(button.gameObject, EnterPhotoMode);
+    }
+
     private void ToggleDetailsPanel()
     {
-        CloseVoicePanel();
         detailMode = detailMode == HomeDetailMode.Stats ? HomeDetailMode.Collapsed : HomeDetailMode.Stats;
         ApplyDetailMode();
     }
 
     private void ToggleInventoryPanel()
     {
-        CloseVoicePanel();
         detailMode = detailMode == HomeDetailMode.Inventory ? HomeDetailMode.Collapsed : HomeDetailMode.Inventory;
         ApplyDetailMode();
     }
 
-    private void ToggleVoicePanel()
+    private void ToggleMicrophoneMode()
     {
-        if (voicePanel == null)
-        {
-            return;
-        }
-
-        bool shouldShow = !voicePanel.gameObject.activeSelf;
-        if (!shouldShow)
-        {
-            CloseVoicePanel();
-            return;
-        }
-
-        AcquireVoiceDogSwitchLock();
-        detailMode = HomeDetailMode.Collapsed;
-        ApplyDetailMode();
+        CloseTrainingMode();
         if (voiceController != null)
         {
-            voiceController.RefreshForActiveDog();
+            voiceController.ToggleMic();
+            if (!voiceController.IsMicEnabled)
+            {
+                voiceController.SetInteractionTrainingCommandsEnabled(false);
+            }
         }
 
-        voicePanel.gameObject.SetActive(true);
-        voicePanel.Refresh();
+        RefreshAddonSelection();
     }
 
-    private void CloseVoicePanel()
+    private void DisableMicrophoneMode()
     {
         if (voiceController != null)
         {
             voiceController.CancelActiveOperation();
+            voiceController.SetInteractionTrainingCommandsEnabled(false);
         }
 
-        if (voicePanel != null)
+        RefreshAddonSelection();
+    }
+
+    private void EnterDogInteractionByWhistle()
+    {
+        TriggerWhistlePulse();
+        CloseTrainingMode();
+        DisableMicrophoneMode();
+        detailMode = HomeDetailMode.Collapsed;
+        ApplyDetailMode();
+
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        string dogId = runtime != null && runtime.ActiveDog != null ? runtime.ActiveDog.Id : string.Empty;
+        if (shell != null && shell.EnterDogInteractionMode(dogId, false))
         {
-            voicePanel.gameObject.SetActive(false);
+            RefreshAddonSelection();
         }
-
-        ReleaseVoiceDogSwitchLock();
     }
 
     private void EnterPhotoMode()
     {
-        CloseVoicePanel();
+        CloseTrainingMode();
+        DisableMicrophoneMode();
         detailMode = HomeDetailMode.Collapsed;
         ApplyDetailMode();
 
         if (shell != null)
         {
+            if (addons != null)
+            {
+                addons.SetWhistleSelected(false);
+            }
+
             shell.EnterPhotoMode();
+            RefreshAddonSelection();
         }
     }
 
     private void ApplyDetailMode()
     {
+        bool statsExpanded = detailMode == HomeDetailMode.Stats;
+        bool dogMenuOpen = statsExpanded || detailMode == HomeDetailMode.Inventory;
+        UpdateMenuDogSwitchLock(dogMenuOpen);
+
         if (dogDetails != null)
         {
-            dogDetails.SetExpanded(detailMode == HomeDetailMode.Stats);
+            dogDetails.SetExpanded(statsExpanded);
             dogDetails.gameObject.SetActive(detailMode != HomeDetailMode.Inventory);
         }
 
         if (dogDetailsRect != null)
         {
-            bool statsExpanded = detailMode == HomeDetailMode.Stats;
             float panelHeight = statsExpanded ? StatsPanelHeight : BasePanelHeight;
             dogDetailsRect.sizeDelta = new Vector2(246f, panelHeight);
             dogDetailsRect.anchoredPosition = new Vector2(statsExpanded ? StatsPanelX : BasePanelX, -(statsExpanded ? StatsPanelY : BasePanelY));
@@ -268,11 +345,6 @@ public class HomeScreenView : AppScreenViewBase
             inventoryPanelRect.anchoredPosition = new Vector2(InventoryRegionX, -528f);
         }
 
-        if (voicePanelRect != null)
-        {
-            voicePanelRect.anchoredPosition = new Vector2(VoicePanelX, -VoicePanelY);
-        }
-
         if (needPopup != null)
         {
             needPopup.anchoredPosition = new Vector2(0f, -GetBottomAnchoredY(52f, NeedPopupBottomOffset));
@@ -280,7 +352,7 @@ public class HomeScreenView : AppScreenViewBase
 
         if (addons != null)
         {
-            addons.SetInventorySelected(detailMode == HomeDetailMode.Inventory);
+            RefreshAddonSelection();
         }
 
         if (inventoryNameBar != null)
@@ -298,6 +370,56 @@ public class HomeScreenView : AppScreenViewBase
     private void HandleRuntimeStateChanged()
     {
         RefreshRuntimeState();
+        if (trainingController != null)
+        {
+            trainingController.Refresh();
+        }
+    }
+
+    private void HandleVoiceControllerStateChanged()
+    {
+        if (shell != null)
+        {
+            shell.SetDogInteractionMicListening(voiceController != null && voiceController.IsMicEnabled);
+        }
+
+        RefreshAddonSelection();
+    }
+
+    private PawPalVoiceCommandExecutionResult HandleVoiceCommandExecutionRequested(PawPalResolvedVoiceCommand command)
+    {
+        if (command == null || shell == null)
+        {
+            return PawPalVoiceCommandExecutionResult.Unhandled();
+        }
+
+        if (command.Type == PawPalResolvedVoiceCommandType.CallDog)
+        {
+            CloseTrainingMode();
+            detailMode = HomeDetailMode.Collapsed;
+            ApplyDetailMode();
+
+            bool started = shell.EnterDogInteractionMode(command.DogId, true);
+            if (started && voiceController != null)
+            {
+                voiceController.SetInteractionTrainingCommandsEnabled(true);
+                shell.SetDogInteractionMicListening(true);
+            }
+
+            string dogName = string.IsNullOrWhiteSpace(command.DogName) ? "Your dog" : command.DogName;
+            return PawPalVoiceCommandExecutionResult.HandledResult(
+                started,
+                started ? dogName + " is coming closer." : dogName + " is busy right now.");
+        }
+
+        if (command.Type == PawPalResolvedVoiceCommandType.PerformTrick && shell.IsDogInteractionModeActive)
+        {
+            string message;
+            bool success = shell.TryPerformDogInteractionVoiceTrick(command, out message);
+            return PawPalVoiceCommandExecutionResult.HandledResult(success, message);
+        }
+
+        return PawPalVoiceCommandExecutionResult.Unhandled();
     }
 
     private void RefreshRuntimeState()
@@ -324,7 +446,10 @@ public class HomeScreenView : AppScreenViewBase
             inventoryPanel.RefreshRuntimeState(runtime);
         }
 
-        RefreshVoicePanelForDogSwitch();
+        if (voiceController != null)
+        {
+            voiceController.RefreshCommandCatalog();
+        }
     }
 
     private void SelectPreviousDog()
@@ -339,7 +464,7 @@ public class HomeScreenView : AppScreenViewBase
         {
             runtime.SelectPreviousDog();
             DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
-            RefreshVoicePanelForDogSwitch();
+            RefreshVoiceCommandsForDogSwitch();
         }
     }
 
@@ -355,48 +480,79 @@ public class HomeScreenView : AppScreenViewBase
         {
             runtime.SelectNextDog();
             DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
-            RefreshVoicePanelForDogSwitch();
+            RefreshVoiceCommandsForDogSwitch();
         }
     }
 
     private bool IsDogSwitchBlockedByOverlay()
     {
-        return (voicePanel != null && voicePanel.gameObject.activeSelf)
-            || (shell != null && shell.IsPhotoModeActive);
+        return (trainingController != null && trainingController.IsOpen)
+            || (shell != null && (shell.IsPhotoModeActive || shell.IsDogInteractionModeActive));
     }
 
-    private void AcquireVoiceDogSwitchLock()
+    private void OpenTrainingForTrick(PawPalTrickId trickId)
     {
-        if (voiceDogSwitchLockActive)
+        DisableMicrophoneMode();
+        detailMode = HomeDetailMode.Stats;
+        ApplyDetailMode();
+        if (trainingController != null)
+        {
+            trainingController.Open(trickId);
+        }
+    }
+
+    private void CloseTrainingMode()
+    {
+        if (trainingController != null && trainingController.IsOpen)
+        {
+            trainingController.Close();
+        }
+    }
+
+    private void UpdateMenuDogSwitchLock(bool shouldLock)
+    {
+        if (shouldLock)
+        {
+            AcquireMenuDogSwitchLock();
+        }
+        else
+        {
+            ReleaseMenuDogSwitchLock(true);
+        }
+    }
+
+    private void AcquireMenuDogSwitchLock()
+    {
+        if (menuDogSwitchLockActive)
         {
             return;
         }
 
         DogCycleCamera.PushDogSwitchLock();
-        voiceDogSwitchLockActive = true;
+        menuDogSwitchLockActive = true;
     }
 
-    private void ReleaseVoiceDogSwitchLock()
+    private void ReleaseMenuDogSwitchLock(bool focusActiveDogAfterRelease)
     {
-        if (!voiceDogSwitchLockActive)
+        if (!menuDogSwitchLockActive)
         {
             return;
         }
 
         DogCycleCamera.PopDogSwitchLock();
-        voiceDogSwitchLockActive = false;
+        menuDogSwitchLockActive = false;
+
+        if (focusActiveDogAfterRelease)
+        {
+            DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
+        }
     }
 
-    private void RefreshVoicePanelForDogSwitch()
+    private void RefreshVoiceCommandsForDogSwitch()
     {
         if (voiceController != null)
         {
-            voiceController.RefreshForActiveDog();
-        }
-
-        if (voicePanel != null && voicePanel.gameObject.activeSelf)
-        {
-            voicePanel.Refresh();
+            voiceController.RefreshCommandCatalog();
         }
     }
 
@@ -479,6 +635,43 @@ public class HomeScreenView : AppScreenViewBase
         }
     }
 
+    private void RefreshAddonSelection()
+    {
+        if (addons == null)
+        {
+            return;
+        }
+
+        addons.SetMicSelected(voiceController != null && voiceController.IsMicEnabled);
+        addons.SetInventorySelected(detailMode == HomeDetailMode.Inventory);
+        addons.SetWhistleSelected((shell != null && shell.IsDogInteractionModeActive) || whistlePulseActive);
+    }
+
+    public void SetHomeChromeVisible(bool visible)
+    {
+        if (bottomHudFrame != null)
+        {
+            bottomHudFrame.gameObject.SetActive(visible);
+        }
+
+        if (topCameraButtonRect != null)
+        {
+            topCameraButtonRect.gameObject.SetActive(visible);
+        }
+
+        if (!visible && needPopup != null)
+        {
+            needPopup.gameObject.SetActive(false);
+        }
+
+        if (visible && voiceController != null)
+        {
+            voiceController.SetInteractionTrainingCommandsEnabled(false);
+        }
+
+        RefreshAddonSelection();
+    }
+
     private void BuildNeedPopup()
     {
         needPopup = UiFactory.CreateRect("NeedPopup", bottomHudFrame);
@@ -548,6 +741,27 @@ public class HomeScreenView : AppScreenViewBase
         needPopupLabel.text = message;
         needPopup.gameObject.SetActive(true);
         needPopupRoutine = StartCoroutine(HideNeedPopupAfterDelay(2f));
+    }
+
+    private void TriggerWhistlePulse()
+    {
+        whistlePulseActive = true;
+        RefreshAddonSelection();
+
+        if (whistlePulseRoutine != null)
+        {
+            StopCoroutine(whistlePulseRoutine);
+        }
+
+        whistlePulseRoutine = StartCoroutine(ClearWhistlePulseAfterDelay(WhistlePulseDuration));
+    }
+
+    private IEnumerator ClearWhistlePulseAfterDelay(float delay)
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0.1f, delay));
+        whistlePulseActive = false;
+        whistlePulseRoutine = null;
+        RefreshAddonSelection();
     }
 
     private IEnumerator HideNeedPopupAfterDelay(float delay)

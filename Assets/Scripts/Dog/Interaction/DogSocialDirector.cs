@@ -23,6 +23,7 @@ public class DogSocialDirector : MonoBehaviour
     private const string LabradorBarkAssetPath = "Assets/Audio/bark_light.mp3";
     private const string CorgiBarkAssetPath = "Assets/Audio/bark_dark.mp3";
     private const string AmbientCarAssetPath = "Assets/Audio/ambient_car.mp3";
+    private const string AmbientBirdsAssetPath = "Assets/Audio/birds_chirping.mp3";
     private const float AmbientCarVolumeMultiplier = 1.5f;
     private const float CozySocialMeetDistance = 0.46f;
     private const float MaximumProximityInteractionStartDistance = 1.35f;
@@ -66,20 +67,26 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private AudioClip corgiBarkClip;
     [SerializeField] private AudioClip backgroundMusicClip;
     [SerializeField] private AudioClip ambientCarClip;
+    [SerializeField] private AudioClip ambientBirdsClip;
     [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = 0.25f;
     [SerializeField, Range(0f, 1f)] private float ambientCarVolume = 0.35f;
+    [SerializeField, Range(0f, 1f)] private float ambientBirdsVolume = 0.14f;
     [SerializeField] private float ambientCarIntervalSeconds = 60f;
+    [SerializeField] private float ambientBirdsCooldownSeconds = 15f;
     [SerializeField, Range(0f, 1f)] private float barkVolume = 1f;
     [SerializeField] private float barkSpacing = 0.18f;
 
     private Coroutine socialRoutine;
     private Coroutine backgroundMusicRoutine;
     private Coroutine ambientCarRoutine;
+    private Coroutine ambientBirdsRoutine;
     private bool attemptedRuntimeNavMeshBuild;
     private NavMeshData runtimeNavMeshData;
     private NavMeshDataInstance runtimeNavMeshInstance;
     private AudioSource backgroundMusicSource;
     private AudioSource ambientCarSource;
+    private AudioSource ambientBirdsSource;
+    private bool ambientBirdsSuppressed;
     private DogCycleCamera resolvedDogCamera;
     private readonly Queue<DogSocialInteractionType> recentInteractionTypes = new Queue<DogSocialInteractionType>();
     private readonly Dictionary<string, float> pairCooldownUntilByKey = new Dictionary<string, float>();
@@ -153,6 +160,7 @@ public class DogSocialDirector : MonoBehaviour
         EnsureActiveAudioListener();
         EnsureBackgroundMusicSource();
         EnsureAmbientCarSource();
+        EnsureAmbientBirdsSource();
     }
 
     private void OnEnable()
@@ -186,6 +194,12 @@ public class DogSocialDirector : MonoBehaviour
             ambientCarRoutine = null;
         }
 
+        if (ambientBirdsRoutine != null)
+        {
+            StopCoroutine(ambientBirdsRoutine);
+            ambientBirdsRoutine = null;
+        }
+
         if (runtimeNavMeshInstance.valid)
         {
             runtimeNavMeshInstance.Remove();
@@ -199,6 +213,11 @@ public class DogSocialDirector : MonoBehaviour
         if (ambientCarSource != null)
         {
             ambientCarSource.Stop();
+        }
+
+        if (ambientBirdsSource != null)
+        {
+            ambientBirdsSource.Stop();
         }
 
         PawPalAudioSettings.MusicVolumeChanged -= HandleAudioSettingsChanged;
@@ -262,7 +281,7 @@ public class DogSocialDirector : MonoBehaviour
                 break;
             }
 
-            DogSocialInteractionType interactionType = SelectInteractionType();
+            DogSocialInteractionType interactionType = SelectInteractionType(firstDog, secondDog);
             yield return RunInteraction(interactionType, firstDog, secondDog);
             RememberInteraction(firstDog, secondDog, interactionType);
 
@@ -314,6 +333,7 @@ public class DogSocialDirector : MonoBehaviour
                     weight *= 1.15f;
                 }
 
+                weight *= GetSocialPairWeight(firstCandidate) * GetSocialPairWeight(secondCandidate);
                 candidates.Add(new SocialPairCandidate
                 {
                     First = firstCandidate,
@@ -443,17 +463,17 @@ public class DogSocialDirector : MonoBehaviour
         return Mathf.Max(MinimumPairCooldownSeconds, pairCooldownSeconds);
     }
 
-    private DogSocialInteractionType SelectInteractionType()
+    private DogSocialInteractionType SelectInteractionType(DogRoomAgent firstDog, DogRoomAgent secondDog)
     {
         List<DogSocialInteractionType> blockedInteractions = new List<DogSocialInteractionType>(recentInteractionTypes);
         DogSocialInteractionType interactionType;
-        if (TrySelectWeightedInteraction(blockedInteractions, out interactionType))
+        if (TrySelectWeightedInteraction(blockedInteractions, firstDog, secondDog, out interactionType))
         {
             return interactionType;
         }
 
         blockedInteractions.Clear();
-        if (TrySelectWeightedInteraction(blockedInteractions, out interactionType))
+        if (TrySelectWeightedInteraction(blockedInteractions, firstDog, secondDog, out interactionType))
         {
             return interactionType;
         }
@@ -461,7 +481,7 @@ public class DogSocialDirector : MonoBehaviour
         return DogSocialInteractionType.PlayfulGreeting;
     }
 
-    private bool TrySelectWeightedInteraction(List<DogSocialInteractionType> blockedInteractions, out DogSocialInteractionType interactionType)
+    private bool TrySelectWeightedInteraction(List<DogSocialInteractionType> blockedInteractions, DogRoomAgent firstDog, DogRoomAgent secondDog, out DogSocialInteractionType interactionType)
     {
         interactionType = DogSocialInteractionType.PlayfulGreeting;
         DogSocialInteractionType[] interactionTypes =
@@ -482,7 +502,7 @@ public class DogSocialDirector : MonoBehaviour
                 continue;
             }
 
-            weights[i] = GetInteractionWeight(interactionTypes[i]);
+            weights[i] = GetInteractionWeight(interactionTypes[i], firstDog, secondDog);
             totalWeight += weights[i];
         }
 
@@ -506,19 +526,67 @@ public class DogSocialDirector : MonoBehaviour
         return true;
     }
 
-    private float GetInteractionWeight(DogSocialInteractionType interactionType)
+    private float GetInteractionWeight(DogSocialInteractionType interactionType, DogRoomAgent firstDog, DogRoomAgent secondDog)
     {
+        float baseWeight;
         switch (interactionType)
         {
             case DogSocialInteractionType.BouncePast:
-                return Mathf.Max(0f, bouncePastWeight);
+                baseWeight = Mathf.Max(0f, bouncePastWeight);
+                break;
             case DogSocialInteractionType.ChaseInvite:
-                return Mathf.Max(0f, chaseInviteWeight);
+                baseWeight = Mathf.Max(0f, chaseInviteWeight);
+                break;
             case DogSocialInteractionType.CompanionRest:
-                return Mathf.Max(0f, companionRestWeight);
+                baseWeight = Mathf.Max(0f, companionRestWeight);
+                break;
             default:
-                return Mathf.Max(0f, playfulGreetingWeight);
+                baseWeight = Mathf.Max(0f, playfulGreetingWeight);
+                break;
         }
+
+        return baseWeight
+            * GetInteractionPersonalityWeight(firstDog, interactionType)
+            * GetInteractionPersonalityWeight(secondDog, interactionType);
+    }
+
+    private static float GetSocialPairWeight(DogRoomAgent agent)
+    {
+        return PawPalDogPersonalityProfiles.GetSocialPairWeightMultiplier(GetAgentPersonality(agent));
+    }
+
+    private static float GetInteractionPersonalityWeight(DogRoomAgent agent, DogSocialInteractionType interactionType)
+    {
+        PawPalDogPersonality personality = GetAgentPersonality(agent);
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return interactionType == DogSocialInteractionType.CompanionRest ? 1.35f : interactionType == DogSocialInteractionType.ChaseInvite ? 0.72f : 0.92f;
+            case PawPalDogPersonality.Gentle:
+                return interactionType == DogSocialInteractionType.CompanionRest ? 1.25f : interactionType == DogSocialInteractionType.BouncePast || interactionType == DogSocialInteractionType.ChaseInvite ? 0.78f : 1f;
+            case PawPalDogPersonality.Energetic:
+                return interactionType == DogSocialInteractionType.BouncePast || interactionType == DogSocialInteractionType.ChaseInvite ? 1.28f : interactionType == DogSocialInteractionType.CompanionRest ? 0.72f : 1.08f;
+            case PawPalDogPersonality.Loyal:
+                return interactionType == DogSocialInteractionType.ChaseInvite ? 0.82f : 0.96f;
+            case PawPalDogPersonality.Social:
+                return interactionType == DogSocialInteractionType.PlayfulGreeting ? 1.35f : interactionType == DogSocialInteractionType.CompanionRest ? 0.88f : 1.08f;
+            case PawPalDogPersonality.Playful:
+                return interactionType == DogSocialInteractionType.PlayfulGreeting || interactionType == DogSocialInteractionType.ChaseInvite || interactionType == DogSocialInteractionType.BouncePast ? 1.25f : 0.82f;
+            case PawPalDogPersonality.Mischievous:
+                return interactionType == DogSocialInteractionType.BouncePast || interactionType == DogSocialInteractionType.ChaseInvite ? 1.18f : 0.9f;
+            default:
+                return 1f;
+        }
+    }
+
+    private static PawPalDogPersonality GetAgentPersonality(DogRoomAgent agent)
+    {
+        if (agent == null)
+        {
+            return PawPalDogPersonality.Relaxed;
+        }
+
+        return PawPalDogPersonalityProfiles.GetPersonalityForDogId(agent.DogId, agent.name);
     }
 
     private IEnumerator RunInteraction(DogSocialInteractionType interactionType, DogRoomAgent firstDog, DogRoomAgent secondDog)
@@ -1053,15 +1121,7 @@ public class DogSocialDirector : MonoBehaviour
             yield break;
         }
 
-        AudioClip barkClip = GetBarkClipForAgent(agent);
-        float barkDuration = 0f;
-        if (barkClip != null)
-        {
-            barkDuration = GetBarkAudioDuration(barkClip);
-            PlayBarkAudio(agent, barkClip);
-        }
-
-        yield return StartCoroutine(agent.PlayBark(barkDuration));
+        yield return StartCoroutine(agent.PlayBark(0f));
     }
 
     public IEnumerator PlayAmbientBarkForAgent(DogRoomAgent agent)
@@ -1161,6 +1221,19 @@ public class DogSocialDirector : MonoBehaviour
         ConfigureAmbientCarSource();
     }
 
+    private void EnsureAmbientBirdsSource()
+    {
+        if (ambientBirdsSource != null)
+        {
+            return;
+        }
+
+        GameObject audioObject = new GameObject("AmbientBirdsAudio");
+        audioObject.transform.SetParent(transform, false);
+        ambientBirdsSource = audioObject.AddComponent<AudioSource>();
+        ConfigureAmbientBirdsSource();
+    }
+
     private void EnsureBackgroundMusicPlayback()
     {
         AutoAssignDavidTestAudio();
@@ -1239,18 +1312,24 @@ public class DogSocialDirector : MonoBehaviour
     private void EnsureAmbientCarPlayback()
     {
         AutoAssignDavidTestAudio();
-        if (ambientCarClip == null)
+        if (ambientCarClip == null && ambientBirdsClip == null)
         {
             return;
         }
 
-        EnsureAmbientCarSource();
-        if (ambientCarSource == null)
+        if (ambientCarClip != null)
         {
-            return;
+            EnsureAmbientCarSource();
+        }
+
+        if (ambientBirdsClip != null)
+        {
+            EnsureAmbientBirdsSource();
         }
 
         ConfigureAmbientCarSource();
+        ConfigureAmbientBirdsSource();
+        EnsureAmbientBirdsPlayback();
         if (ambientCarRoutine != null)
         {
             StopCoroutine(ambientCarRoutine);
@@ -1261,17 +1340,72 @@ public class DogSocialDirector : MonoBehaviour
 
     private IEnumerator PlayAmbientCarRoutine()
     {
+        if (ambientCarClip == null || ambientCarSource == null)
+        {
+            ambientCarRoutine = null;
+            yield break;
+        }
+
         while (isActiveAndEnabled && ambientCarClip != null && ambientCarSource != null)
         {
             yield return new WaitForSeconds(Mathf.Max(1f, ambientCarIntervalSeconds));
             ConfigureAmbientCarSource();
             if (ambientCarSource.volume > 0f)
             {
+                ambientBirdsSuppressed = true;
+                StopAmbientBirdsPlayback();
                 ambientCarSource.PlayOneShot(ambientCarClip, Mathf.Clamp01(ambientCarVolume * AmbientCarVolumeMultiplier));
+                yield return new WaitForSeconds(Mathf.Max(0.1f, ambientCarClip.length));
+                ambientBirdsSuppressed = false;
             }
         }
 
         ambientCarRoutine = null;
+    }
+
+    private void EnsureAmbientBirdsPlayback()
+    {
+        if (ambientBirdsClip == null)
+        {
+            return;
+        }
+
+        EnsureAmbientBirdsSource();
+        if (ambientBirdsSource == null)
+        {
+            return;
+        }
+
+        ConfigureAmbientBirdsSource();
+        if (ambientBirdsRoutine != null)
+        {
+            StopCoroutine(ambientBirdsRoutine);
+        }
+
+        ambientBirdsRoutine = StartCoroutine(PlayAmbientBirdsRoutine());
+    }
+
+    private IEnumerator PlayAmbientBirdsRoutine()
+    {
+        while (isActiveAndEnabled && ambientBirdsClip != null && ambientBirdsSource != null)
+        {
+            while (ambientBirdsSuppressed)
+            {
+                yield return null;
+            }
+
+            ConfigureAmbientBirdsSource();
+            if (ambientBirdsSource.volume > 0f)
+            {
+                ambientBirdsSource.Play();
+                yield return new WaitForSeconds(Mathf.Max(0.1f, ambientBirdsClip.length));
+                ambientBirdsSource.Stop();
+            }
+
+            yield return new WaitForSeconds(Mathf.Max(0f, ambientBirdsCooldownSeconds));
+        }
+
+        ambientBirdsRoutine = null;
     }
 
     private void ConfigureAmbientCarSource()
@@ -1287,10 +1421,35 @@ public class DogSocialDirector : MonoBehaviour
         ambientCarSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(ambientCarVolume);
     }
 
+    private void ConfigureAmbientBirdsSource()
+    {
+        if (ambientBirdsSource == null)
+        {
+            return;
+        }
+
+        ambientBirdsSource.playOnAwake = false;
+        ambientBirdsSource.loop = false;
+        ambientBirdsSource.spatialBlend = 0f;
+        ambientBirdsSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(ambientBirdsVolume);
+        ambientBirdsSource.clip = ambientBirdsClip;
+    }
+
+    private void StopAmbientBirdsPlayback()
+    {
+        if (ambientBirdsSource == null || !ambientBirdsSource.isPlaying)
+        {
+            return;
+        }
+
+        ambientBirdsSource.Stop();
+    }
+
     private void HandleAudioSettingsChanged()
     {
         ConfigureBackgroundMusicSource();
         ConfigureAmbientCarSource();
+        ConfigureAmbientBirdsSource();
     }
 
     private void AutoAssignDavidTestAudio()
@@ -1318,6 +1477,11 @@ public class DogSocialDirector : MonoBehaviour
         if (ambientCarClip == null)
         {
             ambientCarClip = LoadEditorAudioClip(AmbientCarAssetPath);
+        }
+
+        if (ambientBirdsClip == null)
+        {
+            ambientBirdsClip = LoadEditorAudioClip(AmbientBirdsAssetPath);
         }
     }
 

@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: ChubbyCat
+  m_EditorClassIdentifier: 
+  PetId: cat_chubby
+  DisplayName: Chubby Cat
+  Species: 1
+  BreedName: Chubby Cat
+  Description: Round, calm, and affectionate, this cat prefers short walks, sunny patches, and gentle attention.
+  BasePrefab: {fileID: 100100000, guid: 92b2090a9e6a6ad4e8c9cdbed234bae1, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 0.95, z: -2.5}
+  HomeCameraOffset: {x: 0, y: 0.85, z: -2.65}
+  RoamRadius: 2.8
+  AnimationSet: {fileID: 11400000, guid: 6cab22fe24c84c44827b8b858fae523c, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: 14e672baea8e4a209b40743a95650e85, type: 2}
+  - {fileID: 11400000, guid: ff71b5175be249f78649a3cc850da7ae, type: 2}
+  - {fileID: 11400000, guid: 84b69b3fda5f4c68bcd41823ea02a979, type: 2}

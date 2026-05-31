@@ -477,6 +477,7 @@ public class SettingsScreenView : AppScreenViewBase
         CreateActionButton(options, "SendButton", "Send", 96f, 0f, 55f, true, delegate
         {
             currentModal = SettingsModal.FeedbackSuccess;
+            PawPalUiAudio.PlaySuccessPopup();
             RefreshViewState();
         });
 

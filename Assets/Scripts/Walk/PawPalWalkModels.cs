@@ -16,7 +16,8 @@ public enum PawPalWalkEventType
 {
     PresentFound,
     DogEncounter,
-    LocationVisit
+    LocationVisit,
+    PersonalityMoment
 }
 
 [Serializable]
@@ -68,7 +69,9 @@ public sealed class PawPalWalkRoutePlan
     public List<PawPalWalkPointData> RoutePoints = new List<PawPalWalkPointData>();
     public List<PawPalWalkLocationData> PlannedStops = new List<PawPalWalkLocationData>();
     public float RouteDistance;
+    public float BaseStaminaCost;
     public float StaminaCost;
+    public string PersonalizedCostDogId;
     public string ReturnSceneName;
 }
 
@@ -79,6 +82,7 @@ public sealed class PawPalWalkGeneratedEventState
     public PawPalWalkEventType EventType;
     public string LocationId;
     public string DisplayName;
+    public string BodyText;
     public string RewardItemId;
     public float Progress;
     public bool Resolved;

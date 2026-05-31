@@ -21,12 +21,15 @@ public class AppShellController : MonoBehaviour
     private BottomNav bottomNav;
     private PawPalPhotoModeController photoModeController;
     private PawPalPhotoModeView photoModeView;
+    private PawPalDogInteractionModeController dogInteractionModeController;
+    private PawPalDogInteractionModeView dogInteractionModeView;
     private Vector2Int lastScreenSize;
     private Rect lastSafeArea;
     private Vector2 lastRootSize;
     private Vector2 lastSafeAreaRootSize;
     private int pendingLayoutFrames;
     private bool photoModeActive;
+    private bool dogInteractionModeActive;
     private Coroutine failedPhotoModeToastRoutine;
 
     public UiLayoutBucket CurrentBucket { get; private set; }
@@ -35,6 +38,11 @@ public class AppShellController : MonoBehaviour
     public bool IsPhotoModeActive
     {
         get { return photoModeActive; }
+    }
+
+    public bool IsDogInteractionModeActive
+    {
+        get { return dogInteractionModeActive; }
     }
 
     private void Awake()
@@ -70,7 +78,7 @@ public class AppShellController : MonoBehaviour
 
     public void ShowScreen(AppScreenId screenId)
     {
-        if (photoModeActive)
+        if (photoModeActive || dogInteractionModeActive)
         {
             return;
         }
@@ -90,6 +98,11 @@ public class AppShellController : MonoBehaviour
 
     public void EnterPhotoMode()
     {
+        if (dogInteractionModeActive)
+        {
+            ExitDogInteractionMode();
+        }
+
         EnsurePhotoModeController();
         if (modalLayer != null)
         {
@@ -119,6 +132,71 @@ public class AppShellController : MonoBehaviour
         SetPhotoModeChromeVisible(true);
     }
 
+    public bool EnterDogInteractionMode(string dogId, bool keepMicListening)
+    {
+        if (photoModeActive && photoModeController != null)
+        {
+            photoModeController.ExitPhotoMode();
+        }
+
+        EnsureDogInteractionModeController();
+        if (modalLayer != null)
+        {
+            modalLayer.gameObject.SetActive(true);
+        }
+
+        if (dogInteractionModeController == null || !dogInteractionModeController.TryEnterDogInteractionMode(dogId, keepMicListening))
+        {
+            dogInteractionModeActive = false;
+            SetDogInteractionModeChromeVisible(false);
+            return false;
+        }
+
+        dogInteractionModeActive = true;
+        SetDogInteractionModeChromeVisible(true);
+        return true;
+    }
+
+    public void ExitDogInteractionMode()
+    {
+        if (dogInteractionModeController != null && dogInteractionModeController.IsActive)
+        {
+            dogInteractionModeController.ExitDogInteractionMode();
+            return;
+        }
+
+        HandleDogInteractionModeExitedFromController();
+    }
+
+    public bool TryPerformDogInteractionVoiceTrick(PawPalResolvedVoiceCommand command, out string message)
+    {
+        EnsureDogInteractionModeController();
+        if (!dogInteractionModeActive || dogInteractionModeController == null)
+        {
+            message = "Dog interaction mode is not active.";
+            return false;
+        }
+
+        return dogInteractionModeController.TryPerformVoiceTrick(command, out message);
+    }
+
+    public void SetDogInteractionMicListening(bool listening)
+    {
+        if (dogInteractionModeController != null)
+        {
+            dogInteractionModeController.SetMicListening(listening);
+        }
+    }
+
+    public void ToggleDogInteractionMic()
+    {
+        HomeScreenView home = GetHomeScreenView();
+        if (home != null)
+        {
+            home.ToggleVoiceMicForInteraction();
+        }
+    }
+
     private void BuildShell()
     {
         rootRect = GetComponent<RectTransform>();
@@ -127,7 +205,7 @@ public class AppShellController : MonoBehaviour
         Canvas canvas = GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 500;
-        canvas.pixelPerfect = false;
+        canvas.pixelPerfect = true;
 
         CanvasScaler scaler = GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -160,6 +238,7 @@ public class AppShellController : MonoBehaviour
         UiFactory.Stretch(modalLayer, 0f, 0f, 0f, 0f);
         modalLayer.gameObject.SetActive(false);
         EnsurePhotoModeController();
+        EnsureDogInteractionModeController();
 
         RectTransform navRect = UiFactory.CreateRect("BottomNav", safeAreaRoot);
         bottomNav = navRect.gameObject.AddComponent<BottomNav>();
@@ -238,19 +317,22 @@ public class AppShellController : MonoBehaviour
         {
             bottomNav.ApplyLayout(bucket);
             BottomNavHeight = bottomNav.CurrentHeight;
-            bottomNav.gameObject.SetActive(!photoModeActive);
+            bottomNav.gameObject.SetActive(!photoModeActive && !dogInteractionModeActive);
         }
 
         if (screenLayer != null)
         {
             screenLayer.gameObject.SetActive(!photoModeActive);
-            UiFactory.Stretch(screenLayer, 0f, photoModeActive ? 0f : BottomNavHeight, 0f, 0f);
+            UiFactory.Stretch(screenLayer, 0f, (photoModeActive || dogInteractionModeActive) ? 0f : BottomNavHeight, 0f, 0f);
         }
 
         if (modalLayer != null)
         {
             UiFactory.Stretch(modalLayer, 0f, 0f, 0f, 0f);
-            bool modalVisible = photoModeActive || (photoModeView != null && photoModeView.gameObject.activeSelf);
+            bool modalVisible = photoModeActive
+                || dogInteractionModeActive
+                || (photoModeView != null && photoModeView.gameObject.activeSelf)
+                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
             modalLayer.gameObject.SetActive(modalVisible);
         }
 
@@ -285,6 +367,22 @@ public class AppShellController : MonoBehaviour
         photoModeView.HideAll();
     }
 
+    private void EnsureDogInteractionModeController()
+    {
+        if (dogInteractionModeController != null || modalLayer == null)
+        {
+            return;
+        }
+
+        RectTransform interactionRoot = UiFactory.CreateRect("DogInteractionMode", modalLayer);
+        UiFactory.Stretch(interactionRoot, 0f, 0f, 0f, 0f);
+        dogInteractionModeView = interactionRoot.gameObject.AddComponent<PawPalDogInteractionModeView>();
+        dogInteractionModeView.Initialize(spriteLibrary);
+        dogInteractionModeController = interactionRoot.gameObject.AddComponent<PawPalDogInteractionModeController>();
+        dogInteractionModeController.Initialize(this, dogInteractionModeView);
+        dogInteractionModeView.Hide();
+    }
+
     private void HandlePhotoModeExited()
     {
         photoModeActive = false;
@@ -297,7 +395,7 @@ public class AppShellController : MonoBehaviour
 
         if (bottomNav != null)
         {
-            bottomNav.gameObject.SetActive(!photoModeActive);
+            bottomNav.gameObject.SetActive(!photoModeActive && !dogInteractionModeActive);
         }
 
         if (screenLayer != null)
@@ -307,12 +405,76 @@ public class AppShellController : MonoBehaviour
 
         if (modalLayer != null)
         {
-            bool modalVisible = photoModeActive || (photoModeView != null && photoModeView.gameObject.activeSelf);
+            bool modalVisible = photoModeActive
+                || dogInteractionModeActive
+                || (photoModeView != null && photoModeView.gameObject.activeSelf)
+                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
             modalLayer.gameObject.SetActive(modalVisible);
         }
 
         pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
         ApplyCurrentLayout(CurrentBucket);
+    }
+
+    public void HandleDogInteractionModeExitedFromController()
+    {
+        if (!dogInteractionModeActive && (dogInteractionModeView == null || !dogInteractionModeView.gameObject.activeSelf))
+        {
+            return;
+        }
+
+        dogInteractionModeActive = false;
+        SetDogInteractionModeChromeVisible(false);
+    }
+
+    private void SetDogInteractionModeChromeVisible(bool activeDogInteractionMode)
+    {
+        dogInteractionModeActive = activeDogInteractionMode;
+
+        if (bottomNav != null)
+        {
+            bottomNav.gameObject.SetActive(!photoModeActive && !dogInteractionModeActive);
+        }
+
+        if (screenLayer != null)
+        {
+            screenLayer.gameObject.SetActive(!photoModeActive);
+            UiFactory.Stretch(screenLayer, 0f, (photoModeActive || dogInteractionModeActive) ? 0f : BottomNavHeight, 0f, 0f);
+        }
+
+        SetHomeScreenChromeVisible(!dogInteractionModeActive);
+
+        if (modalLayer != null)
+        {
+            bool modalVisible = photoModeActive
+                || dogInteractionModeActive
+                || (photoModeView != null && photoModeView.gameObject.activeSelf)
+                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
+            modalLayer.gameObject.SetActive(modalVisible);
+        }
+
+        pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
+        ApplyCurrentLayout(CurrentBucket);
+    }
+
+    private void SetHomeScreenChromeVisible(bool visible)
+    {
+        HomeScreenView home = GetHomeScreenView();
+        if (home != null)
+        {
+            home.SetHomeChromeVisible(visible);
+        }
+    }
+
+    private HomeScreenView GetHomeScreenView()
+    {
+        AppScreenViewBase screen;
+        if (!screens.TryGetValue(AppScreenId.Home, out screen))
+        {
+            return null;
+        }
+
+        return screen as HomeScreenView;
     }
 
     private IEnumerator HideFailedPhotoModeToastRoutine()

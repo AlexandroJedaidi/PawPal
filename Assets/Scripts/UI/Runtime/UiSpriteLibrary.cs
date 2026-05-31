@@ -9,6 +9,7 @@ public class UiSpriteLibrary : MonoBehaviour
     private readonly Dictionary<string, Sprite> cache = new Dictionary<string, Sprite>();
     private readonly Dictionary<string, Texture2D> textureCache = new Dictionary<string, Texture2D>();
     private readonly Dictionary<string, Sprite> whiteIconCache = new Dictionary<string, Sprite>();
+    private readonly Dictionary<string, Sprite> whiteResourceSpriteCache = new Dictionary<string, Sprite>();
     private readonly Dictionary<string, Sprite> resourceSpriteCache = new Dictionary<string, Sprite>();
     private readonly Dictionary<string, Texture2D> resourceTextureCache = new Dictionary<string, Texture2D>();
 
@@ -133,6 +134,50 @@ public class UiSpriteLibrary : MonoBehaviour
         }
 
         resourceSpriteCache[resourcePath] = sprite;
+        return sprite;
+    }
+
+    public Sprite GetWhiteResourceSprite(string resourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(resourcePath))
+        {
+            return UiTheme.WhiteSprite;
+        }
+
+        Sprite sprite;
+        if (whiteResourceSpriteCache.TryGetValue(resourcePath, out sprite))
+        {
+            return sprite;
+        }
+
+        Texture2D source = LoadResourceTexture(resourcePath);
+        if (source == null)
+        {
+            sprite = GetResourceSprite(resourcePath);
+            whiteResourceSpriteCache[resourcePath] = sprite;
+            return sprite;
+        }
+
+        Texture2D readableSource = CreateReadableCopy(source);
+        Texture2D generated = new Texture2D(readableSource.width, readableSource.height, TextureFormat.ARGB32, false);
+        generated.name = resourcePath.Replace('/', '_') + "_WhiteMask";
+        generated.filterMode = FilterMode.Bilinear;
+        generated.wrapMode = TextureWrapMode.Clamp;
+
+        Color[] pixels = readableSource.GetPixels();
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            float alpha = pixels[i].a;
+            pixels[i] = new Color(1f, 1f, 1f, alpha);
+        }
+
+        generated.SetPixels(pixels);
+        generated.Apply();
+        Destroy(readableSource);
+
+        string spriteName = resourcePath.Replace('/', '_') + "_WhiteRuntimeSprite";
+        sprite = ShouldTrimResourceSprite(resourcePath) ? CreateTrimmedIconSprite(generated, spriteName) : CreateRuntimeSprite(generated, spriteName);
+        whiteResourceSpriteCache[resourcePath] = sprite;
         return sprite;
     }
 
@@ -269,6 +314,7 @@ public class UiSpriteLibrary : MonoBehaviour
     {
         return resourcePath.StartsWith("UI/Figma/HomeMain/icon_", System.StringComparison.Ordinal)
             || resourcePath.StartsWith("UI/Figma/HomeMain/button_", System.StringComparison.Ordinal)
-            || resourcePath.StartsWith("UI/Figma/HomeStats/icon_", System.StringComparison.Ordinal);
+            || resourcePath.StartsWith("UI/Figma/HomeStats/icon_", System.StringComparison.Ordinal)
+            || resourcePath.StartsWith("UI/Figma/HomeInventory/icon_", System.StringComparison.Ordinal);
     }
 }

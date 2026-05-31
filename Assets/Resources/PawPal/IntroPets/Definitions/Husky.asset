@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: Husky
+  m_EditorClassIdentifier: 
+  PetId: husky
+  DisplayName: Husky
+  Species: 0
+  BreedName: Husky
+  Description: Bright, social, and athletic, the Husky brings expressive eyes, quick movement, and a lively outdoor spirit.
+  BasePrefab: {fileID: 100100000, guid: 584829c5eb832154c98b30ec3d89c58e, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 1.2, z: -3}
+  HomeCameraOffset: {x: 0, y: 1.05, z: -3}
+  RoamRadius: 3.75
+  AnimationSet: {fileID: 11400000, guid: 8eee034bb13a4cb092b41888a538ee51, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: d7a93c9b91d7439dae3e5aa284828a1c, type: 2}
+  - {fileID: 11400000, guid: b22c76a15c3843c4bbd92f9f1313be66, type: 2}
+  - {fileID: 11400000, guid: a018f470cbf2428e9dd4ef3515f98b6c, type: 2}

@@ -30,9 +30,48 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         return true;
     }
 
+    public bool TryCallDogToCamera(string dogId)
+    {
+        DogRoomAgent dog;
+        if (!TryResolveDogTarget(dogId, out dog))
+        {
+            return false;
+        }
+
+        if (!CanStartVoiceAnimation(dog))
+        {
+            return false;
+        }
+
+        StartVoiceRoutine(CallToCameraRoutine(dog));
+        return true;
+    }
+
     public bool TryPerformTrick(PawPalVoiceTrick trick)
     {
+        return TryPerformTrick(PawPalTrickId.Sit);
+    }
+
+    public bool TryPerformTrick(PawPalTrickId trick)
+    {
         DogRoomAgent dog = ResolveActiveDog();
+        if (!CanStartVoiceAnimation(dog))
+        {
+            return false;
+        }
+
+        StartVoiceRoutine(PerformTrickRoutine(dog, trick));
+        return true;
+    }
+
+    public bool TryPerformTrick(string dogId, PawPalTrickId trick)
+    {
+        DogRoomAgent dog;
+        if (!TryResolveDogTarget(dogId, out dog))
+        {
+            return false;
+        }
+
         if (!CanStartVoiceAnimation(dog))
         {
             return false;
@@ -92,16 +131,20 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
 
     private IEnumerator PerformTrickRoutine(DogRoomAgent dog, PawPalVoiceTrick trick)
     {
+        yield return PerformTrickRoutine(dog, PawPalTrickId.Sit);
+    }
+
+    private IEnumerator PerformTrickRoutine(DogRoomAgent dog, PawPalTrickId trick)
+    {
         if (dog == null)
         {
             yield break;
         }
 
-        switch (trick)
+        PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trick);
+        if (definition != null)
         {
-            case PawPalVoiceTrick.Sit:
-                yield return StartCoroutine(dog.PlaySit());
-                break;
+            yield return StartCoroutine(dog.PlayTrainingTrick(definition, true));
         }
     }
 
@@ -146,6 +189,89 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         candidate = camera.transform.position;
         candidate.y = dog.transform.position.y;
         return dog.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out approachPoint);
+    }
+
+    private static bool TryResolveDogTarget(string dogId, out DogRoomAgent dog)
+    {
+        dog = ResolveDogById(dogId);
+        if (dog == null)
+        {
+            return false;
+        }
+
+        SelectRuntimeDog(dog);
+        DogCycleCamera.TryForceFocusRuntimeActiveDogFromSelection();
+        return true;
+    }
+
+    private static void SelectRuntimeDog(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null)
+        {
+            return;
+        }
+
+        if (dog.HasExplicitDogId && !string.IsNullOrEmpty(dog.DogId))
+        {
+            runtime.SelectDogById(dog.DogId, false);
+            return;
+        }
+
+        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < dogs.Length; i++)
+        {
+            if (dogs[i] == dog)
+            {
+                runtime.SelectDogIndex(i, false);
+                return;
+            }
+        }
+    }
+
+    private static DogRoomAgent ResolveDogById(string dogId)
+    {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return ResolveActiveDog();
+        }
+
+        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < dogs.Length; i++)
+        {
+            DogRoomAgent candidate = dogs[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            if (candidate.HasExplicitDogId && string.Equals(candidate.DogId, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime != null)
+        {
+            for (int i = 0; i < runtime.Dogs.Count && i < dogs.Length; i++)
+            {
+                PawPalDogState dogState = runtime.Dogs[i];
+                if (dogState != null
+                    && string.Equals(dogState.Id, dogId, StringComparison.OrdinalIgnoreCase)
+                    && dogs[i] != null)
+                {
+                    return dogs[i];
+                }
+            }
+        }
+
+        return null;
     }
 
     private static DogRoomAgent ResolveActiveDog()

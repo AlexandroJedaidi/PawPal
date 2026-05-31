@@ -47,16 +47,19 @@ public static class PawPalWalkEventGenerator
 
         int seed = session.SessionId != null ? session.SessionId.GetHashCode() : Environment.TickCount;
         System.Random random = new System.Random(seed);
-        AddPresentEvents(session, plan, runtime, random);
-        AddDogEncounterEvent(session, plan, random);
+        PawPalDogState dog = PawPalDogPersonalityProfiles.FindRuntimeDog(session.SelectedDogId);
+        AddPresentEvents(session, plan, runtime, dog, random);
+        AddDogEncounterEvent(session, plan, dog, random);
+        AddPersonalityMomentEvent(session, plan, dog, random);
         SortAndSpaceEvents(session.GeneratedEvents);
     }
 
-    private static void AddPresentEvents(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalGameRuntime runtime, System.Random random)
+    private static void AddPresentEvents(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalGameRuntime runtime, PawPalDogState dog, System.Random random)
     {
-        float chance = Mathf.Clamp01(0.22f + plan.RouteDistance * 0.006f);
+        float chance = Mathf.Clamp01((0.22f + plan.RouteDistance * 0.006f) * PawPalDogPersonalityProfiles.GetWalkPresentChanceMultiplier(dog));
         int presentCount = random.NextDouble() < chance ? 1 : 0;
-        if (plan.RouteDistance > 36f && random.NextDouble() < 0.32f)
+        float longRouteChance = 0.32f * PawPalDogPersonalityProfiles.GetWalkPresentChanceMultiplier(dog);
+        if (plan.RouteDistance > 36f && random.NextDouble() < Mathf.Clamp01(longRouteChance))
         {
             presentCount++;
         }
@@ -77,7 +80,7 @@ public static class PawPalWalkEventGenerator
         }
     }
 
-    private static void AddDogEncounterEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, System.Random random)
+    private static void AddDogEncounterEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalDogState dog, System.Random random)
     {
         float chance = 0.28f + plan.RouteDistance * 0.004f;
         for (int i = 0; i < plan.PlannedStops.Count; i++)
@@ -89,6 +92,7 @@ public static class PawPalWalkEventGenerator
             }
         }
 
+        chance *= PawPalDogPersonalityProfiles.GetWalkDogEncounterChanceMultiplier(dog);
         if (random.NextDouble() > Mathf.Clamp01(chance))
         {
             return;
@@ -101,6 +105,29 @@ public static class PawPalWalkEventGenerator
             EventType = PawPalWalkEventType.DogEncounter,
             DisplayName = dogName,
             Progress = ClampEventProgress(Mathf.Lerp(0.28f, 0.74f, (float)random.NextDouble()))
+        });
+    }
+
+    private static void AddPersonalityMomentEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalDogState dog, System.Random random)
+    {
+        if (dog == null || plan.RouteDistance < 8f)
+        {
+            return;
+        }
+
+        float chance = plan.PlannedStops.Count > 0 ? 0.72f : 0.52f;
+        if (random.NextDouble() > chance)
+        {
+            return;
+        }
+
+        session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
+        {
+            EventId = "personality_moment",
+            EventType = PawPalWalkEventType.PersonalityMoment,
+            DisplayName = PawPalDogPersonalityProfiles.GetWalkMomentTitle(dog),
+            BodyText = PawPalDogPersonalityProfiles.GetWalkMomentBody(dog),
+            Progress = ClampEventProgress(Mathf.Lerp(0.22f, 0.78f, (float)random.NextDouble()))
         });
     }
 

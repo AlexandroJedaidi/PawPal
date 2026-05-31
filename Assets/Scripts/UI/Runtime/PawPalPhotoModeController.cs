@@ -9,6 +9,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private AppShellController shell;
     private PawPalPhotoModeView view;
+    private PawPalPhotoDogCommandDirector photoDogCommands;
     private DogCycleCamera dogCamera;
     private DogRoomAgent activeDog;
     private Texture2D pendingCapture;
@@ -27,6 +28,12 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
     {
         shell = ownerShell;
         view = photoView;
+        photoDogCommands = GetComponent<PawPalPhotoDogCommandDirector>();
+        if (photoDogCommands == null)
+        {
+            photoDogCommands = gameObject.AddComponent<PawPalPhotoDogCommandDirector>();
+        }
+
         albumStore.Load();
 
         if (view == null)
@@ -37,13 +44,17 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         view.CloseRequested += HandleCloseRequested;
         view.ShutterRequested += HandleShutterRequested;
         view.AlbumRequested += HandleAlbumRequested;
-        view.FocusRequested += HandleFocusRequested;
+        view.PoseSelected += HandlePoseSelected;
         view.AttentionRequested += HandleAttentionRequested;
         view.KeepRequested += HandleKeepRequested;
         view.RetakeRequested += HandleRetakeRequested;
         view.DeletePreviewRequested += HandleDeletePreviewRequested;
         view.AlbumBackRequested += HandleAlbumBackRequested;
         view.AlbumPhotoSelected += HandleAlbumPhotoSelected;
+        view.AlbumFavoriteToggled += HandleAlbumFavoriteToggled;
+        view.AlbumShareRequested += HandleAlbumShareRequested;
+        view.AlbumDeleteRequested += HandleAlbumDeleteRequested;
+        view.AlbumTitleChanged += HandleAlbumTitleChanged;
         view.DetailBackRequested += HandleDetailBackRequested;
         view.DetailDeleteRequested += HandleDetailDeleteRequested;
         view.DetailFavoriteToggled += HandleDetailFavoriteToggled;
@@ -106,6 +117,10 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
         captureBusy = false;
         DestroyPendingCapture();
+        if (photoDogCommands != null)
+        {
+            photoDogCommands.CancelActiveCommand(true);
+        }
 
         if (dogCamera != null)
         {
@@ -182,7 +197,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         view.ShowAlbum(albumStore);
     }
 
-    private void HandleFocusRequested()
+    private void HandlePoseSelected(PawPalPhotoPoseId poseId)
     {
         if (!active || dogCamera == null)
         {
@@ -191,6 +206,13 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
         activeDog = ResolvePreferredDog(dogCamera);
         dogCamera.FocusPhotoModeOnActiveDog();
+
+        string failureReason;
+        if (photoDogCommands != null && !photoDogCommands.TryPose(activeDog, ResolvePhotoCamera(), poseId, out failureReason) && view != null)
+        {
+            view.ShowToast(string.IsNullOrEmpty(failureReason) ? "That pose is not available." : failureReason);
+        }
+
         if (view != null)
         {
             view.SetZoom01(dogCamera.PhotoZoom01);
@@ -199,7 +221,23 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private void HandleAttentionRequested()
     {
-        RequestDogAttention(3f);
+        if (!active)
+        {
+            return;
+        }
+
+        activeDog = ResolvePreferredDog(dogCamera);
+        string failureReason = string.Empty;
+        if (photoDogCommands != null && photoDogCommands.TryWhistle(activeDog, ResolvePhotoCamera(), out failureReason))
+        {
+            RequestDogAttention(4f);
+            return;
+        }
+
+        if (view != null)
+        {
+            view.ShowToast(string.IsNullOrEmpty(failureReason) ? "Whistle did not reach your dog." : failureReason);
+        }
     }
 
     private void HandleKeepRequested()
@@ -293,6 +331,89 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
     }
 
+    private void HandleAlbumFavoriteToggled(PawPalPhotoRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        albumStore.SetFavorite(record, !record.Favorite);
+        albumStore.Load();
+
+        if (view != null)
+        {
+            view.ShowAlbum(albumStore);
+        }
+    }
+
+    private void HandleAlbumShareRequested(PawPalPhotoRecord record)
+    {
+        if (record == null)
+        {
+            if (view != null)
+            {
+                view.ShowToast("Pick a photo first.");
+            }
+
+            return;
+        }
+
+        string resultMessage;
+        string title = BuildShareTitle(record);
+        string message = "A PawFriends photo" + (string.IsNullOrWhiteSpace(record.DogName) ? "." : " of " + record.DogName + ".");
+        PawPalPhotoShareService.ShareImage(albumStore.GetPhotoPath(record), title, message, out resultMessage);
+
+        if (view != null)
+        {
+            view.ShowToast(resultMessage);
+        }
+    }
+
+    private void HandleAlbumDeleteRequested(PawPalPhotoRecord record)
+    {
+        if (record == null)
+        {
+            if (view != null)
+            {
+                view.ShowToast("Pick a photo first.");
+            }
+
+            return;
+        }
+
+        albumStore.DeletePhoto(record);
+        albumStore.Load();
+
+        if (view != null)
+        {
+            view.ShowAlbum(albumStore);
+            view.ShowToast("Photo deleted.");
+        }
+    }
+
+    private void HandleAlbumTitleChanged(PawPalPhotoRecord record, string title)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        albumStore.SetTitle(record, title);
+        albumStore.Load();
+
+        PawPalPhotoRecord refreshed = FindRecord(record.Id);
+        if (view != null)
+        {
+            if (refreshed != null)
+            {
+                view.ShowDetail(albumStore, refreshed);
+            }
+
+            view.ShowToast("Caption saved.");
+        }
+    }
+
     private void HandleDetailFavoriteToggled(PawPalPhotoRecord record)
     {
         if (record == null)
@@ -308,6 +429,21 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         {
             view.ShowDetail(albumStore, refreshed);
         }
+    }
+
+    private static string BuildShareTitle(PawPalPhotoRecord record)
+    {
+        if (record == null)
+        {
+            return "PawFriends Photo";
+        }
+
+        if (!string.IsNullOrWhiteSpace(record.Title))
+        {
+            return record.Title.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(record.DogName) ? "PawFriends Photo" : record.DogName + " photo";
     }
 
     private void HandleZoomChanged(float zoom01)
@@ -373,6 +509,20 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
 
         return null;
+    }
+
+    private Camera ResolvePhotoCamera()
+    {
+        if (dogCamera != null)
+        {
+            Camera camera = dogCamera.GetComponent<Camera>();
+            if (camera != null)
+            {
+                return camera;
+            }
+        }
+
+        return Camera.main;
     }
 
     private DogRoomAgent ResolvePreferredDog(DogCycleCamera camera)

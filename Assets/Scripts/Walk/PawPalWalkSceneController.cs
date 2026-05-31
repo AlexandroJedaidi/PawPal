@@ -760,6 +760,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         hudCanvas = new GameObject("WalkHudCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster)).GetComponent<Canvas>();
         hudCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
         hudCanvas.sortingOrder = 700;
+        hudCanvas.pixelPerfect = true;
 
         CanvasScaler scaler = hudCanvas.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -929,6 +930,11 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             eventBodyLabel.text = session.SelectedDogName + " met " + walkEvent.DisplayName + ".";
             MoveEncounterDogNearWalker();
         }
+        else if (walkEvent.EventType == PawPalWalkEventType.PersonalityMoment)
+        {
+            eventTitleLabel.text = string.IsNullOrWhiteSpace(walkEvent.DisplayName) ? "A little moment" : walkEvent.DisplayName;
+            eventBodyLabel.text = string.IsNullOrWhiteSpace(walkEvent.BodyText) ? session.SelectedDogName + " paused for a moment." : walkEvent.BodyText;
+        }
         else
         {
             eventTitleLabel.text = walkEvent.DisplayName;
@@ -1038,17 +1044,41 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         string body = result.DogName + " walked " + Mathf.RoundToInt(result.Distance) + " distance.\n";
-        body += "Stamina used: " + Mathf.RoundToInt(result.StaminaUsed) + "\n";
+        body += "Effort: " + GetEffortLabel(result) + "\n";
         body += "Stops: " + JoinOrNone(result.LocationsVisited) + "\n";
         body += "Presents: " + JoinOrNone(result.ItemsReceived) + "\n";
         body += "Dogs met: " + JoinOrNone(result.DogsMet);
         if (result.IncreasedMaxStamina)
         {
-            body += "\nStamina grew to " + Mathf.RoundToInt(result.NewMaxStamina) + ".";
+            body += "\nStamina improved.";
         }
 
         summaryBodyLabel.text = body;
         summaryPanel.gameObject.SetActive(true);
+    }
+
+    private static string GetEffortLabel(PawPalWalkCompletionResult result)
+    {
+        float baseline = result != null && result.PreviousMaxStamina > 0.001f
+            ? result.PreviousMaxStamina
+            : Mathf.Max(1f, result != null ? result.StaminaUsed : 0f);
+        float ratio = result != null ? result.StaminaUsed / baseline : 0f;
+        if (ratio < 0.2f)
+        {
+            return "Light";
+        }
+
+        if (ratio < 0.45f)
+        {
+            return "Medium";
+        }
+
+        if (ratio < 0.7f)
+        {
+            return "High";
+        }
+
+        return "Very High";
     }
 
     private string JoinOrNone(List<string> values)

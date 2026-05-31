@@ -79,7 +79,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
         if (staminaLabel != null)
         {
-            staminaLabel.text = "Stamina " + stamina.CompactText;
+            staminaLabel.text = "Stamina";
         }
 
         if (staminaFill != null)
@@ -190,7 +190,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         staminaFill.fillOrigin = (int)Image.OriginHorizontal.Left;
         UiFactory.Stretch(staminaFill.rectTransform, 0f, 0f, 0f, 0f);
 
-        staminaLabel = CreateLabel(hud, "StaminaLabel", "Stamina 100/100", 12, CoralDark, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
+        staminaLabel = CreateLabel(hud, "StaminaLabel", "Stamina", 12, CoralDark, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
         staminaLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         staminaLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
         staminaLabel.rectTransform.pivot = new Vector2(0f, 1f);
@@ -362,6 +362,11 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
         PawPalWalkRoutePlan previewPlan = PawPalWalkRouteGraph.BuildPlan(preview);
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime != null)
+        {
+            runtime.ApplyWalkPersonalityToPlan(runtime.ActiveDog, previewPlan);
+        }
+
         PawPalWalkStaminaSnapshot stamina = runtime != null
             ? runtime.GetActiveDogWalkStaminaSnapshot()
             : new PawPalWalkStaminaSnapshot();
@@ -370,7 +375,14 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
     private PawPalWalkRoutePlan BuildCurrentPlan()
     {
-        return PawPalWalkRouteGraph.BuildPlan(routePoints);
+        PawPalWalkRoutePlan plan = PawPalWalkRouteGraph.BuildPlan(routePoints);
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime != null)
+        {
+            runtime.ApplyWalkPersonalityToPlan(runtime.ActiveDog, plan);
+        }
+
+        return plan;
     }
 
     private void RefreshPlanUi()
@@ -388,7 +400,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
         if (distanceLabel != null)
         {
-            distanceLabel.text = "Distance " + Mathf.RoundToInt(plan.RouteDistance) + "  Cost " + Mathf.RoundToInt(plan.StaminaCost);
+            distanceLabel.text = "Distance " + Mathf.RoundToInt(plan.RouteDistance) + "  Effort " + GetEffortLabel(plan.StaminaCost, stamina.Max);
         }
 
         if (stopsLabel != null)
@@ -437,6 +449,27 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         }
 
         return text;
+    }
+
+    private static string GetEffortLabel(float staminaCost, float maxStamina)
+    {
+        float ratio = maxStamina > 0.001f ? staminaCost / maxStamina : 0f;
+        if (ratio < 0.2f)
+        {
+            return "Light";
+        }
+
+        if (ratio < 0.45f)
+        {
+            return "Medium";
+        }
+
+        if (ratio < 0.7f)
+        {
+            return "High";
+        }
+
+        return "Very High";
     }
 
     private void RefreshRouteLines()

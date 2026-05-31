@@ -68,6 +68,11 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private float photoMinFieldOfView = 28f;
     [SerializeField] private Vector3 photoHeadFocusOffset = new Vector3(0f, 0.04f, 0f);
 
+    [Header("Dog Interaction Mode")]
+    [SerializeField] private Vector3 interactionCameraPositionOffset = new Vector3(0f, -0.12f, 0f);
+    [SerializeField] private Vector3 interactionHeadFocusOffset = new Vector3(0f, -0.04f, 0f);
+    [SerializeField] private float interactionFieldOfView = 0f;
+
     private Camera attachedCamera;
     private Vector3 fixedPosition;
     private int activeIndex;
@@ -102,6 +107,11 @@ public class DogCycleCamera : MonoBehaviour
     private int photoTouchFingerId = -1;
     private Vector2 photoLastPointerPosition;
     private float photoLastPinchDistance;
+    private bool dogInteractionModeActive;
+    private DogRoomAgent dogInteractionModeDog;
+    private Vector3 dogInteractionSavedPosition;
+    private Quaternion dogInteractionSavedRotation;
+    private float dogInteractionSavedFieldOfView;
     private int legacyInteractionFocusId;
     private int nextFocusClaimId = 1;
     private int activeFocusClaimId;
@@ -134,6 +144,11 @@ public class DogCycleCamera : MonoBehaviour
     public bool IsPhotoModeActive
     {
         get { return photoModeActive; }
+    }
+
+    public bool IsDogInteractionModeActive
+    {
+        get { return dogInteractionModeActive; }
     }
 
     public static bool IsDogSwitchingLocked
@@ -188,6 +203,43 @@ public class DogCycleCamera : MonoBehaviour
         return false;
     }
 
+    public static bool TryForceFocusRuntimeActiveDogFromSelection()
+    {
+        PawPalGameRuntime runtimeInstance = PawPalGameRuntime.Instance;
+        Camera mainCamera = Camera.main;
+        DogCycleCamera dogCamera = null;
+
+        if (mainCamera != null)
+        {
+            dogCamera = mainCamera.GetComponent<DogCycleCamera>();
+        }
+
+        if (dogCamera == null)
+        {
+            dogCamera = FindFirstObjectByType<DogCycleCamera>();
+        }
+
+        if (dogCamera == null && mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneDogs())
+        {
+            dogCamera = mainCamera.gameObject.AddComponent<DogCycleCamera>();
+        }
+
+        if (dogCamera != null)
+        {
+            dogCamera.FocusRuntimeActiveDogFromSelection(true);
+            return true;
+        }
+
+        CameraFollow legacyCamera = mainCamera != null ? mainCamera.GetComponent<CameraFollow>() : null;
+        if (legacyCamera != null && runtimeInstance != null && legacyCamera.target != null && legacyCamera.target.Length > 0)
+        {
+            legacyCamera.index = Mathf.Clamp(runtimeInstance.ActiveDogIndex, 0, legacyCamera.target.Length - 1);
+            return true;
+        }
+
+        return false;
+    }
+
     public static void PushDogSwitchLock()
     {
         dogSwitchLockCount++;
@@ -200,7 +252,12 @@ public class DogCycleCamera : MonoBehaviour
 
     public void FocusRuntimeActiveDogFromSelection()
     {
-        if (IsDogSwitchingLocked || photoModeActive)
+        FocusRuntimeActiveDogFromSelection(false);
+    }
+
+    private void FocusRuntimeActiveDogFromSelection(bool ignoreLock)
+    {
+        if ((!ignoreLock && IsDogSwitchingLocked) || photoModeActive)
         {
             return;
         }
@@ -291,6 +348,79 @@ public class DogCycleCamera : MonoBehaviour
         SyncToRuntimeActiveDog(false);
     }
 
+    public bool EnterDogInteractionMode(DogRoomAgent preferredDog)
+    {
+        RefreshDogsIfNeeded();
+
+        DogRoomAgent targetDog = preferredDog != null ? preferredDog : ResolveRuntimeActiveDog();
+        if (targetDog == null)
+        {
+            targetDog = GetActiveDog();
+        }
+
+        if (targetDog == null)
+        {
+            return false;
+        }
+
+        if (!dogInteractionModeActive)
+        {
+            dogInteractionSavedPosition = transform.position;
+            dogInteractionSavedRotation = transform.rotation;
+            dogInteractionSavedFieldOfView = attachedCamera != null ? attachedCamera.fieldOfView : baseFieldOfView;
+        }
+
+        dogInteractionModeActive = true;
+        dogInteractionModeDog = targetDog;
+        manualLookHoldUntil = 0f;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        switchTimer = 0f;
+        StopZoomForFocus();
+        SelectRuntimeDogForAgent(targetDog);
+        ApplyDogInteractionCamera(true);
+        return true;
+    }
+
+    public void ExitDogInteractionMode()
+    {
+        if (!dogInteractionModeActive)
+        {
+            return;
+        }
+
+        dogInteractionModeActive = false;
+        dogInteractionModeDog = null;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        transform.position = dogInteractionSavedPosition;
+        transform.rotation = dogInteractionSavedRotation;
+        if (attachedCamera != null && dogInteractionSavedFieldOfView > 0f)
+        {
+            attachedCamera.fieldOfView = dogInteractionSavedFieldOfView;
+        }
+
+        hasFocusPoint = false;
+        SyncToRuntimeActiveDog(false);
+    }
+
+    public void FocusDogInteractionModeOnActiveDog()
+    {
+        if (!dogInteractionModeActive)
+        {
+            return;
+        }
+
+        DogRoomAgent targetDog = ResolveRuntimeActiveDog();
+        if (targetDog != null)
+        {
+            dogInteractionModeDog = targetDog;
+            SelectRuntimeDogForAgent(targetDog);
+        }
+
+        ApplyDogInteractionCamera(false);
+    }
+
     public void FocusPhotoModeOnActiveDog()
     {
         if (!photoModeActive)
@@ -369,6 +499,8 @@ public class DogCycleCamera : MonoBehaviour
         photoMouseDragActive = false;
         photoTouchFingerId = -1;
         photoLastPinchDistance = 0f;
+        dogInteractionModeActive = false;
+        dogInteractionModeDog = null;
 
         if (attachedCamera != null && baseFieldOfView > 0f)
         {
@@ -388,6 +520,12 @@ public class DogCycleCamera : MonoBehaviour
         if (photoModeActive)
         {
             UpdatePhotoModeCamera();
+            return;
+        }
+
+        if (dogInteractionModeActive)
+        {
+            UpdateDogInteractionModeCamera();
             return;
         }
 
@@ -764,6 +902,21 @@ public class DogCycleCamera : MonoBehaviour
         ApplyPhotoCamera(false);
     }
 
+    private void UpdateDogInteractionModeCamera()
+    {
+        if (dogInteractionModeDog == null)
+        {
+            dogInteractionModeDog = ResolveRuntimeActiveDog();
+        }
+
+        if (dogInteractionModeDog == null)
+        {
+            return;
+        }
+
+        ApplyDogInteractionCamera(false);
+    }
+
     private void HandlePhotoMouseInput()
     {
         if (PawPalPlayerToyThrowController.IsPointerInteractionActive)
@@ -950,6 +1103,45 @@ public class DogCycleCamera : MonoBehaviour
             : Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 14f);
     }
 
+    private void ApplyDogInteractionCamera(bool immediate)
+    {
+        if (dogInteractionModeDog == null)
+        {
+            return;
+        }
+
+        Vector3 desiredPosition = dogInteractionSavedPosition + interactionCameraPositionOffset;
+        if (keepInitialPosition)
+        {
+            transform.position = immediate
+                ? desiredPosition
+                : Vector3.Lerp(transform.position, desiredPosition, Time.deltaTime * 12f);
+        }
+
+        if (attachedCamera != null)
+        {
+            float targetFieldOfView = interactionFieldOfView > 0f
+                ? interactionFieldOfView
+                : Mathf.Clamp(baseFieldOfView > 0f ? Mathf.Min(baseFieldOfView, 36f) : 36f, 24f, 60f);
+            attachedCamera.fieldOfView = Mathf.Lerp(
+                attachedCamera.fieldOfView,
+                targetFieldOfView,
+                immediate ? 1f : Time.deltaTime * 10f);
+        }
+
+        Vector3 focusPoint = GetDogInteractionFocusPoint(dogInteractionModeDog);
+        Vector3 toFocus = focusPoint - transform.position;
+        if (toFocus.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(toFocus.normalized, Vector3.up);
+        transform.rotation = immediate
+            ? targetRotation
+            : Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 14f);
+    }
+
     private Vector3 GetPhotoFocusPoint(DogRoomAgent dog)
     {
         if (dog == null)
@@ -959,6 +1151,17 @@ public class DogCycleCamera : MonoBehaviour
 
         Transform headTarget = ResolveDogHeadTarget(dog);
         return headTarget != null ? headTarget.position + photoHeadFocusOffset : dog.transform.position + focusOffset;
+    }
+
+    private Vector3 GetDogInteractionFocusPoint(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return transform.position + transform.forward;
+        }
+
+        Transform headTarget = ResolveDogHeadTarget(dog);
+        return headTarget != null ? headTarget.position + interactionHeadFocusOffset : dog.transform.position + focusOffset + interactionHeadFocusOffset;
     }
 
     private Vector3 ConstrainPhotoPosition(DogRoomAgent dog, Vector3 position)

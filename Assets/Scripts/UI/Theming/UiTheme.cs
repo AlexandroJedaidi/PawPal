@@ -21,6 +21,8 @@ public static class UiTheme
     public const float ReferenceContentHeight = ReferenceHeight - ReferenceNavHeight;
     public const float MinimumHudVisualScale = 0.9f;
     public const float MaximumHudVisualScale = 1f;
+    private const int RuntimeShapeSupersample = 4;
+    private const int RuntimeLargeShapeSupersample = 2;
 
     public static readonly Color32 BackgroundCream = new Color32(251, 246, 232, 255);
     public static readonly Color32 CardWhite = new Color32(255, 255, 255, 255);
@@ -529,22 +531,29 @@ public static class UiTheme
 
     private static Sprite BuildRoundedRectSprite(string name, int width, int height, float radius, float border, bool fill)
     {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int scale = GetShapeSupersample(width, height);
+        int textureWidth = Mathf.Max(1, width * scale);
+        int textureHeight = Mathf.Max(1, height * scale);
+        float scaledRadius = ClampRadius(radius, width, height) * scale;
+        float scaledBorder = Mathf.Max(0f, border * scale);
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = name;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
+        Color32 transparent = new Color32(255, 255, 255, 0);
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                float clampedX = Mathf.Clamp(x, radius, width - radius - 1f);
-                float clampedY = Mathf.Clamp(y, radius, height - radius - 1f);
-                float distance = Vector2.Distance(new Vector2(x, y), new Vector2(clampedX, clampedY));
-                bool inside = distance <= radius;
-                bool borderPixel = border > 0f && inside && distance >= radius - border;
+                float sampleX = x + 0.5f;
+                float sampleY = y + 0.5f;
+                bool inside = IsInsideRoundedRect(sampleX, sampleY, textureWidth, textureHeight, scaledRadius);
+                bool borderPixel = scaledBorder > 0f
+                    && inside
+                    && !IsInsideRoundedRect(sampleX, sampleY, textureWidth, textureHeight, scaledRadius, scaledBorder);
 
-                Color32 pixel = new Color32(255, 255, 255, 0);
+                Color32 pixel = transparent;
                 if (fill && inside)
                 {
                     pixel = White;
@@ -559,26 +568,29 @@ public static class UiTheme
         }
 
         texture.Apply();
-        Vector4 borderVector = new Vector4(radius, radius, radius, radius);
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, borderVector);
+        Vector4 borderVector = new Vector4(scaledRadius, scaledRadius, scaledRadius, scaledRadius);
+        return Sprite.Create(texture, new Rect(0f, 0f, textureWidth, textureHeight), new Vector2(0.5f, 0.5f), 100f * scale, 0u, SpriteMeshType.FullRect, borderVector);
     }
 
     private static Sprite BuildCircleSprite(string name, int size, float border, bool fill)
     {
-        Texture2D texture = new Texture2D(size, size, TextureFormat.ARGB32, false);
+        int scale = GetShapeSupersample(size, size);
+        int textureSize = Mathf.Max(1, size * scale);
+        float scaledBorder = Mathf.Max(0f, border * scale);
+        Texture2D texture = new Texture2D(textureSize, textureSize, TextureFormat.ARGB32, false);
         texture.name = name;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
 
-        Vector2 center = new Vector2((size - 1f) * 0.5f, (size - 1f) * 0.5f);
-        float radius = (size - 2f) * 0.5f;
-        for (int y = 0; y < size; y++)
+        Vector2 center = new Vector2(textureSize * 0.5f, textureSize * 0.5f);
+        float radius = Mathf.Max(0f, (textureSize - scale) * 0.5f);
+        for (int y = 0; y < textureSize; y++)
         {
-            for (int x = 0; x < size; x++)
+            for (int x = 0; x < textureSize; x++)
             {
-                float distance = Vector2.Distance(new Vector2(x, y), center);
+                float distance = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), center);
                 bool inside = distance <= radius;
-                bool borderPixel = border > 0f && inside && distance >= radius - border;
+                bool borderPixel = scaledBorder > 0f && inside && distance >= radius - scaledBorder;
                 Color32 pixel = new Color32(255, 255, 255, 0);
                 if (fill && inside)
                 {
@@ -594,72 +606,57 @@ public static class UiTheme
         }
 
         texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), 100f);
+        return Sprite.Create(texture, new Rect(0f, 0f, textureSize, textureSize), new Vector2(0.5f, 0.5f), 100f * scale);
     }
 
     private static Sprite BuildBottomRoundedSprite(string name, int width, int height, float bottomRadius)
     {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int scale = GetShapeSupersample(width, height);
+        int textureWidth = Mathf.Max(1, width * scale);
+        int textureHeight = Mathf.Max(1, height * scale);
+        float scaledRadius = ClampRadius(bottomRadius, width, height) * scale;
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = name;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                bool inside = true;
-
-                if (x < bottomRadius && y < bottomRadius)
-                {
-                    Vector2 center = new Vector2(bottomRadius - 1f, bottomRadius - 1f);
-                    inside = Vector2.Distance(new Vector2(x, y), center) <= bottomRadius;
-                }
-                else if (x >= width - bottomRadius && y < bottomRadius)
-                {
-                    Vector2 center = new Vector2(width - bottomRadius, bottomRadius - 1f);
-                    inside = Vector2.Distance(new Vector2(x, y), center) <= bottomRadius;
-                }
-
+                bool inside = IsInsideBottomRoundedRect(x + 0.5f, y + 0.5f, textureWidth, textureHeight, scaledRadius);
                 texture.SetPixel(x, y, inside ? White : new Color32(255, 255, 255, 0));
             }
         }
 
         texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f);
+        Vector4 borderVector = new Vector4(scaledRadius, scaledRadius, scaledRadius, 0f);
+        return Sprite.Create(texture, new Rect(0f, 0f, textureWidth, textureHeight), new Vector2(0.5f, 0.5f), 100f * scale, 0u, SpriteMeshType.FullRect, borderVector);
     }
 
     private static Sprite BuildTopRoundedSprite(string name, int width, int height, float topRadius)
     {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        int scale = GetShapeSupersample(width, height);
+        int textureWidth = Mathf.Max(1, width * scale);
+        int textureHeight = Mathf.Max(1, height * scale);
+        float scaledRadius = ClampRadius(topRadius, width, height) * scale;
+        Texture2D texture = new Texture2D(textureWidth, textureHeight, TextureFormat.ARGB32, false);
         texture.name = name;
         texture.filterMode = FilterMode.Bilinear;
         texture.wrapMode = TextureWrapMode.Clamp;
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < textureHeight; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < textureWidth; x++)
             {
-                bool inside = true;
-                int topY = height - 1 - y;
-
-                if (x < topRadius && topY < topRadius)
-                {
-                    Vector2 center = new Vector2(topRadius - 1f, topRadius - 1f);
-                    inside = Vector2.Distance(new Vector2(x, topY), center) <= topRadius;
-                }
-                else if (x >= width - topRadius && topY < topRadius)
-                {
-                    Vector2 center = new Vector2(width - topRadius, topRadius - 1f);
-                    inside = Vector2.Distance(new Vector2(x, topY), center) <= topRadius;
-                }
-
+                bool inside = IsInsideTopRoundedRect(x + 0.5f, y + 0.5f, textureWidth, textureHeight, scaledRadius);
                 texture.SetPixel(x, y, inside ? White : new Color32(255, 255, 255, 0));
             }
         }
 
         texture.Apply();
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f);
+        Vector4 borderVector = new Vector4(scaledRadius, 0f, scaledRadius, scaledRadius);
+        return Sprite.Create(texture, new Rect(0f, 0f, textureWidth, textureHeight), new Vector2(0.5f, 0.5f), 100f * scale, 0u, SpriteMeshType.FullRect, borderVector);
     }
 
     private static Sprite BuildVerticalGradientSprite(string name, int width, int height, float topAlpha, float bottomAlpha)
@@ -801,6 +798,109 @@ public static class UiTheme
         }
 
         return inside;
+    }
+
+    private static int GetShapeSupersample(int width, int height)
+    {
+        int maxDimension = Mathf.Max(Mathf.Abs(width), Mathf.Abs(height));
+        if (maxDimension <= 160)
+        {
+            return RuntimeShapeSupersample;
+        }
+
+        if (maxDimension <= 512)
+        {
+            return RuntimeLargeShapeSupersample;
+        }
+
+        return 1;
+    }
+
+    private static float ClampRadius(float radius, float width, float height)
+    {
+        return Mathf.Clamp(radius, 0f, Mathf.Max(0f, Mathf.Min(width, height) * 0.5f));
+    }
+
+    private static bool IsInsideRoundedRect(float x, float y, float width, float height, float radius, float inset)
+    {
+        float innerWidth = width - (inset * 2f);
+        float innerHeight = height - (inset * 2f);
+        if (innerWidth <= 0f || innerHeight <= 0f)
+        {
+            return false;
+        }
+
+        return IsInsideRoundedRect(x - inset, y - inset, innerWidth, innerHeight, Mathf.Max(0f, radius - inset));
+    }
+
+    private static bool IsInsideRoundedRect(float x, float y, float width, float height, float radius)
+    {
+        if (x < 0f || x > width || y < 0f || y > height)
+        {
+            return false;
+        }
+
+        radius = ClampRadius(radius, width, height);
+        if (radius <= 0f)
+        {
+            return true;
+        }
+
+        float clampedX = Mathf.Clamp(x, radius, width - radius);
+        float clampedY = Mathf.Clamp(y, radius, height - radius);
+        return Vector2.Distance(new Vector2(x, y), new Vector2(clampedX, clampedY)) <= radius;
+    }
+
+    private static bool IsInsideTopRoundedRect(float x, float y, float width, float height, float radius)
+    {
+        if (x < 0f || x > width || y < 0f || y > height)
+        {
+            return false;
+        }
+
+        radius = ClampRadius(radius, width, height);
+        if (radius <= 0f || y <= height - radius)
+        {
+            return true;
+        }
+
+        if (x < radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(radius, height - radius)) <= radius;
+        }
+
+        if (x > width - radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(width - radius, height - radius)) <= radius;
+        }
+
+        return true;
+    }
+
+    private static bool IsInsideBottomRoundedRect(float x, float y, float width, float height, float radius)
+    {
+        if (x < 0f || x > width || y < 0f || y > height)
+        {
+            return false;
+        }
+
+        radius = ClampRadius(radius, width, height);
+        if (radius <= 0f || y >= radius)
+        {
+            return true;
+        }
+
+        if (x < radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(radius, radius)) <= radius;
+        }
+
+        if (x > width - radius)
+        {
+            return Vector2.Distance(new Vector2(x, y), new Vector2(width - radius, radius)) <= radius;
+        }
+
+        return true;
     }
 
     private static Sprite BuildSprite(string name, int width, int height, System.Func<Color32> pixelFactory)

@@ -19,6 +19,7 @@ public class InventoryPanelView : MonoBehaviour
     private const float InventoryCardSize = 98f;
     private const float InventoryCardTitleHeight = 15f;
     private const float InventoryCardRowHeight = 110f;
+    private const string EquippedCheckmarkResource = "UI/Figma/HomeInventory/icon_checkmark_white";
     private const int RuntimeShapeSupersample = 4;
 
     private static readonly Dictionary<string, Sprite> RuntimeSpriteCache = new Dictionary<string, Sprite>();
@@ -49,8 +50,6 @@ public class InventoryPanelView : MonoBehaviour
         background.type = Image.Type.Simple;
         background.preserveAspect = false;
         background.color = UiTheme.NavBackgroundCream;
-
-        CreatePanelBorder(root);
 
         RectTransform viewport = UiFactory.CreateRect("Viewport", transform);
         UiFactory.Stretch(viewport, 0f, 0f, 0f, 0f);
@@ -275,7 +274,7 @@ public class InventoryPanelView : MonoBehaviour
         }
         else if (equipped)
         {
-            BuildStatusBadge(group, "E");
+            BuildEquippedBadge(group);
         }
         else if (activeToy)
         {
@@ -372,9 +371,32 @@ public class InventoryPanelView : MonoBehaviour
         UiFactory.Stretch(border.rectTransform, 0f, 0f, 0f, 0f);
     }
 
+    private void BuildEquippedBadge(RectTransform group)
+    {
+        RectTransform badgeRoot = BuildStatusBadgeCircle(group, "EquippedStatusCircle");
+        Image checkmark = UiFactory.CreateImage("Checkmark", badgeRoot, spriteLibrary.GetResourceSprite(EquippedCheckmarkResource), UiTheme.White);
+        checkmark.type = Image.Type.Simple;
+        checkmark.preserveAspect = true;
+        checkmark.raycastTarget = false;
+        checkmark.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        checkmark.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        checkmark.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        checkmark.rectTransform.sizeDelta = new Vector2(13f, 13f);
+        checkmark.rectTransform.anchoredPosition = Vector2.zero;
+    }
+
     private void BuildStatusBadge(RectTransform group, string text)
     {
-        Image usedCircle = UiFactory.CreateImage("StatusCircle", group, UiTheme.CircleSprite, new Color32(50, 187, 255, 255));
+        RectTransform badgeRoot = BuildStatusBadgeCircle(group, "StatusCircle");
+
+        TextMeshProUGUI usedText = UiFactory.CreateLabel("StatusText", badgeRoot, text, 12, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+        usedText.font = UiTheme.NavExtraBoldFont;
+        UiFactory.Stretch(usedText.rectTransform, 0f, 0f, 0f, 0f);
+    }
+
+    private static RectTransform BuildStatusBadgeCircle(RectTransform group, string name)
+    {
+        Image usedCircle = UiFactory.CreateImage(name, group, UiTheme.CircleSprite, CtaBlue);
         usedCircle.type = Image.Type.Simple;
         usedCircle.preserveAspect = false;
         usedCircle.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -382,14 +404,7 @@ public class InventoryPanelView : MonoBehaviour
         usedCircle.rectTransform.pivot = new Vector2(0f, 1f);
         usedCircle.rectTransform.sizeDelta = new Vector2(19f, 19f);
         usedCircle.rectTransform.anchoredPosition = new Vector2(InventoryCardSize - 24f, -(InventoryCardSize - 24f));
-
-        TextMeshProUGUI usedText = UiFactory.CreateLabel("StatusText", group, text, 12, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
-        usedText.font = UiTheme.NavExtraBoldFont;
-        usedText.rectTransform.anchorMin = new Vector2(0f, 1f);
-        usedText.rectTransform.anchorMax = new Vector2(0f, 1f);
-        usedText.rectTransform.pivot = new Vector2(0f, 1f);
-        usedText.rectTransform.sizeDelta = new Vector2(19f, 19f);
-        usedText.rectTransform.anchoredPosition = new Vector2(InventoryCardSize - 24f, -(InventoryCardSize - 24f));
+        return usedCircle.rectTransform;
     }
 
     private void BuildQuantityBadge(RectTransform group, int quantity)
@@ -410,26 +425,6 @@ public class InventoryPanelView : MonoBehaviour
         quantityText.rectTransform.pivot = new Vector2(0f, 1f);
         quantityText.rectTransform.sizeDelta = new Vector2(25f, 25f);
         quantityText.rectTransform.anchoredPosition = new Vector2(InventoryCardSize - 31f, -(InventoryCardSize - 33f));
-    }
-
-    private static void CreatePanelBorder(RectTransform root)
-    {
-        CreateBorder(root, "TopBorder", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, 1f));
-        CreateBorder(root, "BottomBorder", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 1f));
-        CreateBorder(root, "LeftBorder", new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(1f, 0f));
-        CreateBorder(root, "RightBorder", new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), new Vector2(1f, 0f));
-    }
-
-    private static void CreateBorder(RectTransform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 sizeDelta)
-    {
-        Image border = UiFactory.CreateImage(name, parent, UiTheme.WhiteSprite, UiTheme.NavBrand);
-        border.type = Image.Type.Simple;
-        border.preserveAspect = false;
-        border.rectTransform.anchorMin = anchorMin;
-        border.rectTransform.anchorMax = anchorMax;
-        border.rectTransform.pivot = pivot;
-        border.rectTransform.sizeDelta = sizeDelta;
-        border.rectTransform.anchoredPosition = Vector2.zero;
     }
 
     private static void SetTopLeft(RectTransform rect, float x, float y, float width, float height)

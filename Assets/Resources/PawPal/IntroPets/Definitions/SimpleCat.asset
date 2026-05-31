@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: SimpleCat
+  m_EditorClassIdentifier: 
+  PetId: cat_simple
+  DisplayName: Simple Cat
+  Species: 1
+  BreedName: Simple Cat
+  Description: Light on its feet and quietly curious, this cat likes to inspect the field before settling near the camera.
+  BasePrefab: {fileID: 100100000, guid: 68a8902e5df2eb1488bf65397d907181, type: 3}
+  IntroScale: {x: 1, y: 1, z: 1}
+  HomeScale: {x: 1, y: 1, z: 1}
+  IntroCameraOffset: {x: 0, y: 0.9, z: -2.35}
+  HomeCameraOffset: {x: 0, y: 0.8, z: -2.45}
+  RoamRadius: 3.1
+  AnimationSet: {fileID: 11400000, guid: 6cab22fe24c84c44827b8b858fae523c, type: 2}
+  FurVariants:
+  - {fileID: 11400000, guid: e69394a735f04b66b0f80e25cfe8377f, type: 2}
+  - {fileID: 11400000, guid: c517372547ad46b980693f388c865028, type: 2}
+  - {fileID: 11400000, guid: 1ee549c828784397a2880d1c4772ee8f, type: 2}

@@ -13,36 +13,65 @@ public class DogDetailsWidgetView : MonoBehaviour
     private static readonly Color32 NeedBluePaleLight = new Color32(220, 241, 251, 255);
     private static readonly Color32 HandleWhite = new Color32(248, 248, 248, 255);
     private static readonly Color32 SupportCream = new Color32(236, 223, 200, 255);
-    private static readonly Color32 EnergyLabelBlack = new Color32(0, 0, 0, 255);
+    private static readonly Color32 TrickLockedFill = new Color32(244, 238, 226, 255);
+    private static readonly Color32 TrickLockedText = new Color32(164, 137, 121, 255);
+    private static readonly Color32 TrickRequirementFill = new Color32(255, 252, 241, 255);
 
     private const float BaseWidth = 246f;
     private const float CollapsedHeight = 117f;
     private const float ExpandedHeight = 251f;
+    private const float PagerPageWidth = 207f;
+    private const int PagerPageCount = 3;
+    private const float PagerHeight = 124f;
+    private const float PagerHeaderHeight = 19f;
+    private const float StatLevelMax = 5f;
+    private const float BondLevelMax = 10f;
     private static readonly Vector2 SelectorArrowSize = new Vector2(16f, 24f);
-
+    private static readonly Vector2 PagerArrowHitSize = new Vector2(28f, 40f);
+    private static readonly Vector2 StatRingSize = new Vector2(31.8f, 31.8f);
     private LayoutElement layout;
     private RectTransform frame;
     private Image background;
-    private RectTransform statsHeader;
+    private UiSpriteLibrary spriteLibrary;
+    private RectTransform statsPager;
+    private RectTransform statsPagerContent;
     private RectTransform statsFrame;
+    private Button pagerPreviousButton;
+    private Button pagerNextButton;
+    private Image pagerPreviousIcon;
+    private Image pagerNextIcon;
     private TextMeshProUGUI dogNameLabel;
-    private TextMeshProUGUI walkStaminaValueLabel;
     private Image walkStaminaFill;
     private TextMeshProUGUI enduranceValueLabel;
+    private Image enduranceRingFill;
     private TextMeshProUGUI mobilityValueLabel;
+    private Image mobilityRingFill;
     private TextMeshProUGUI speedValueLabel;
+    private Image speedRingFill;
     private TextMeshProUGUI focusValueLabel;
+    private Image focusRingFill;
+    private TextMeshProUGUI bondValueLabel;
+    private Image bondRingFill;
+    private Image genderProfileIcon;
+    private TextMeshProUGUI genderValueLabel;
+    private TextMeshProUGUI personalityValueLabel;
+    private TextMeshProUGUI furValueLabel;
+    private TextMeshProUGUI breedValueLabel;
     private readonly Dictionary<PawPalDogNeed, Image> needCircles = new Dictionary<PawPalDogNeed, Image>();
     private readonly Dictionary<PawPalDogNeed, Image> needFills = new Dictionary<PawPalDogNeed, Image>();
     private readonly Dictionary<PawPalDogNeed, Image> needIcons = new Dictionary<PawPalDogNeed, Image>();
+    private readonly List<TrickTileView> trickTiles = new List<TrickTileView>();
     private Action toggleRequested;
     private Action previousDogRequested;
     private Action nextDogRequested;
     private Action<PawPalDogNeed> needRequested;
+    private Action<PawPalTrickId> trickRequested;
     private bool expanded;
+    private int statsPagerPageIndex;
 
     public void Initialize(UiSpriteLibrary sprites, Action onToggleRequested)
     {
+        spriteLibrary = sprites;
         toggleRequested = onToggleRequested;
         layout = UiFactory.EnsureLayoutElement(gameObject, -1f, CollapsedHeight, 1f, 0f);
         layout.minHeight = CollapsedHeight;
@@ -71,8 +100,7 @@ public class DogDetailsWidgetView : MonoBehaviour
         BuildBreedRow(frame, sprites);
         BuildNeedsHeader(frame);
         BuildNeedsRow(frame, sprites);
-        BuildStatsHeader(frame);
-        BuildStatsFrame(frame, sprites);
+        BuildStatsPager(frame, sprites);
         SetExpanded(false);
     }
 
@@ -234,53 +262,357 @@ public class DogDetailsWidgetView : MonoBehaviour
         CreateNeed(row, sprites, PawPalDogNeed.Activity, "Activity", "icon_activity_brand", NeedBlue, new Vector2(90f, -0.028f), new Vector2(26.952f, 26.952f), 2.184f);
     }
 
-    private void BuildStatsHeader(RectTransform parent)
+    private void BuildStatsPager(RectTransform parent, UiSpriteLibrary sprites)
     {
-        statsHeader = UiFactory.CreateRect("StatsHeader", parent);
-        statsHeader.anchorMin = new Vector2(0f, 1f);
-        statsHeader.anchorMax = new Vector2(0f, 1f);
-        statsHeader.pivot = new Vector2(0f, 1f);
-        statsHeader.sizeDelta = new Vector2(220f, 19f);
-        statsHeader.anchoredPosition = new Vector2(13f, -117f);
+        statsPager = UiFactory.CreateRect("StatsTricksPager", parent);
+        statsPager.anchorMin = new Vector2(0f, 1f);
+        statsPager.anchorMax = new Vector2(0f, 1f);
+        statsPager.pivot = new Vector2(0f, 1f);
+        statsPager.sizeDelta = new Vector2(PagerPageWidth, PagerHeight);
+        statsPager.anchoredPosition = new Vector2(20f, -117f);
 
-        Image line = UiFactory.CreateImage("Line", statsHeader, UiTheme.WhiteSprite, UiTheme.NavBrand);
+        RectTransform viewport = UiFactory.CreateRect("Viewport", statsPager);
+        UiFactory.Stretch(viewport, 0f, 0f, 0f, 0f);
+        Image viewportImage = viewport.gameObject.AddComponent<Image>();
+        viewportImage.color = new Color(1f, 1f, 1f, 0.002f);
+        viewportImage.raycastTarget = true;
+        viewport.gameObject.AddComponent<RectMask2D>();
+
+        RectTransform content = UiFactory.CreateRect("Content", viewport);
+        content.anchorMin = new Vector2(0f, 1f);
+        content.anchorMax = new Vector2(0f, 1f);
+        content.pivot = new Vector2(0f, 1f);
+        content.sizeDelta = new Vector2(PagerPageWidth * PagerPageCount, PagerHeight);
+        content.anchoredPosition = Vector2.zero;
+        statsPagerContent = content;
+
+        ScrollRect scrollRect = statsPager.gameObject.AddComponent<ScrollRect>();
+        scrollRect.viewport = viewport;
+        scrollRect.content = content;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = false;
+        scrollRect.movementType = ScrollRect.MovementType.Clamped;
+        scrollRect.inertia = false;
+        scrollRect.scrollSensitivity = 0f;
+
+        RectTransform statsPage = CreatePagerPage(content, "StatsPage", 0f);
+        BuildPagerHeader(statsPage, "Stats");
+        BuildStatsFrame(statsPage, sprites);
+
+        RectTransform tricksPage = CreatePagerPage(content, "TricksPage", PagerPageWidth);
+        BuildPagerHeader(tricksPage, "Tricks");
+        BuildTrickTiles(tricksPage, sprites);
+
+        RectTransform profilePage = CreatePagerPage(content, "ProfilePage", PagerPageWidth * 2f);
+        BuildPagerHeader(profilePage, "Profile");
+        BuildProfileTiles(profilePage, sprites);
+
+        BuildPagerArrowButtons(statsPager, sprites);
+        SetStatsPagerPage(0);
+    }
+
+    private void BuildPagerArrowButtons(RectTransform parent, UiSpriteLibrary sprites)
+    {
+        pagerPreviousButton = CreatePagerArrow(parent, sprites, "PagerPrevious", "UI/Figma/HomeMain/button_back", new Vector2(-10f, -62f), -1, out pagerPreviousIcon);
+        pagerNextButton = CreatePagerArrow(parent, sprites, "PagerNext", "UI/Figma/HomeMain/button_forward", new Vector2(PagerPageWidth + 10f, -62f), 1, out pagerNextIcon);
+    }
+
+    private Button CreatePagerArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, int pageDelta, out Image arrowIcon)
+    {
+        Image hitArea = UiFactory.CreateImage(name + "HitArea", parent, UiTheme.WhiteSprite, new Color(1f, 1f, 1f, 0.002f));
+        hitArea.type = Image.Type.Simple;
+        hitArea.preserveAspect = false;
+        hitArea.rectTransform.anchorMin = new Vector2(0f, 1f);
+        hitArea.rectTransform.anchorMax = new Vector2(0f, 1f);
+        hitArea.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        hitArea.rectTransform.sizeDelta = PagerArrowHitSize;
+        hitArea.rectTransform.anchoredPosition = anchoredPosition;
+
+        arrowIcon = UiFactory.CreateImage(name, hitArea.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
+        arrowIcon.type = Image.Type.Simple;
+        arrowIcon.preserveAspect = true;
+        arrowIcon.raycastTarget = false;
+        arrowIcon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        arrowIcon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        arrowIcon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        arrowIcon.rectTransform.sizeDelta = SelectorArrowSize;
+        arrowIcon.rectTransform.anchoredPosition = Vector2.zero;
+
+        return UiFactory.AddButton(hitArea.gameObject, delegate
+        {
+            SetStatsPagerPage(statsPagerPageIndex + pageDelta);
+        });
+    }
+
+    private void SetStatsPagerPage(int pageIndex)
+    {
+        statsPagerPageIndex = Mathf.Clamp(pageIndex, 0, PagerPageCount - 1);
+        if (statsPagerContent != null)
+        {
+            statsPagerContent.anchoredPosition = new Vector2(-PagerPageWidth * statsPagerPageIndex, 0f);
+        }
+
+        RefreshPagerArrows();
+    }
+
+    private void RefreshPagerArrows()
+    {
+        bool canGoPrevious = statsPagerPageIndex > 0;
+        bool canGoNext = statsPagerPageIndex < PagerPageCount - 1;
+        RefreshPagerArrow(pagerPreviousButton, pagerPreviousIcon, canGoPrevious);
+        RefreshPagerArrow(pagerNextButton, pagerNextIcon, canGoNext);
+    }
+
+    private static void RefreshPagerArrow(Button button, Image icon, bool enabled)
+    {
+        if (button != null)
+        {
+            button.interactable = enabled;
+        }
+
+        if (icon != null)
+        {
+            Color color = Color.white;
+            color.a = enabled ? 1f : 0.28f;
+            icon.color = color;
+        }
+    }
+
+    private RectTransform CreatePagerPage(RectTransform parent, string name, float x)
+    {
+        RectTransform page = UiFactory.CreateRect(name, parent);
+        page.anchorMin = new Vector2(0f, 1f);
+        page.anchorMax = new Vector2(0f, 1f);
+        page.pivot = new Vector2(0f, 1f);
+        page.sizeDelta = new Vector2(PagerPageWidth, PagerHeight);
+        page.anchoredPosition = new Vector2(x, 0f);
+        return page;
+    }
+
+    private void BuildPagerHeader(RectTransform parent, string title)
+    {
+        RectTransform header = UiFactory.CreateRect(title + "Header", parent);
+        header.anchorMin = new Vector2(0f, 1f);
+        header.anchorMax = new Vector2(0f, 1f);
+        header.pivot = new Vector2(0f, 1f);
+        header.sizeDelta = new Vector2(PagerPageWidth, PagerHeaderHeight);
+        header.anchoredPosition = Vector2.zero;
+
+        Image line = UiFactory.CreateImage("Line", header, UiTheme.WhiteSprite, UiTheme.NavBrand);
         line.type = Image.Type.Simple;
         line.preserveAspect = false;
         line.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         line.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         line.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        line.rectTransform.sizeDelta = new Vector2(220f, 1f);
+        line.rectTransform.sizeDelta = new Vector2(PagerPageWidth, 1f);
         line.rectTransform.anchoredPosition = new Vector2(0f, -0.5f);
 
-        Image labelMask = UiFactory.CreateImage("LabelMask", statsHeader, UiTheme.WhiteSprite, UiTheme.NavBackgroundCream);
+        Image labelMask = UiFactory.CreateImage("LabelMask", header, UiTheme.WhiteSprite, UiTheme.NavBackgroundCream);
         labelMask.type = Image.Type.Simple;
         labelMask.preserveAspect = false;
         labelMask.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         labelMask.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         labelMask.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        labelMask.rectTransform.sizeDelta = new Vector2(79f, 19f);
-        labelMask.rectTransform.anchoredPosition = new Vector2(-0.5f, 0f);
+        labelMask.rectTransform.sizeDelta = new Vector2(76f, 19f);
+        labelMask.rectTransform.anchoredPosition = Vector2.zero;
 
-        TextMeshProUGUI label = UiFactory.CreateLabel("StatsLabel", statsHeader, "Stats", 13, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Center);
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", header, title, 13, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Center);
         ConfigureCompactLabel(label, UiTheme.DefaultFont, 12f);
         label.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         label.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         label.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        label.rectTransform.sizeDelta = new Vector2(82f, 22f);
-        label.rectTransform.anchoredPosition = new Vector2(0f, 0f);
+        label.rectTransform.sizeDelta = new Vector2(80f, 22f);
+        label.rectTransform.anchoredPosition = Vector2.zero;
     }
 
     private void BuildStatsFrame(RectTransform parent, UiSpriteLibrary sprites)
     {
         statsFrame = UiFactory.CreateRect("StatsFrame", parent);
-        statsFrame.anchorMin = new Vector2(0f, 1f);
-        statsFrame.anchorMax = new Vector2(0f, 1f);
-        statsFrame.pivot = new Vector2(0f, 1f);
-        statsFrame.sizeDelta = new Vector2(207f, 105.6f);
-        statsFrame.anchoredPosition = new Vector2(19.5f, -139f);
+        statsFrame.anchorMin = new Vector2(0.5f, 1f);
+        statsFrame.anchorMax = new Vector2(0.5f, 1f);
+        statsFrame.pivot = new Vector2(0.5f, 1f);
+        statsFrame.sizeDelta = new Vector2(180f, 105.6f);
+        statsFrame.anchoredPosition = new Vector2(0f, -22f);
 
         BuildWalkStaminaStat(statsFrame, sprites);
-        BuildMainStats(statsFrame, sprites);
+        BuildBondStat(statsFrame);
+        BuildMainStats(statsFrame);
+    }
+
+    private void BuildTrickTiles(RectTransform parent, UiSpriteLibrary sprites)
+    {
+        trickTiles.Clear();
+
+        IReadOnlyList<PawPalTrickDefinition> definitions = PawPalTrickCatalog.CoreDefinitions;
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            PawPalTrickDefinition definition = definitions[i];
+            int row = i / 3;
+            int column = i % 3;
+            float x = column * 71f;
+            if (row > 0)
+            {
+                x = 35f + (i - 3) * 71f;
+            }
+
+            Vector2 position = new Vector2(x, -(24f + row * 48f));
+            trickTiles.Add(BuildTrickTile(parent, sprites, definition, position));
+        }
+    }
+
+    private void BuildProfileTiles(RectTransform parent, UiSpriteLibrary sprites)
+    {
+        Image unusedIcon;
+        genderValueLabel = BuildProfileTile(parent, sprites, "Gender", "icon_male_other", new Vector2(0f, -24f), out genderProfileIcon);
+        personalityValueLabel = BuildProfileTile(parent, sprites, "Personality", "icon_star_brand", new Vector2(109f, -24f), out unusedIcon);
+        furValueLabel = BuildProfileTile(parent, sprites, "Fur", "icon_pawprint_other", new Vector2(0f, -72f), out unusedIcon);
+        breedValueLabel = BuildProfileTile(parent, sprites, "Breed", "icon_dog_brand", new Vector2(109f, -72f), out unusedIcon);
+    }
+
+    private TextMeshProUGUI BuildProfileTile(RectTransform parent, UiSpriteLibrary sprites, string labelText, string iconName, Vector2 anchoredPosition, out Image icon)
+    {
+        RectTransform root = UiFactory.CreateRect(labelText.Replace(" ", string.Empty) + "Profile", parent);
+        root.anchorMin = new Vector2(0f, 1f);
+        root.anchorMax = new Vector2(0f, 1f);
+        root.pivot = new Vector2(0f, 1f);
+        root.sizeDelta = new Vector2(98f, 42f);
+        root.anchoredPosition = anchoredPosition;
+
+        Image background = UiFactory.CreateImage("Background", root, UiTheme.RoundedTenSprite, UiTheme.CardWhite);
+        background.type = Image.Type.Sliced;
+        background.preserveAspect = false;
+        background.raycastTarget = false;
+        UiFactory.Stretch(background.rectTransform, 0f, 0f, 0f, 0f);
+
+        Image border = UiFactory.CreateImage("Border", root, UiTheme.RoundedTenOutlineSprite, SupportCream);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        UiFactory.Stretch(border.rectTransform, 0f, 0f, 0f, 0f);
+
+        Image iconCircle = UiFactory.CreateImage("IconCircle", root, UiTheme.CircleSprite, UiTheme.NavBrand);
+        iconCircle.type = Image.Type.Simple;
+        iconCircle.preserveAspect = false;
+        iconCircle.raycastTarget = false;
+        iconCircle.rectTransform.anchorMin = new Vector2(0f, 1f);
+        iconCircle.rectTransform.anchorMax = new Vector2(0f, 1f);
+        iconCircle.rectTransform.pivot = new Vector2(0f, 1f);
+        iconCircle.rectTransform.sizeDelta = new Vector2(24f, 24f);
+        iconCircle.rectTransform.anchoredPosition = new Vector2(7f, -9f);
+
+        icon = UiFactory.CreateImage("Icon", iconCircle.rectTransform, sprites.GetWhiteIcon(iconName), UiTheme.White);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = new Vector2(14f, 14f);
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", root, labelText, 9, TrickLockedText, FontStyles.Normal, TextAlignmentOptions.Left);
+        ConfigureCompactLabel(label, UiTheme.NavExtraBoldFont, 8f);
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 6f;
+        label.fontSizeMax = 8f;
+        label.rectTransform.anchorMin = new Vector2(0f, 1f);
+        label.rectTransform.anchorMax = new Vector2(0f, 1f);
+        label.rectTransform.pivot = new Vector2(0f, 1f);
+        label.rectTransform.sizeDelta = new Vector2(60f, 13f);
+        label.rectTransform.anchoredPosition = new Vector2(36f, -6f);
+
+        TextMeshProUGUI value = UiFactory.CreateLabel("Value", root, "-", 10, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        ConfigureCompactLabel(value, UiTheme.NavExtraBoldFont, 10f);
+        value.enableAutoSizing = true;
+        value.fontSizeMin = 7f;
+        value.fontSizeMax = 10f;
+        value.rectTransform.anchorMin = new Vector2(0f, 1f);
+        value.rectTransform.anchorMax = new Vector2(0f, 1f);
+        value.rectTransform.pivot = new Vector2(0f, 1f);
+        value.rectTransform.sizeDelta = new Vector2(58f, 18f);
+        value.rectTransform.anchoredPosition = new Vector2(36f, -19f);
+        return value;
+    }
+
+    private TrickTileView BuildTrickTile(RectTransform parent, UiSpriteLibrary sprites, PawPalTrickDefinition definition, Vector2 anchoredPosition)
+    {
+        RectTransform root = UiFactory.CreateRect(definition.Id + "Trick", parent);
+        root.anchorMin = new Vector2(0f, 1f);
+        root.anchorMax = new Vector2(0f, 1f);
+        root.pivot = new Vector2(0f, 1f);
+        root.sizeDelta = new Vector2(65f, 42f);
+        root.anchoredPosition = anchoredPosition;
+
+        Image background = UiFactory.CreateImage("Background", root, UiTheme.RoundedTenSprite, UiTheme.CardWhite);
+        background.type = Image.Type.Sliced;
+        background.preserveAspect = false;
+        background.raycastTarget = true;
+        UiFactory.Stretch(background.rectTransform, 0f, 0f, 0f, 0f);
+        UiFactory.AddButton(background.gameObject, delegate
+        {
+            if (trickRequested != null)
+            {
+                trickRequested(definition.Id);
+            }
+        });
+
+        Image border = UiFactory.CreateImage("Border", root, UiTheme.RoundedTenOutlineSprite, UiTheme.NavBrand);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
+        UiFactory.Stretch(border.rectTransform, 0f, 0f, 0f, 0f);
+
+        Image iconCircle = UiFactory.CreateImage("IconCircle", root, UiTheme.CircleSprite, UiTheme.NavBrand);
+        iconCircle.type = Image.Type.Simple;
+        iconCircle.preserveAspect = false;
+        iconCircle.raycastTarget = false;
+        iconCircle.rectTransform.anchorMin = new Vector2(0f, 1f);
+        iconCircle.rectTransform.anchorMax = new Vector2(0f, 1f);
+        iconCircle.rectTransform.pivot = new Vector2(0f, 1f);
+        iconCircle.rectTransform.sizeDelta = new Vector2(24f, 24f);
+        iconCircle.rectTransform.anchoredPosition = new Vector2(5f, -9f);
+
+        Image icon = UiFactory.CreateImage("Icon", iconCircle.rectTransform, sprites.GetWhiteIcon(definition.IconName), UiTheme.White);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = new Vector2(13f, 13f);
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", root, definition.DisplayName, 10, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        ConfigureCompactLabel(label, UiTheme.NavExtraBoldFont, 10f);
+        label.raycastTarget = false;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 7f;
+        label.fontSizeMax = 10f;
+        label.rectTransform.anchorMin = new Vector2(0f, 1f);
+        label.rectTransform.anchorMax = new Vector2(0f, 1f);
+        label.rectTransform.pivot = new Vector2(0f, 1f);
+        label.rectTransform.sizeDelta = new Vector2(30f, 17f);
+        label.rectTransform.anchoredPosition = new Vector2(32f, -6f);
+
+        Image requirementPill = UiFactory.CreateImage("RequirementPill", root, UiTheme.RoundedFiveSprite, TrickRequirementFill);
+        requirementPill.type = Image.Type.Sliced;
+        requirementPill.preserveAspect = false;
+        requirementPill.raycastTarget = false;
+        requirementPill.rectTransform.anchorMin = new Vector2(0f, 1f);
+        requirementPill.rectTransform.anchorMax = new Vector2(0f, 1f);
+        requirementPill.rectTransform.pivot = new Vector2(0f, 1f);
+        requirementPill.rectTransform.sizeDelta = new Vector2(28f, 15f);
+        requirementPill.rectTransform.anchoredPosition = new Vector2(32f, -23f);
+
+        TextMeshProUGUI requirement = UiFactory.CreateLabel("Requirement", requirementPill.rectTransform, "Teach", 8, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
+        ConfigureCompactLabel(requirement, UiTheme.NavExtraBoldFont, 8f);
+        requirement.raycastTarget = false;
+        requirement.enableAutoSizing = true;
+        requirement.fontSizeMin = 6f;
+        requirement.fontSizeMax = 8f;
+        UiFactory.Stretch(requirement.rectTransform, 2f, 1f, 2f, 1f);
+
+        return new TrickTileView(definition, background, border, iconCircle, icon, label, requirementPill, requirement);
     }
 
     private void BuildWalkStaminaStat(RectTransform parent, UiSpriteLibrary sprites)
@@ -289,82 +621,85 @@ public class DogDetailsWidgetView : MonoBehaviour
         group.anchorMin = new Vector2(0f, 1f);
         group.anchorMax = new Vector2(0f, 1f);
         group.pivot = new Vector2(0f, 1f);
-        group.sizeDelta = new Vector2(47f, 49.8f);
-        group.anchoredPosition = new Vector2(0f, -27.9f);
+        group.sizeDelta = new Vector2(48f, 46f);
+        group.anchoredPosition = new Vector2(0f, 0f);
 
-        Image graph = UiFactory.CreateImage("Graph", group, UiTheme.CircleSprite, SupportCream);
+        Image graph = UiFactory.CreateImage("Graph", group, UiTheme.CircleSprite, NeedBluePale);
         graph.type = Image.Type.Simple;
         graph.preserveAspect = false;
+        graph.raycastTarget = false;
         graph.rectTransform.anchorMin = new Vector2(0f, 1f);
         graph.rectTransform.anchorMax = new Vector2(0f, 1f);
         graph.rectTransform.pivot = new Vector2(0f, 1f);
-        graph.rectTransform.sizeDelta = new Vector2(31.8f, 31.8f);
-        graph.rectTransform.anchoredPosition = new Vector2(7.6f, 0f);
+        graph.rectTransform.sizeDelta = StatRingSize;
+        graph.rectTransform.anchoredPosition = new Vector2(8f, 0f);
 
-        walkStaminaFill = UiFactory.CreateImage("Fill", graph.rectTransform, UiTheme.CircleSprite, UiTheme.NavBrand);
-        walkStaminaFill.type = Image.Type.Filled;
-        walkStaminaFill.fillMethod = Image.FillMethod.Radial360;
-        walkStaminaFill.fillOrigin = (int)Image.Origin360.Top;
-        walkStaminaFill.fillClockwise = true;
-        walkStaminaFill.preserveAspect = false;
-        UiFactory.Stretch(walkStaminaFill.rectTransform, 0f, 0f, 0f, 0f);
+        walkStaminaFill = CreateStatRingFill(graph.rectTransform, "Fill");
+        CreateStatRingCenter(graph.rectTransform);
 
-        Image icon = UiFactory.CreateImage("Icon", graph.rectTransform, sprites.GetWhiteIcon("icon_paw_brand"), new Color(1f, 1f, 1f, 0.26f));
+        Image icon = UiFactory.CreateImage("Icon", graph.rectTransform, sprites.GetWhiteIcon("icon_energy_brand"), new Color(0.133f, 0.565f, 0.839f, 0.22f));
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
-        icon.rectTransform.anchorMin = new Vector2(0f, 1f);
-        icon.rectTransform.anchorMax = new Vector2(0f, 1f);
-        icon.rectTransform.pivot = new Vector2(0f, 1f);
-        icon.rectTransform.sizeDelta = new Vector2(15f, 15f);
-        icon.rectTransform.anchoredPosition = new Vector2(8.4f, -8.2f);
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = new Vector2(16f, 16f);
+        icon.rectTransform.anchoredPosition = new Vector2(0f, 0f);
 
-        walkStaminaValueLabel = UiFactory.CreateLabel("Value", graph.rectTransform, "100", 11, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
-        ConfigureCompactLabel(walkStaminaValueLabel, UiTheme.NavExtraBoldFont, 10f);
-        UiFactory.Stretch(walkStaminaValueLabel.rectTransform, 1f, 1f, 1f, 1f);
-
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", group, "Walk", 13, EnergyLabelBlack, FontStyles.Normal, TextAlignmentOptions.Center);
-        ConfigureCompactLabel(label, UiTheme.DefaultFont, 11f);
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", group, "Stamina", 13, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
+        ConfigureCompactLabel(label, UiTheme.DefaultFont, 9f);
         label.rectTransform.anchorMin = new Vector2(0f, 1f);
         label.rectTransform.anchorMax = new Vector2(0f, 1f);
         label.rectTransform.pivot = new Vector2(0f, 1f);
-        label.rectTransform.sizeDelta = new Vector2(47f, 20f);
-        label.rectTransform.anchoredPosition = new Vector2(0f, -31.8f);
+        label.rectTransform.sizeDelta = new Vector2(48f, 16f);
+        label.rectTransform.anchoredPosition = new Vector2(0f, -29f);
     }
 
-    private void BuildMainStats(RectTransform parent, UiSpriteLibrary sprites)
+    private void BuildBondStat(RectTransform parent)
+    {
+        bondValueLabel = BuildLevelStat(parent, "Bond", "1", new Vector2(0f, -55.8f), BondLevelMax, out bondRingFill);
+    }
+
+    private void BuildMainStats(RectTransform parent)
     {
         RectTransform main = UiFactory.CreateRect("MainStats", parent);
         main.anchorMin = new Vector2(0f, 1f);
         main.anchorMax = new Vector2(0f, 1f);
         main.pivot = new Vector2(0f, 1f);
-        main.sizeDelta = new Vector2(152f, 105.6f);
-        main.anchoredPosition = new Vector2(55f, 0f);
+        main.sizeDelta = new Vector2(180f, 105.6f);
+        main.anchoredPosition = Vector2.zero;
 
-        enduranceValueLabel = BuildLevelStat(main, sprites, "Endurance", "2", "UI/Figma/HomeStats/graph_endurance", new Vector2(0f, 0f));
-        mobilityValueLabel = BuildLevelStat(main, sprites, "Mobility", "4", "UI/Figma/HomeStats/graph_mobility", new Vector2(86f, 0f));
-        speedValueLabel = BuildLevelStat(main, sprites, "Speed", "3", "UI/Figma/HomeStats/graph_speed", new Vector2(0f, -55.8f));
-        focusValueLabel = BuildLevelStat(main, sprites, "Focus", "5", "UI/Figma/HomeStats/graph_focus", new Vector2(86f, -55.8f));
+        enduranceValueLabel = BuildLevelStat(main, "Endurance", "2", new Vector2(66f, 0f), StatLevelMax, out enduranceRingFill);
+        mobilityValueLabel = BuildLevelStat(main, "Mobility", "4", new Vector2(132f, 0f), StatLevelMax, out mobilityRingFill);
+        speedValueLabel = BuildLevelStat(main, "Speed", "3", new Vector2(66f, -55.8f), StatLevelMax, out speedRingFill);
+        focusValueLabel = BuildLevelStat(main, "Focus", "5", new Vector2(132f, -55.8f), StatLevelMax, out focusRingFill);
     }
 
-    private TextMeshProUGUI BuildLevelStat(RectTransform parent, UiSpriteLibrary sprites, string labelText, string value, string graphPath, Vector2 anchoredPosition)
+    private TextMeshProUGUI BuildLevelStat(RectTransform parent, string labelText, string value, Vector2 anchoredPosition, float maxValue, out Image ringFill)
     {
         RectTransform group = UiFactory.CreateRect(labelText + "Stat", parent);
         group.anchorMin = new Vector2(0f, 1f);
         group.anchorMax = new Vector2(0f, 1f);
         group.pivot = new Vector2(0f, 1f);
-        group.sizeDelta = new Vector2(66f, 49.8f);
+        group.sizeDelta = new Vector2(48f, 46f);
         group.anchoredPosition = anchoredPosition;
 
-        Image graph = UiFactory.CreateImage("Graph", group, sprites.GetResourceSprite(graphPath), Color.white);
+        Image graph = UiFactory.CreateImage("Graph", group, UiTheme.CircleSprite, NeedBluePale);
         graph.type = Image.Type.Simple;
         graph.preserveAspect = false;
+        graph.raycastTarget = false;
         graph.rectTransform.anchorMin = new Vector2(0f, 1f);
         graph.rectTransform.anchorMax = new Vector2(0f, 1f);
         graph.rectTransform.pivot = new Vector2(0f, 1f);
-        graph.rectTransform.sizeDelta = new Vector2(31.8f, 31.8f);
-        graph.rectTransform.anchoredPosition = new Vector2(17.1f, 0f);
+        graph.rectTransform.sizeDelta = StatRingSize;
+        graph.rectTransform.anchoredPosition = new Vector2(8f, 0f);
 
-        TextMeshProUGUI valueLabel = UiFactory.CreateLabel("Value", graph.rectTransform, value, 14, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Center);
+        ringFill = CreateStatRingFill(graph.rectTransform, "Fill");
+        ringFill.fillAmount = GetStatLevelFillAmount(ParseStatValue(value), maxValue);
+        CreateStatRingCenter(graph.rectTransform);
+
+        TextMeshProUGUI valueLabel = UiFactory.CreateLabel("Value", graph.rectTransform, value, 14, NeedBlue, FontStyles.Normal, TextAlignmentOptions.Center);
         ConfigureCompactLabel(valueLabel, UiTheme.DefaultFont, 13f);
         valueLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         valueLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -373,13 +708,50 @@ public class DogDetailsWidgetView : MonoBehaviour
         valueLabel.rectTransform.anchoredPosition = new Vector2(7f, -7f);
 
         TextMeshProUGUI label = UiFactory.CreateLabel("Label", group, labelText, 13, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
-        ConfigureCompactLabel(label, UiTheme.DefaultFont, 11f);
+        ConfigureCompactLabel(label, UiTheme.DefaultFont, 9f);
         label.rectTransform.anchorMin = new Vector2(0f, 1f);
         label.rectTransform.anchorMax = new Vector2(0f, 1f);
         label.rectTransform.pivot = new Vector2(0f, 1f);
-        label.rectTransform.sizeDelta = new Vector2(66f, 20f);
-        label.rectTransform.anchoredPosition = new Vector2(0f, -31.8f);
+        label.rectTransform.sizeDelta = new Vector2(48f, 16f);
+        label.rectTransform.anchoredPosition = new Vector2(0f, -29f);
         return valueLabel;
+    }
+
+    private static Image CreateStatRingFill(RectTransform parent, string name)
+    {
+        Image fill = UiFactory.CreateImage(name, parent, UiTheme.CircleSprite, NeedBlue);
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Radial360;
+        fill.fillOrigin = (int)Image.Origin360.Top;
+        fill.fillClockwise = true;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+        UiFactory.Stretch(fill.rectTransform, 0f, 0f, 0f, 0f);
+        return fill;
+    }
+
+    private static void CreateStatRingCenter(RectTransform parent)
+    {
+        Image center = UiFactory.CreateImage("Center", parent, UiTheme.CircleSprite, UiTheme.NavBackgroundCream);
+        center.type = Image.Type.Simple;
+        center.preserveAspect = false;
+        center.raycastTarget = false;
+        center.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        center.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        center.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        center.rectTransform.sizeDelta = new Vector2(22.6f, 22.6f);
+        center.rectTransform.anchoredPosition = Vector2.zero;
+    }
+
+    private static int ParseStatValue(string value)
+    {
+        int parsed;
+        return int.TryParse(value, out parsed) ? parsed : 0;
+    }
+
+    private static float GetStatLevelFillAmount(int value, float maxValue)
+    {
+        return Mathf.Clamp01(value / Mathf.Max(1f, maxValue));
     }
 
     private void CreateNeed(RectTransform parent, UiSpriteLibrary sprites, PawPalDogNeed need, string labelText, string iconName, Color32 circleColor, Vector2 anchoredPosition, Vector2 iconSize, float iconTop)
@@ -454,6 +826,11 @@ public class DogDetailsWidgetView : MonoBehaviour
         needRequested = onNeedSelected;
     }
 
+    public void BindTrickRequested(Action<PawPalTrickId> onTrickRequested)
+    {
+        trickRequested = onTrickRequested;
+    }
+
     public void SetDogState(PawPalDogState dog)
     {
         if (dog == null)
@@ -461,40 +838,22 @@ public class DogDetailsWidgetView : MonoBehaviour
             return;
         }
 
+        PawPalDogPersonalityProfiles.EnsureProfile(dog);
         if (dogNameLabel != null)
         {
             dogNameLabel.text = dog.DisplayName;
         }
 
-        if (enduranceValueLabel != null)
-        {
-            enduranceValueLabel.text = dog.Endurance.ToString();
-        }
-
-        if (mobilityValueLabel != null)
-        {
-            mobilityValueLabel.text = dog.Mobility.ToString();
-        }
-
-        if (speedValueLabel != null)
-        {
-            speedValueLabel.text = dog.Speed.ToString();
-        }
-
-        if (focusValueLabel != null)
-        {
-            focusValueLabel.text = dog.Focus.ToString();
-        }
+        RefreshLevelStat(enduranceValueLabel, enduranceRingFill, dog.Endurance);
+        RefreshLevelStat(mobilityValueLabel, mobilityRingFill, dog.Mobility);
+        RefreshLevelStat(speedValueLabel, speedRingFill, dog.Speed);
+        RefreshLevelStat(focusValueLabel, focusRingFill, dog.Focus);
+        RefreshLevelStat(bondValueLabel, bondRingFill, PawPalGameRuntime.GetBondLevel(dog), BondLevelMax, PawPalGameRuntime.GetBondProgress01(dog));
 
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         PawPalWalkStaminaSnapshot walkStamina = runtime != null
             ? runtime.GetWalkStaminaSnapshot(dog)
             : new PawPalWalkStaminaSnapshot();
-        if (walkStaminaValueLabel != null)
-        {
-            walkStaminaValueLabel.text = Mathf.RoundToInt(walkStamina.Current).ToString();
-        }
-
         if (walkStaminaFill != null)
         {
             walkStaminaFill.fillAmount = walkStamina.Fill01;
@@ -504,6 +863,138 @@ public class DogDetailsWidgetView : MonoBehaviour
         RefreshNeedVisual(PawPalDogNeed.Water, dog.Water01);
         RefreshNeedVisual(PawPalDogNeed.Hygiene, dog.Hygiene01);
         RefreshNeedVisual(PawPalDogNeed.Activity, dog.Activity01);
+        RefreshTrickTiles(dog);
+        RefreshProfile(dog);
+    }
+
+    private static void RefreshLevelStat(TextMeshProUGUI valueLabel, Image ringFill, int value)
+    {
+        RefreshLevelStat(valueLabel, ringFill, value, StatLevelMax, -1f);
+    }
+
+    private static void RefreshLevelStat(TextMeshProUGUI valueLabel, Image ringFill, int value, float maxValue, float overrideFillAmount)
+    {
+        if (valueLabel != null)
+        {
+            valueLabel.text = value.ToString();
+        }
+
+        if (ringFill != null)
+        {
+            ringFill.fillAmount = overrideFillAmount >= 0f
+                ? Mathf.Clamp01(overrideFillAmount)
+                : GetStatLevelFillAmount(value, maxValue);
+        }
+    }
+
+    private void RefreshProfile(PawPalDogState dog)
+    {
+        if (genderValueLabel != null)
+        {
+            genderValueLabel.text = PawPalDogPersonalityProfiles.FormatGender(dog.Gender);
+        }
+
+        if (genderProfileIcon != null && spriteLibrary != null)
+        {
+            string iconName = dog.Gender == PawPalDogGender.Female ? "icon_female_other" : "icon_male_other";
+            genderProfileIcon.sprite = spriteLibrary.GetWhiteIcon(iconName);
+        }
+
+        if (personalityValueLabel != null)
+        {
+            personalityValueLabel.text = PawPalDogPersonalityProfiles.FormatPersonality(dog.Personality);
+        }
+
+        if (furValueLabel != null)
+        {
+            furValueLabel.text = PawPalDogPersonalityProfiles.FormatProfileText(dog.FurColor);
+        }
+
+        if (breedValueLabel != null)
+        {
+            breedValueLabel.text = PawPalDogPersonalityProfiles.FormatProfileText(dog.Breed);
+        }
+    }
+
+    private void RefreshTrickTiles(PawPalDogState dog)
+    {
+        if (dog != null)
+        {
+            PawPalTrickCatalog.EnsureDogTrickData(dog);
+        }
+
+        for (int i = 0; i < trickTiles.Count; i++)
+        {
+            TrickTileView tile = trickTiles[i];
+            if (tile == null)
+            {
+                continue;
+            }
+
+            PawPalDogTrickProgress progress = dog != null ? PawPalTrickCatalog.GetProgress(dog, tile.Definition.Id) : null;
+            PawPalTrickLearningStage stage = PawPalTrickCatalog.GetLearningStage(progress, tile.Definition);
+            PawPalTrainingTrickPresentation presentation = PawPalTrainingModeView.DescribeTrick(dog, tile.Definition.Id);
+            bool learned = stage == PawPalTrickLearningStage.Learned || stage == PawPalTrickLearningStage.Mastered;
+            bool locked = presentation.VisualState == PawPalTrainingTrickVisualState.Locked;
+            if (tile.Background != null)
+            {
+                tile.Background.color = locked ? TrickLockedFill : UiTheme.CardWhite;
+            }
+
+            if (tile.Border != null)
+            {
+                tile.Border.color = locked ? SupportCream : learned ? new Color32(103, 178, 151, 255) : UiTheme.NavBrand;
+            }
+
+            if (tile.IconCircle != null)
+            {
+                tile.IconCircle.color = locked ? SupportCream : learned ? new Color32(103, 178, 151, 255) : UiTheme.NavBrand;
+            }
+
+            if (tile.Icon != null)
+            {
+                tile.Icon.color = locked ? new Color(1f, 1f, 1f, 0.62f) : UiTheme.White;
+            }
+
+            if (tile.Label != null)
+            {
+                tile.Label.color = locked ? TrickLockedText : UiTheme.NavBrandDark;
+            }
+
+            if (tile.RequirementPill != null)
+            {
+                tile.RequirementPill.gameObject.SetActive(true);
+                tile.RequirementPill.color = locked ? TrickRequirementFill : learned ? new Color32(226, 246, 235, 255) : TrickRequirementFill;
+            }
+
+            if (tile.Requirement != null)
+            {
+                tile.Requirement.text = FormatTrickStage(dog, progress, tile.Definition, stage, locked);
+                tile.Requirement.color = locked ? UiTheme.NavBrandDark : learned ? new Color32(55, 132, 104, 255) : UiTheme.NavBrandDark;
+            }
+        }
+    }
+
+    private static string FormatTrickStage(PawPalDogState dog, PawPalDogTrickProgress progress, PawPalTrickDefinition definition, PawPalTrickLearningStage stage, bool locked)
+    {
+        if (locked)
+        {
+            return "Lock";
+        }
+
+        switch (stage)
+        {
+            case PawPalTrickLearningStage.Mastered:
+                return "Max";
+            case PawPalTrickLearningStage.Learned:
+                return "Done";
+            case PawPalTrickLearningStage.Practicing:
+                return Mathf.RoundToInt(PawPalTrickCatalog.GetProgress01(progress, definition) * 100f) + "%";
+            case PawPalTrickLearningStage.Discovered:
+                return "Go";
+            default:
+                return "Teach";
+        }
     }
 
     private void RefreshNeedVisual(PawPalDogNeed need, float value01)
@@ -567,14 +1058,41 @@ public class DogDetailsWidgetView : MonoBehaviour
             frame.sizeDelta = new Vector2(BaseWidth, targetHeight);
         }
 
-        if (statsHeader != null)
+        if (statsPager != null)
         {
-            statsHeader.gameObject.SetActive(expanded);
+            statsPager.gameObject.SetActive(expanded);
+        }
+    }
+
+    private sealed class TrickTileView
+    {
+        public TrickTileView(
+            PawPalTrickDefinition definition,
+            Image background,
+            Image border,
+            Image iconCircle,
+            Image icon,
+            TextMeshProUGUI label,
+            Image requirementPill,
+            TextMeshProUGUI requirement)
+        {
+            Definition = definition;
+            Background = background;
+            Border = border;
+            IconCircle = iconCircle;
+            Icon = icon;
+            Label = label;
+            RequirementPill = requirementPill;
+            Requirement = requirement;
         }
 
-        if (statsFrame != null)
-        {
-            statsFrame.gameObject.SetActive(expanded);
-        }
+        public readonly PawPalTrickDefinition Definition;
+        public readonly Image Background;
+        public readonly Image Border;
+        public readonly Image IconCircle;
+        public readonly Image Icon;
+        public readonly TextMeshProUGUI Label;
+        public readonly Image RequirementPill;
+        public readonly TextMeshProUGUI Requirement;
     }
 }

@@ -9,6 +9,7 @@ public sealed class PawPalPhotoRecord
     public string Id;
     public string DogId;
     public string DogName;
+    public string Title;
     public string FileName;
     public string ThumbnailFileName;
     public long CreatedUtcTicks;
@@ -115,6 +116,7 @@ public sealed class PawPalPhotoAlbumStore
                 Id = id,
                 DogId = dogId ?? string.Empty,
                 DogName = string.IsNullOrWhiteSpace(dogName) ? "Dog" : dogName,
+                Title = string.Empty,
                 FileName = fileName,
                 ThumbnailFileName = thumbnailFileName,
                 CreatedUtcTicks = DateTime.UtcNow.Ticks,
@@ -185,6 +187,19 @@ public sealed class PawPalPhotoAlbumStore
         }
 
         stored.Favorite = favorite;
+        SaveMetadata();
+        return true;
+    }
+
+    public bool SetTitle(PawPalPhotoRecord record, string title)
+    {
+        PawPalPhotoRecord stored = FindRecord(record);
+        if (stored == null)
+        {
+            return false;
+        }
+
+        stored.Title = string.IsNullOrWhiteSpace(title) ? string.Empty : title.Trim();
         SaveMetadata();
         return true;
     }

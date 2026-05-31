@@ -15,11 +15,21 @@ public struct PawPalVoiceMatchResult
         IsMatch = isMatch;
         Confidence = confidence;
         Label = label;
+        TrickId = string.Empty;
+    }
+
+    public PawPalVoiceMatchResult(bool isMatch, float confidence, string label, string trickId)
+    {
+        IsMatch = isMatch;
+        Confidence = confidence;
+        Label = label;
+        TrickId = trickId;
     }
 
     public bool IsMatch;
     public float Confidence;
     public string Label;
+    public string TrickId;
 }
 
 [Serializable]
@@ -128,7 +138,17 @@ public sealed class PawPalVoiceProfileStore
 
     public int GetTrickSampleCount(string dogId, PawPalVoiceTrick trick)
     {
-        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trick);
+        return GetTrickSampleCount(dogId, trick.ToString());
+    }
+
+    public int GetTrickSampleCount(string dogId, PawPalTrickId trick)
+    {
+        return GetTrickSampleCount(dogId, trick.ToString());
+    }
+
+    private int GetTrickSampleCount(string dogId, string trickId)
+    {
+        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trickId);
         return trickProfile != null && trickProfile.Samples != null ? trickProfile.Samples.Count : 0;
     }
 
@@ -139,7 +159,17 @@ public sealed class PawPalVoiceProfileStore
 
     public bool IsTrickLearned(string dogId, PawPalVoiceTrick trick, int requiredSamples)
     {
-        return GetTrickSampleCount(dogId, trick) >= Mathf.Max(1, requiredSamples);
+        return IsTrickLearned(dogId, trick.ToString(), requiredSamples);
+    }
+
+    public bool IsTrickLearned(string dogId, PawPalTrickId trick, int requiredSamples)
+    {
+        return IsTrickLearned(dogId, trick.ToString(), requiredSamples);
+    }
+
+    private bool IsTrickLearned(string dogId, string trickId, int requiredSamples)
+    {
+        return GetTrickSampleCount(dogId, trickId) >= Mathf.Max(1, requiredSamples);
     }
 
     public void AddNameSample(string dogId, string displayName, PawPalVoiceTemplate template, int maxSamples)
@@ -164,27 +194,57 @@ public sealed class PawPalVoiceProfileStore
 
     public void AddTrickSample(string dogId, PawPalVoiceTrick trick, PawPalVoiceTemplate template, int maxSamples)
     {
+        AddTrickSample(dogId, trick.ToString(), template, maxSamples);
+    }
+
+    public void AddTrickSample(string dogId, PawPalTrickId trick, PawPalVoiceTemplate template, int maxSamples)
+    {
+        AddTrickSample(dogId, trick.ToString(), template, maxSamples);
+    }
+
+    private void AddTrickSample(string dogId, string trickId, PawPalVoiceTemplate template, int maxSamples)
+    {
         if (template == null)
         {
             return;
         }
 
         PawPalVoiceDogProfile profile = GetOrCreateDogProfile(dogId);
-        PawPalVoiceTrickProfile trickProfile = GetOrCreateTrickProfile(profile, trick);
+        PawPalVoiceTrickProfile trickProfile = GetOrCreateTrickProfile(profile, trickId);
         AddTemplate(trickProfile.Samples, template, maxSamples);
         Save();
     }
 
     public bool HasTrickRewardGranted(string dogId, PawPalVoiceTrick trick)
     {
-        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trick);
+        return HasTrickRewardGranted(dogId, trick.ToString());
+    }
+
+    public bool HasTrickRewardGranted(string dogId, PawPalTrickId trick)
+    {
+        return HasTrickRewardGranted(dogId, trick.ToString());
+    }
+
+    private bool HasTrickRewardGranted(string dogId, string trickId)
+    {
+        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trickId);
         return trickProfile != null && trickProfile.RewardGranted;
     }
 
     public void MarkTrickRewardGranted(string dogId, PawPalVoiceTrick trick)
     {
+        MarkTrickRewardGranted(dogId, trick.ToString());
+    }
+
+    public void MarkTrickRewardGranted(string dogId, PawPalTrickId trick)
+    {
+        MarkTrickRewardGranted(dogId, trick.ToString());
+    }
+
+    private void MarkTrickRewardGranted(string dogId, string trickId)
+    {
         PawPalVoiceDogProfile profile = GetOrCreateDogProfile(dogId);
-        PawPalVoiceTrickProfile trickProfile = GetOrCreateTrickProfile(profile, trick);
+        PawPalVoiceTrickProfile trickProfile = GetOrCreateTrickProfile(profile, trickId);
         if (!trickProfile.RewardGranted)
         {
             trickProfile.RewardGranted = true;
@@ -206,14 +266,58 @@ public sealed class PawPalVoiceProfileStore
 
     public PawPalVoiceMatchResult MatchTrick(string dogId, PawPalVoiceTrick trick, PawPalVoiceTemplate input, int requiredSamples, float threshold)
     {
-        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trick);
-        if (trickProfile == null || !IsTrickLearned(dogId, trick, requiredSamples))
+        return MatchTrick(dogId, trick.ToString(), GetTrickLabel(trick), input, requiredSamples, threshold);
+    }
+
+    public PawPalVoiceMatchResult MatchTrick(string dogId, PawPalTrickId trick, PawPalVoiceTemplate input, int requiredSamples, float threshold)
+    {
+        return MatchTrick(dogId, trick.ToString(), GetTrickLabel(trick), input, requiredSamples, threshold);
+    }
+
+    private PawPalVoiceMatchResult MatchTrick(string dogId, string trickId, string label, PawPalVoiceTemplate input, int requiredSamples, float threshold)
+    {
+        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(FindDogProfile(dogId), trickId);
+        if (trickProfile == null || !IsTrickLearned(dogId, trickId, requiredSamples))
         {
-            return new PawPalVoiceMatchResult(false, 0f, GetTrickLabel(trick));
+            return new PawPalVoiceMatchResult(false, 0f, label, trickId);
         }
 
         float confidence = GetBestScore(trickProfile.Samples, input);
-        return new PawPalVoiceMatchResult(confidence >= threshold, confidence, GetTrickLabel(trick));
+        return new PawPalVoiceMatchResult(confidence >= threshold, confidence, label, trickId);
+    }
+
+    public PawPalVoiceMatchResult MatchBestLearnedTrick(string dogId, PawPalVoiceTemplate input, int requiredSamples, float threshold)
+    {
+        PawPalVoiceDogProfile profile = FindDogProfile(dogId);
+        if (profile == null || profile.Tricks == null)
+        {
+            return new PawPalVoiceMatchResult(false, 0f, string.Empty, string.Empty);
+        }
+
+        float bestConfidence = 0f;
+        string bestTrickId = string.Empty;
+        string bestLabel = string.Empty;
+        for (int i = 0; i < profile.Tricks.Count; i++)
+        {
+            PawPalVoiceTrickProfile trickProfile = profile.Tricks[i];
+            if (trickProfile == null
+                || string.IsNullOrEmpty(trickProfile.TrickId)
+                || trickProfile.Samples == null
+                || trickProfile.Samples.Count < Mathf.Max(1, requiredSamples))
+            {
+                continue;
+            }
+
+            float confidence = GetBestScore(trickProfile.Samples, input);
+            if (confidence > bestConfidence)
+            {
+                bestConfidence = confidence;
+                bestTrickId = trickProfile.TrickId;
+                bestLabel = GetTrickLabel(bestTrickId);
+            }
+        }
+
+        return new PawPalVoiceMatchResult(bestConfidence >= threshold, bestConfidence, bestLabel, bestTrickId);
     }
 
     public static string GetTrickLabel(PawPalVoiceTrick trick)
@@ -225,6 +329,28 @@ public sealed class PawPalVoiceProfileStore
             default:
                 return trick.ToString();
         }
+    }
+
+    public static string GetTrickLabel(PawPalTrickId trick)
+    {
+        return GetTrickLabel(trick.ToString());
+    }
+
+    public static string GetTrickLabel(string trickId)
+    {
+        PawPalTrickId parsedTrickId;
+        if (Enum.TryParse(trickId, true, out parsedTrickId))
+        {
+            PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(parsedTrickId);
+            if (definition != null && !string.IsNullOrWhiteSpace(definition.DisplayName))
+            {
+                return definition.DisplayName.ToLowerInvariant();
+            }
+
+            return parsedTrickId.ToString().ToLowerInvariant();
+        }
+
+        return string.IsNullOrEmpty(trickId) ? "trick" : trickId.ToLowerInvariant();
     }
 
     private PawPalVoiceDogProfile GetOrCreateDogProfile(string dogId)
@@ -265,10 +391,10 @@ public sealed class PawPalVoiceProfileStore
         return null;
     }
 
-    private PawPalVoiceTrickProfile GetOrCreateTrickProfile(PawPalVoiceDogProfile profile, PawPalVoiceTrick trick)
+    private PawPalVoiceTrickProfile GetOrCreateTrickProfile(PawPalVoiceDogProfile profile, string trickId)
     {
         EnsureProfileLists(profile);
-        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(profile, trick);
+        PawPalVoiceTrickProfile trickProfile = FindTrickProfile(profile, trickId);
         if (trickProfile != null)
         {
             return trickProfile;
@@ -276,14 +402,14 @@ public sealed class PawPalVoiceProfileStore
 
         trickProfile = new PawPalVoiceTrickProfile
         {
-            TrickId = trick.ToString(),
+            TrickId = NormalizeTrickId(trickId),
             Samples = new List<PawPalVoiceTemplate>()
         };
         profile.Tricks.Add(trickProfile);
         return trickProfile;
     }
 
-    private PawPalVoiceTrickProfile FindTrickProfile(PawPalVoiceDogProfile profile, PawPalVoiceTrick trick)
+    private PawPalVoiceTrickProfile FindTrickProfile(PawPalVoiceDogProfile profile, string trickId)
     {
         if (profile == null)
         {
@@ -291,7 +417,7 @@ public sealed class PawPalVoiceProfileStore
         }
 
         EnsureProfileLists(profile);
-        string trickId = trick.ToString();
+        string normalizedTrickId = NormalizeTrickId(trickId);
         for (int i = 0; i < profile.Tricks.Count; i++)
         {
             PawPalVoiceTrickProfile trickProfile = profile.Tricks[i];
@@ -300,7 +426,7 @@ public sealed class PawPalVoiceProfileStore
                 continue;
             }
 
-            if (string.Equals(trickProfile.TrickId, trickId, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(trickProfile.TrickId, normalizedTrickId, StringComparison.OrdinalIgnoreCase))
             {
                 if (trickProfile.Samples == null)
                 {
@@ -382,7 +508,13 @@ public sealed class PawPalVoiceProfileStore
 
         for (int i = 0; i < profile.Tricks.Count; i++)
         {
-            if (profile.Tricks[i] != null && profile.Tricks[i].Samples == null)
+            if (profile.Tricks[i] == null)
+            {
+                continue;
+            }
+
+            profile.Tricks[i].TrickId = NormalizeTrickId(profile.Tricks[i].TrickId);
+            if (profile.Tricks[i].Samples == null)
             {
                 profile.Tricks[i].Samples = new List<PawPalVoiceTemplate>();
             }
@@ -399,6 +531,22 @@ public sealed class PawPalVoiceProfileStore
     private static string NormalizeDogId(string dogId)
     {
         return string.IsNullOrWhiteSpace(dogId) ? "active_dog" : dogId.Trim();
+    }
+
+    private static string NormalizeTrickId(string trickId)
+    {
+        if (string.IsNullOrWhiteSpace(trickId))
+        {
+            return PawPalTrickId.Sit.ToString();
+        }
+
+        PawPalTrickId parsedTrickId;
+        if (Enum.TryParse(trickId, true, out parsedTrickId))
+        {
+            return parsedTrickId.ToString();
+        }
+
+        return trickId.Trim();
     }
 }
 

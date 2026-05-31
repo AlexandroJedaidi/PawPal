@@ -20,6 +20,25 @@ public enum PawPalDogStatType
     Focus
 }
 
+public enum PawPalDogGender
+{
+    Male,
+    Female
+}
+
+public enum PawPalDogPersonality
+{
+    Relaxed,
+    Gentle,
+    Energetic,
+    Loyal,
+    Curious,
+    Clever,
+    Social,
+    Playful,
+    Mischievous
+}
+
 public enum PawPalCurrencyType
 {
     Basic,
@@ -88,16 +107,30 @@ public sealed class PawPalDogState
 {
     public string Id;
     public string DisplayName;
+    public PawPalDogGender Gender;
+    public PawPalDogPersonality Personality;
+    public string FurColor;
+    public string Breed;
+    public int ProfileVersion;
     public float Food01;
     public float Water01;
     public float Hygiene01;
     public float Activity01;
     public float Energy01;
     public PawPalDogWalkData WalkData = new PawPalDogWalkData();
+    public int TrickProfileVersion;
+    public float Bond01;
+    public int BondXp;
+    public int BondLevel;
+    public float Mood01;
+    public float TrainingFatigue01;
+    public long LastTrainingFatigueUpdateUtcTicks;
+    public List<PawPalDogTrickProgress> Tricks = new List<PawPalDogTrickProgress>();
     public int Endurance;
     public int Mobility;
     public int Speed;
     public int Focus;
+    public float NewDogWhinyHoursRemaining;
 
     public float GetNeed(PawPalDogNeed need)
     {
@@ -176,6 +209,620 @@ public sealed class PawPalDogState
                 Focus = nextValue;
                 break;
         }
+    }
+}
+
+internal static class PawPalDogPersonalityProfiles
+{
+    public const int CurrentProfileVersion = 1;
+    private const int PersonalityCount = 9;
+    private static readonly string[] FallbackFurColors = { "Black", "Brown", "Cream", "White", "Golden", "Gray" };
+    private static readonly string[] FallbackBreeds = { "Mixed breed", "Labrador", "Corgi", "Husky", "Beagle", "Shepherd" };
+
+    public static bool EnsureProfile(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return false;
+        }
+
+        DogProfileSeed profile = BuildProfileSeed(dog.Id, dog.DisplayName);
+        bool needsProfile = dog.ProfileVersion < CurrentProfileVersion
+            || string.IsNullOrWhiteSpace(dog.FurColor)
+            || string.IsNullOrWhiteSpace(dog.Breed)
+            || !IsValidPersonality(dog.Personality)
+            || !IsValidGender(dog.Gender);
+        if (!needsProfile)
+        {
+            return false;
+        }
+
+        bool changed = dog.Gender != profile.Gender
+            || dog.Personality != profile.Personality
+            || !string.Equals(dog.FurColor, profile.FurColor, StringComparison.Ordinal)
+            || !string.Equals(dog.Breed, profile.Breed, StringComparison.Ordinal)
+            || dog.ProfileVersion != CurrentProfileVersion;
+
+        dog.Gender = profile.Gender;
+        dog.Personality = profile.Personality;
+        dog.FurColor = profile.FurColor;
+        dog.Breed = profile.Breed;
+        dog.ProfileVersion = CurrentProfileVersion;
+        return changed;
+    }
+
+    public static PawPalDogState FindRuntimeDog(string dogId)
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null || string.IsNullOrWhiteSpace(dogId))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < runtime.Dogs.Count; i++)
+        {
+            PawPalDogState dog = runtime.Dogs[i];
+            if (dog != null && string.Equals(dog.Id, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureProfile(dog);
+                return dog;
+            }
+        }
+
+        return null;
+    }
+
+    public static PawPalDogPersonality GetPersonalityForDogId(string dogId, string fallbackKey)
+    {
+        PawPalDogState dog = FindRuntimeDog(dogId);
+        return dog != null ? dog.Personality : BuildProfileSeed(dogId, fallbackKey).Personality;
+    }
+
+    public static string FormatGender(PawPalDogGender gender)
+    {
+        return gender == PawPalDogGender.Female ? "Female" : "Male";
+    }
+
+    public static string FormatPersonality(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Gentle:
+                return "Gentle";
+            case PawPalDogPersonality.Energetic:
+                return "Energetic";
+            case PawPalDogPersonality.Loyal:
+                return "Loyal";
+            case PawPalDogPersonality.Curious:
+                return "Curious";
+            case PawPalDogPersonality.Clever:
+                return "Clever";
+            case PawPalDogPersonality.Social:
+                return "Social";
+            case PawPalDogPersonality.Playful:
+                return "Playful";
+            case PawPalDogPersonality.Mischievous:
+                return "Mischievous";
+            default:
+                return "Relaxed";
+        }
+    }
+
+    public static string FormatProfileText(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Unknown" : value;
+    }
+
+    public static float GetNeedDrainMultiplier(PawPalDogState dog, PawPalDogNeed need)
+    {
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Relaxed:
+                return need == PawPalDogNeed.Activity ? 0.8f : need == PawPalDogNeed.Hygiene ? 0.95f : 0.85f;
+            case PawPalDogPersonality.Gentle:
+                return need == PawPalDogNeed.Activity ? 0.9f : 0.92f;
+            case PawPalDogPersonality.Energetic:
+                return need == PawPalDogNeed.Activity ? 1.25f : 1.15f;
+            case PawPalDogPersonality.Loyal:
+                return need == PawPalDogNeed.Activity ? 1.1f : 1f;
+            case PawPalDogPersonality.Curious:
+                return need == PawPalDogNeed.Activity ? 1.12f : need == PawPalDogNeed.Hygiene ? 1.05f : 1f;
+            case PawPalDogPersonality.Clever:
+                return need == PawPalDogNeed.Activity ? 1.1f : 1f;
+            case PawPalDogPersonality.Social:
+                return need == PawPalDogNeed.Activity ? 1.12f : 1f;
+            case PawPalDogPersonality.Playful:
+                return need == PawPalDogNeed.Activity ? 1.2f : need == PawPalDogNeed.Hygiene ? 1.15f : 1.05f;
+            case PawPalDogPersonality.Mischievous:
+                return need == PawPalDogNeed.Hygiene ? 1.25f : need == PawPalDogNeed.Activity ? 1.12f : 1f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetEnergyDrainMultiplier(PawPalDogState dog)
+    {
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.85f;
+            case PawPalDogPersonality.Gentle:
+                return 0.95f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+                return 1.15f;
+            case PawPalDogPersonality.Loyal:
+            case PawPalDogPersonality.Curious:
+            case PawPalDogPersonality.Clever:
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Mischievous:
+                return 1.08f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetWalkStaminaCostMultiplier(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return 1f;
+        }
+
+        switch (dog.Personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 1.1f;
+            case PawPalDogPersonality.Energetic:
+                return 0.8f;
+            case PawPalDogPersonality.Loyal:
+            case PawPalDogPersonality.Clever:
+            case PawPalDogPersonality.Mischievous:
+                return 0.95f;
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Playful:
+                return 0.9f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetWalkPresentChanceMultiplier(PawPalDogState dog)
+    {
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.95f;
+            case PawPalDogPersonality.Curious:
+                return 1.25f;
+            case PawPalDogPersonality.Clever:
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Playful:
+                return 1.1f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.2f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetWalkDogEncounterChanceMultiplier(PawPalDogState dog)
+    {
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Gentle:
+                return 0.95f;
+            case PawPalDogPersonality.Energetic:
+                return 1.1f;
+            case PawPalDogPersonality.Loyal:
+                return 0.85f;
+            case PawPalDogPersonality.Social:
+                return 1.3f;
+            case PawPalDogPersonality.Playful:
+                return 1.15f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.05f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetTrainingBonusChance(PawPalDogState dog)
+    {
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Clever:
+                return 0.35f;
+            case PawPalDogPersonality.Loyal:
+                return 0.25f;
+            case PawPalDogPersonality.Playful:
+                return 0.2f;
+            case PawPalDogPersonality.Energetic:
+                return 0.15f;
+            default:
+                return 0f;
+        }
+    }
+
+    public static float GetInteractionAnnoyedChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+            case PawPalDogPersonality.Clever:
+                return 1.25f;
+            case PawPalDogPersonality.Curious:
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Loyal:
+                return 1f;
+            case PawPalDogPersonality.Gentle:
+            case PawPalDogPersonality.Relaxed:
+                return 0.65f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetInteractionAnnoyedCooldownMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+            case PawPalDogPersonality.Clever:
+                return 0.8f;
+            case PawPalDogPersonality.Curious:
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Loyal:
+                return 1f;
+            case PawPalDogPersonality.Gentle:
+            case PawPalDogPersonality.Relaxed:
+                return 1.35f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetNewDogWhinyInitialHours(PawPalDogPersonality personality)
+    {
+        return personality == PawPalDogPersonality.Gentle ? 3f : 0f;
+    }
+
+    public static float GetRoomRoamRadiusMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.78f;
+            case PawPalDogPersonality.Gentle:
+            case PawPalDogPersonality.Loyal:
+                return 0.88f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Curious:
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+                return 1.2f;
+            case PawPalDogPersonality.Social:
+                return 1.08f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomWaitMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 1.28f;
+            case PawPalDogPersonality.Gentle:
+                return 1.12f;
+            case PawPalDogPersonality.Energetic:
+                return 0.7f;
+            case PawPalDogPersonality.Curious:
+            case PawPalDogPersonality.Social:
+                return 0.85f;
+            case PawPalDogPersonality.Playful:
+                return 0.75f;
+            case PawPalDogPersonality.Mischievous:
+                return 0.8f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomSpeedMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.82f;
+            case PawPalDogPersonality.Gentle:
+                return 0.92f;
+            case PawPalDogPersonality.Energetic:
+                return 1.18f;
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+                return 1.08f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomAmbientIdleChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+            case PawPalDogPersonality.Gentle:
+                return 1.18f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+                return 0.88f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomBarkChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Gentle:
+            case PawPalDogPersonality.Relaxed:
+                return 0.55f;
+            case PawPalDogPersonality.Social:
+            case PawPalDogPersonality.Playful:
+                return 1.35f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.45f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomChillChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 1.65f;
+            case PawPalDogPersonality.Gentle:
+                return 1.25f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+                return 0.75f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetRoomSleepChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 1.7f;
+            case PawPalDogPersonality.Gentle:
+                return 1.15f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Mischievous:
+                return 0.75f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetToyPickupChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.65f;
+            case PawPalDogPersonality.Gentle:
+                return 0.8f;
+            case PawPalDogPersonality.Curious:
+                return 1.2f;
+            case PawPalDogPersonality.Playful:
+                return 1.45f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.3f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetBigBallInterestChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+                return 0.65f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+                return 1.3f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.2f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetToyPlayBurstChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+            case PawPalDogPersonality.Gentle:
+                return 0.72f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+                return 1.35f;
+            case PawPalDogPersonality.Mischievous:
+                return 1.25f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetToyChasePartnerChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Loyal:
+                return 0.75f;
+            case PawPalDogPersonality.Social:
+                return 1.35f;
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Energetic:
+                return 1.2f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetBigBallChaseChanceMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Relaxed:
+            case PawPalDogPersonality.Gentle:
+                return 0.75f;
+            case PawPalDogPersonality.Energetic:
+            case PawPalDogPersonality.Playful:
+                return 1.25f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static float GetSocialPairWeightMultiplier(PawPalDogPersonality personality)
+    {
+        switch (personality)
+        {
+            case PawPalDogPersonality.Loyal:
+                return 0.78f;
+            case PawPalDogPersonality.Social:
+                return 1.35f;
+            case PawPalDogPersonality.Playful:
+            case PawPalDogPersonality.Energetic:
+                return 1.15f;
+            case PawPalDogPersonality.Relaxed:
+            case PawPalDogPersonality.Gentle:
+                return 0.95f;
+            default:
+                return 1f;
+        }
+    }
+
+    public static string GetWalkMomentTitle(PawPalDogState dog)
+    {
+        return FormatPersonality(GetPersonality(dog)) + " moment";
+    }
+
+    public static string GetWalkMomentBody(PawPalDogState dog)
+    {
+        string dogName = dog != null && !string.IsNullOrWhiteSpace(dog.DisplayName) ? dog.DisplayName : "Your dog";
+        switch (GetPersonality(dog))
+        {
+            case PawPalDogPersonality.Gentle:
+                return dogName + " took the route calmly and stayed close.";
+            case PawPalDogPersonality.Energetic:
+                return dogName + " bounced ahead, ready for the next stretch.";
+            case PawPalDogPersonality.Loyal:
+                return dogName + " checked back with you before trotting on.";
+            case PawPalDogPersonality.Curious:
+                return dogName + " paused to sniff something interesting nearby.";
+            case PawPalDogPersonality.Clever:
+                return dogName + " watched the route carefully and kept a steady pace.";
+            case PawPalDogPersonality.Social:
+                return dogName + " perked up at every friendly sound along the path.";
+            case PawPalDogPersonality.Playful:
+                return dogName + " turned the walk into a tiny game.";
+            case PawPalDogPersonality.Mischievous:
+                return dogName + " made a cheeky little detour before coming back.";
+            default:
+                return dogName + " took a cozy breather before continuing.";
+        }
+    }
+
+    private static PawPalDogPersonality GetPersonality(PawPalDogState dog)
+    {
+        return dog != null ? dog.Personality : PawPalDogPersonality.Relaxed;
+    }
+
+    private static bool IsValidGender(PawPalDogGender gender)
+    {
+        return gender == PawPalDogGender.Male || gender == PawPalDogGender.Female;
+    }
+
+    private static bool IsValidPersonality(PawPalDogPersonality personality)
+    {
+        int value = (int)personality;
+        return value >= 0 && value < PersonalityCount;
+    }
+
+    private static DogProfileSeed BuildProfileSeed(string dogId, string fallbackKey)
+    {
+        if (string.Equals(dogId, "pepper", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DogProfileSeed(PawPalDogGender.Male, PawPalDogPersonality.Loyal, "Beige", "Labrador");
+        }
+
+        if (string.Equals(dogId, "miso", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DogProfileSeed(PawPalDogGender.Female, PawPalDogPersonality.Relaxed, "Brown", "Corgi");
+        }
+
+        if (string.Equals(dogId, "suki", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DogProfileSeed(PawPalDogGender.Female, PawPalDogPersonality.Energetic, "White", "Husky");
+        }
+
+        int seed = BuildStableSeed(!string.IsNullOrWhiteSpace(dogId) ? dogId : fallbackKey);
+        return new DogProfileSeed(
+            seed % 2 == 0 ? PawPalDogGender.Male : PawPalDogGender.Female,
+            (PawPalDogPersonality)(seed % PersonalityCount),
+            FallbackFurColors[seed % FallbackFurColors.Length],
+            FallbackBreeds[(seed / 3) % FallbackBreeds.Length]);
+    }
+
+    private static int BuildStableSeed(string value)
+    {
+        unchecked
+        {
+            int seed = 17;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                for (int i = 0; i < value.Length; i++)
+                {
+                    seed = seed * 31 + char.ToLowerInvariant(value[i]);
+                }
+            }
+
+            return seed & 0x7fffffff;
+        }
+    }
+
+    private struct DogProfileSeed
+    {
+        public DogProfileSeed(PawPalDogGender gender, PawPalDogPersonality personality, string furColor, string breed)
+        {
+            Gender = gender;
+            Personality = personality;
+            FurColor = furColor;
+            Breed = breed;
+        }
+
+        public readonly PawPalDogGender Gender;
+        public readonly PawPalDogPersonality Personality;
+        public readonly string FurColor;
+        public readonly string Breed;
     }
 }
 
@@ -727,7 +1374,6 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private const float WaterDrainPerHour = 0.03f;
     private const float HygieneDrainPerHour = 0.02f;
     private const float ActivityDrainPerHour = 0.035f;
-    private const float EnergyDrainPerHour = 0.025f;
     private const float DefaultMaxWalkStamina = 100f;
     private const float MaxWalkStaminaCap = 180f;
     private const float WalkStaminaRefillPerHour = 12.5f;
@@ -735,6 +1381,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private const float WalkStaminaXpPerDistance = 0.04f;
     private const float WalkStaminaXpNeededPerLevel = 30f;
     private const float WalkStaminaIncreasePerLevel = 5f;
+    public const int BondXpPerLevel = 100;
+    public const int MaxBondLevel = 10;
+    public const int MaxBondXp = (MaxBondLevel - 1) * BondXpPerLevel;
     private const string SaveFileName = "pawpal_profile_v1.json";
     private const string StarterDogId = "pepper";
     private const string StarterCollarItemId = "collar_simple_c2";
@@ -761,6 +1410,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private readonly Dictionary<PawPalPlayerActionType, TrainerActionRewardDefinition> trainerActionRewardsByType = new Dictionary<PawPalPlayerActionType, TrainerActionRewardDefinition>();
     private readonly Dictionary<int, TrainerMilestoneDefinition> trainerMilestonesByLevel = new Dictionary<int, TrainerMilestoneDefinition>();
     private readonly List<int> pendingUnsupportedTrainerMilestoneLevels = new List<int>();
+    private readonly HashSet<string> temporaryIntroDogIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     [SerializeField] private float secondsPerGameHour = DefaultSecondsPerGameHour;
 
@@ -768,6 +1418,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private PawPalDogSceneBridge sceneBridge;
     private TrainerProgressionConfig trainerProgressionConfig;
     private int activeDogIndex;
+    private int lastPersistentActiveDogIndex;
     private int inventoryRevision;
     private int lastProcessedTrainerMilestoneLevel;
     private int shopRevision;
@@ -1065,6 +1716,61 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return false;
     }
 
+    public bool IsTemporaryIntroDog(string dogId)
+    {
+        return IsTemporaryIntroDogId(dogId);
+    }
+
+    public bool RegisterTemporaryIntroDog(PawPalDogState dogState, bool setActive)
+    {
+        if (dogState == null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(dogState.Id))
+        {
+            dogState.Id = "intro_pet_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        }
+
+        PawPalDogPersonalityProfiles.EnsureProfile(dogState);
+        EnsureWalkData(dogState);
+        EnsureTrickData(dogState);
+
+        int dogIndex = -1;
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState existingDog = dogs[i];
+            if (existingDog != null && string.Equals(existingDog.Id, dogState.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                dogIndex = i;
+                break;
+            }
+        }
+
+        if (dogIndex >= 0)
+        {
+            dogs[dogIndex] = dogState;
+        }
+        else
+        {
+            dogIndex = dogs.Count;
+            dogs.Add(dogState);
+        }
+
+        temporaryIntroDogIds.Add(dogState.Id);
+        EnsureDogEquipmentState(dogState.Id);
+
+        if (setActive)
+        {
+            lastPersistentActiveDogIndex = GetSaveActiveDogIndex();
+            activeDogIndex = dogIndex;
+        }
+
+        CommitState(false, false, false);
+        return true;
+    }
+
     public bool TryFeedActiveDog()
     {
         PawPalDogState dog = ActiveDog;
@@ -1198,7 +1904,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         dog.ModifyNeed(PawPalDogNeed.Water, -0.1f);
         dog.ModifyNeed(PawPalDogNeed.Food, -0.08f);
         dog.ModifyNeed(PawPalDogNeed.Hygiene, -0.04f);
-        dog.Energy01 = Mathf.Clamp01(dog.Energy01 - 0.08f);
+        float currentStamina;
+        float maxStamina;
+        SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.08f), out currentStamina, out maxStamina);
         if (dog.Endurance < 10)
         {
             dog.ModifyStat(PawPalDogStatType.Endurance, 1);
@@ -1218,6 +1926,113 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     {
         EnsureWalkData(dog);
         RefreshWalkStamina(dog, DateTime.UtcNow, false);
+        return GetCanonicalStaminaSnapshot(dog);
+    }
+
+    public void RefreshDogStamina(PawPalDogState dog)
+    {
+        RefreshWalkStamina(dog, DateTime.UtcNow, false);
+    }
+
+    public static void EnsureCanonicalStaminaData(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        if (dog.WalkData == null)
+        {
+            dog.WalkData = new PawPalDogWalkData();
+        }
+
+        PawPalDogWalkData walkData = dog.WalkData;
+        if (walkData.MaxWalkStamina <= 0.001f)
+        {
+            walkData.MaxWalkStamina = Mathf.Clamp(DefaultMaxWalkStamina + dog.Endurance * 2f, DefaultMaxWalkStamina, MaxWalkStaminaCap);
+            float legacyEnergy01 = Mathf.Clamp01(dog.Energy01);
+            walkData.CurrentWalkStamina = Mathf.Lerp(0f, walkData.MaxWalkStamina, legacyEnergy01 > 0.001f ? legacyEnergy01 : 1f);
+        }
+
+        walkData.MaxWalkStamina = Mathf.Clamp(walkData.MaxWalkStamina, 1f, MaxWalkStaminaCap);
+        walkData.CurrentWalkStamina = Mathf.Clamp(walkData.CurrentWalkStamina, 0f, walkData.MaxWalkStamina);
+        if (walkData.LastStaminaRefreshAtUtcTicks <= 0L)
+        {
+            walkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+        }
+
+        SyncLegacyEnergyFromStamina(dog);
+    }
+
+    public static void EnsureDogBondProgression(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        bool hasBondProgression = dog.BondXp > 0 || dog.BondLevel > 0;
+        float legacyBond01 = Mathf.Clamp01(dog.Bond01);
+        if (!hasBondProgression)
+        {
+            if (legacyBond01 <= 0.001f)
+            {
+                legacyBond01 = PawPalTrickSaveDefaults.DefaultBond01;
+            }
+
+            dog.BondXp = Mathf.Clamp(Mathf.RoundToInt(legacyBond01 * MaxBondXp), 0, MaxBondXp);
+        }
+
+        dog.BondXp = Mathf.Clamp(dog.BondXp, 0, MaxBondXp);
+        dog.BondLevel = GetBondLevelForXp(dog.BondXp);
+        SyncLegacyBond01FromBondProgression(dog);
+    }
+
+    public static int GetBondLevel(PawPalDogState dog)
+    {
+        EnsureDogBondProgression(dog);
+        return dog != null ? dog.BondLevel : 1;
+    }
+
+    public static float GetBondProgress01(PawPalDogState dog)
+    {
+        EnsureDogBondProgression(dog);
+        return dog != null ? Mathf.Clamp01(dog.BondXp / (float)MaxBondXp) : 0f;
+    }
+
+    public static int AddDogBondXp(PawPalDogState dog, int deltaXp)
+    {
+        EnsureDogBondProgression(dog);
+        if (dog == null)
+        {
+            return 0;
+        }
+
+        int previousXp = dog.BondXp;
+        dog.BondXp = Mathf.Clamp(dog.BondXp + Mathf.Max(0, deltaXp), 0, MaxBondXp);
+        dog.BondLevel = GetBondLevelForXp(dog.BondXp);
+        SyncLegacyBond01FromBondProgression(dog);
+        return dog.BondXp - previousXp;
+    }
+
+    public static float GetBondDelta01FromXp(int xpDelta)
+    {
+        return MaxBondXp > 0 ? Mathf.Clamp01(Mathf.Max(0, xpDelta) / (float)MaxBondXp) : 0f;
+    }
+
+    public static int GetBondXpFromLegacyDelta01(float bondDelta01)
+    {
+        return Mathf.Max(0, Mathf.RoundToInt(Mathf.Max(0f, bondDelta01) * MaxBondXp));
+    }
+
+    public static int GetBondLevelForXp(int bondXp)
+    {
+        return Mathf.Clamp(1 + Mathf.FloorToInt(Mathf.Clamp(bondXp, 0, MaxBondXp) / (float)BondXpPerLevel), 1, MaxBondLevel);
+    }
+
+    public static PawPalWalkStaminaSnapshot GetCanonicalStaminaSnapshot(PawPalDogState dog)
+    {
+        EnsureCanonicalStaminaData(dog);
         PawPalDogWalkData walkData = dog != null ? dog.WalkData : null;
         return new PawPalWalkStaminaSnapshot
         {
@@ -1226,6 +2041,79 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Xp = walkData != null ? walkData.WalkStaminaXp : 0f,
             XpNeeded = WalkStaminaXpNeededPerLevel
         };
+    }
+
+    public static float GetDogStamina01(PawPalDogState dog)
+    {
+        PawPalWalkStaminaSnapshot snapshot = GetCanonicalStaminaSnapshot(dog);
+        return snapshot.Fill01;
+    }
+
+    public static float GetDogStaminaCostFromRatio(PawPalDogState dog, float staminaRatio)
+    {
+        PawPalWalkStaminaSnapshot snapshot = GetCanonicalStaminaSnapshot(dog);
+        return Mathf.Max(0f, snapshot.Max * Mathf.Clamp01(staminaRatio));
+    }
+
+    public static float SpendDogStamina(PawPalDogState dog, float amount, out float currentStamina, out float maxStamina)
+    {
+        EnsureCanonicalStaminaData(dog);
+        if (dog == null || dog.WalkData == null)
+        {
+            currentStamina = 0f;
+            maxStamina = DefaultMaxWalkStamina;
+            return 0f;
+        }
+
+        PawPalDogWalkData walkData = dog.WalkData;
+        float clampedAmount = Mathf.Max(0f, amount);
+        float previousStamina = walkData.CurrentWalkStamina;
+        walkData.CurrentWalkStamina = Mathf.Max(0f, walkData.CurrentWalkStamina - clampedAmount);
+        walkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+        SyncLegacyEnergyFromStamina(dog);
+        currentStamina = walkData.CurrentWalkStamina;
+        maxStamina = walkData.MaxWalkStamina;
+        return previousStamina - walkData.CurrentWalkStamina;
+    }
+
+    private static void SyncLegacyEnergyFromStamina(PawPalDogState dog)
+    {
+        if (dog == null || dog.WalkData == null || dog.WalkData.MaxWalkStamina <= 0.001f)
+        {
+            return;
+        }
+
+        dog.Energy01 = Mathf.Clamp01(dog.WalkData.CurrentWalkStamina / dog.WalkData.MaxWalkStamina);
+    }
+
+    private static void SyncLegacyBond01FromBondProgression(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        dog.Bond01 = MaxBondXp > 0 ? Mathf.Clamp01(dog.BondXp / (float)MaxBondXp) : 0f;
+    }
+
+    internal void ApplyWalkPersonalityToPlan(PawPalDogState dog, PawPalWalkRoutePlan routePlan)
+    {
+        if (routePlan == null)
+        {
+            return;
+        }
+
+        if (dog != null)
+        {
+            PawPalDogPersonalityProfiles.EnsureProfile(dog);
+        }
+
+        float baseCost = routePlan.BaseStaminaCost > 0.001f
+            ? routePlan.BaseStaminaCost
+            : routePlan.StaminaCost;
+        routePlan.BaseStaminaCost = Mathf.Max(0f, baseCost);
+        routePlan.StaminaCost = Mathf.Max(0f, routePlan.BaseStaminaCost * PawPalDogPersonalityProfiles.GetWalkStaminaCostMultiplier(dog));
+        routePlan.PersonalizedCostDogId = dog != null ? dog.Id : string.Empty;
     }
 
     public bool TryStartWalkSession(PawPalWalkRoutePlan routePlan, out string failureMessage)
@@ -1246,14 +2134,16 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         EnsureWalkData(dog);
         RefreshWalkStamina(dog, DateTime.UtcNow, true);
+        ApplyWalkPersonalityToPlan(dog, routePlan);
         failureMessage = PawPalWalkRouteGraph.ValidatePlan(routePlan, dog.WalkData.CurrentWalkStamina);
         if (!string.IsNullOrEmpty(failureMessage))
         {
             return false;
         }
 
-        dog.WalkData.CurrentWalkStamina = Mathf.Max(0f, dog.WalkData.CurrentWalkStamina - routePlan.StaminaCost);
-        dog.WalkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+        float currentStamina;
+        float maxStamina;
+        SpendDogStamina(dog, routePlan.StaminaCost, out currentStamina, out maxStamina);
 
         if (string.IsNullOrEmpty(routePlan.ReturnSceneName))
         {
@@ -1280,6 +2170,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             RefreshWalkStamina(dog, DateTime.UtcNow, false);
             dog.WalkData.CurrentWalkStamina = Mathf.Min(dog.WalkData.MaxWalkStamina, dog.WalkData.CurrentWalkStamina + activeWalkSession.StaminaCost);
             dog.WalkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+            SyncLegacyEnergyFromStamina(dog);
         }
 
         activeWalkSession = null;
@@ -1413,11 +2304,132 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        dog.ModifyNeed(PawPalDogNeed.Activity, -0.08f);
-        dog.ModifyNeed(PawPalDogNeed.Water, -0.05f);
-        if (dog.Focus < 10)
+        PawPalTrickDefinition sit = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit);
+        PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dog, sit, null, true, false, true);
+        RecordTrickTrainingResult(result);
+    }
+
+    public PawPalDogTrickProgress GetActiveDogTrickProgress(PawPalTrickId trickId)
+    {
+        return GetDogTrickProgress(ActiveDog, trickId);
+    }
+
+    public PawPalDogTrickProgress GetDogTrickProgress(PawPalDogState dog, PawPalTrickId trickId)
+    {
+        if (dog == null)
         {
-            dog.ModifyStat(PawPalDogStatType.Focus, 1);
+            return null;
+        }
+
+        EnsureTrickData(dog);
+        return PawPalTrickCatalog.GetOrCreateProgress(dog, trickId);
+    }
+
+    public bool IsActiveDogTrickLearned(PawPalTrickId trickId)
+    {
+        return IsDogTrickLearned(ActiveDog, trickId);
+    }
+
+    public bool IsDogTrickLearned(PawPalDogState dog, PawPalTrickId trickId)
+    {
+        PawPalDogTrickProgress progress = GetDogTrickProgress(dog, trickId);
+        return progress != null && progress.IsLearned;
+    }
+
+    public bool IsDogTrickLearned(string dogId, PawPalTrickId trickId)
+    {
+        return IsDogTrickLearned(FindDogState(dogId), trickId);
+    }
+
+    public bool CanActiveDogUsePhotoPose(PawPalTrickId trickId)
+    {
+        PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
+        return definition != null
+            && !string.IsNullOrEmpty(definition.PhotoModePoseUnlock)
+            && IsActiveDogTrickLearned(trickId);
+    }
+
+    public void RecordTrickTrainingResult(PawPalTrickAttemptResult result)
+    {
+        if (result == null || ActiveDog == null)
+        {
+            return;
+        }
+
+        EnsureTrickData(ActiveDog);
+        RefreshDogStamina(ActiveDog);
+        ApplyActionRewards(PawPalPlayerActionType.TrainTrick);
+        CommitState(true, false, true);
+    }
+
+    public void PraiseActiveDogForTrick(PawPalTrickId trickId)
+    {
+        PawPalDogState dog = ActiveDog;
+        if (dog == null)
+        {
+            return;
+        }
+
+        PawPalTrickProgressionService.ApplyPraise(dog, trickId);
+        CommitState(true, false, true);
+    }
+
+    public void ApplyActiveDogInteractionBond(float bondDelta01, float moodDelta01, float activityDelta01)
+    {
+        PawPalDogState dog = ActiveDog;
+        if (dog == null)
+        {
+            return;
+        }
+
+        ApplyDogInteractionBond(dog, bondDelta01, moodDelta01, activityDelta01);
+        CommitState(true, false, true);
+    }
+
+    public static void ApplyDogInteractionBond(PawPalDogState dog, float bondDelta01, float moodDelta01, float activityDelta01)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        PawPalTrickCatalog.EnsureDogTrickData(dog);
+        AddDogBondXp(dog, GetBondXpFromLegacyDelta01(bondDelta01));
+        dog.Mood01 = Mathf.Clamp01(dog.Mood01 + moodDelta01);
+        dog.ModifyNeed(PawPalDogNeed.Activity, activityDelta01);
+    }
+
+    public void MarkActiveDogTrickCommandLearned(PawPalTrickId trickId, string commandLabel, float confidence)
+    {
+        PawPalDogState dog = ActiveDog;
+        if (dog == null)
+        {
+            return;
+        }
+
+        EnsureTrickData(dog);
+        PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
+        PawPalDogTrickProgress progress = PawPalTrickCatalog.GetOrCreateProgress(dog, trickId);
+        if (progress == null)
+        {
+            return;
+        }
+
+        progress.IsDiscovered = true;
+        progress.IsLearned = true;
+        progress.MasteryLevel = Mathf.Max(progress.MasteryLevel, 1);
+        progress.CommandConfidence = Mathf.Max(progress.CommandConfidence, Mathf.Clamp01(confidence));
+        progress.CustomVoiceCommand = string.IsNullOrWhiteSpace(commandLabel)
+            ? PawPalTrickCatalog.GetCommandLabel(trickId)
+            : commandLabel;
+        if (definition != null)
+        {
+            progress.MasteryXp = Mathf.Max(progress.MasteryXp, definition.LearnedRequiredXp);
+        }
+
+        if (progress.LearnedAtUtcTicks <= 0L)
+        {
+            progress.LearnedAtUtcTicks = DateTime.UtcNow.Ticks;
         }
 
         ApplyActionRewards(PawPalPlayerActionType.TrainTrick);
@@ -1755,6 +2767,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         catalogById.Clear();
         ownedItemById.Clear();
         dogEquipmentByDogId.Clear();
+        temporaryIntroDogIds.Clear();
         activeWalkSession = null;
 
         dogs.Add(BuildStarterDog());
@@ -1769,6 +2782,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         inventoryRevision = 1;
         shopRevision = 1;
         activeDogIndex = 0;
+        lastPersistentActiveDogIndex = 0;
     }
 
     private void LoadTrainerProgressionData()
@@ -1839,11 +2853,23 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         {
             Id = StarterDogId,
             DisplayName = "Pepper",
+            Gender = PawPalDogGender.Male,
+            Personality = PawPalDogPersonality.Loyal,
+            FurColor = "Beige",
+            Breed = "Labrador",
+            ProfileVersion = PawPalDogPersonalityProfiles.CurrentProfileVersion,
             Food01 = 0.82f,
             Water01 = 0.76f,
             Hygiene01 = 0.7f,
             Activity01 = 0.67f,
             Energy01 = 0.74f,
+            TrickProfileVersion = PawPalTrickSaveDefaults.CurrentTrickProfileVersion,
+            Bond01 = 0.42f,
+            BondXp = Mathf.RoundToInt(0.42f * MaxBondXp),
+            BondLevel = GetBondLevelForXp(Mathf.RoundToInt(0.42f * MaxBondXp)),
+            Mood01 = PawPalTrickSaveDefaults.DefaultMood01,
+            TrainingFatigue01 = 0f,
+            LastTrainingFatigueUpdateUtcTicks = DateTime.UtcNow.Ticks,
             Endurance = 2,
             Mobility = 4,
             Speed = 3,
@@ -1857,11 +2883,23 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         {
             Id = "miso",
             DisplayName = "Miso",
+            Gender = PawPalDogGender.Female,
+            Personality = PawPalDogPersonality.Relaxed,
+            FurColor = "Brown",
+            Breed = "Corgi",
+            ProfileVersion = PawPalDogPersonalityProfiles.CurrentProfileVersion,
             Food01 = 0.9f,
             Water01 = 0.85f,
             Hygiene01 = 0.8f,
             Activity01 = 0.72f,
             Energy01 = 0.79f,
+            TrickProfileVersion = PawPalTrickSaveDefaults.CurrentTrickProfileVersion,
+            Bond01 = PawPalTrickSaveDefaults.DefaultBond01,
+            BondXp = Mathf.RoundToInt(PawPalTrickSaveDefaults.DefaultBond01 * MaxBondXp),
+            BondLevel = GetBondLevelForXp(Mathf.RoundToInt(PawPalTrickSaveDefaults.DefaultBond01 * MaxBondXp)),
+            Mood01 = 0.76f,
+            TrainingFatigue01 = 0f,
+            LastTrainingFatigueUpdateUtcTicks = DateTime.UtcNow.Ticks,
             Endurance = 4,
             Mobility = 3,
             Speed = 4,
@@ -1875,11 +2913,23 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         {
             Id = "suki",
             DisplayName = "Suki",
+            Gender = PawPalDogGender.Female,
+            Personality = PawPalDogPersonality.Energetic,
+            FurColor = "White",
+            Breed = "Husky",
+            ProfileVersion = PawPalDogPersonalityProfiles.CurrentProfileVersion,
             Food01 = 1f,
             Water01 = 1f,
             Hygiene01 = 1f,
             Activity01 = 0.9f,
             Energy01 = 1f,
+            TrickProfileVersion = PawPalTrickSaveDefaults.CurrentTrickProfileVersion,
+            Bond01 = 0.38f,
+            BondXp = Mathf.RoundToInt(0.38f * MaxBondXp),
+            BondLevel = GetBondLevelForXp(Mathf.RoundToInt(0.38f * MaxBondXp)),
+            Mood01 = 0.82f,
+            TrainingFatigue01 = 0f,
+            LastTrainingFatigueUpdateUtcTicks = DateTime.UtcNow.Ticks,
             Endurance = 3,
             Mobility = 5,
             Speed = 4,
@@ -2212,17 +3262,14 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         for (int i = 0; i < dogs.Count; i++)
         {
             PawPalDogState dog = dogs[i];
+            PawPalDogPersonalityProfiles.EnsureProfile(dog);
             changed |= ApplyNeedDrain(dog, PawPalDogNeed.Food, FoodDrainPerHour * deltaHours);
             changed |= ApplyNeedDrain(dog, PawPalDogNeed.Water, WaterDrainPerHour * deltaHours);
             changed |= ApplyNeedDrain(dog, PawPalDogNeed.Hygiene, HygieneDrainPerHour * deltaHours);
             changed |= ApplyNeedDrain(dog, PawPalDogNeed.Activity, ActivityDrainPerHour * deltaHours);
+            changed |= RefreshWalkStamina(dog, DateTime.UtcNow, false);
 
-            float nextEnergy = Mathf.Clamp01(dog.Energy01 - (EnergyDrainPerHour * deltaHours));
-            if (!Mathf.Approximately(nextEnergy, dog.Energy01))
-            {
-                dog.Energy01 = nextEnergy;
-                changed = true;
-            }
+            changed |= TickNewDogWhinyHours(dog, deltaHours);
         }
 
         if (changed)
@@ -2233,6 +3280,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     private bool ApplyNeedDrain(PawPalDogState dog, PawPalDogNeed need, float drain)
     {
+        drain *= PawPalDogPersonalityProfiles.GetNeedDrainMultiplier(dog, need);
         float current = dog.GetNeed(need);
         float next = Mathf.Clamp01(current - drain);
         if (Mathf.Approximately(current, next))
@@ -2241,6 +3289,23 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         dog.SetNeed(need, next);
+        return true;
+    }
+
+    private static bool TickNewDogWhinyHours(PawPalDogState dog, float deltaHours)
+    {
+        if (dog == null || dog.NewDogWhinyHoursRemaining <= 0f || deltaHours <= 0f)
+        {
+            return false;
+        }
+
+        float nextHours = Mathf.Max(0f, dog.NewDogWhinyHoursRemaining - deltaHours);
+        if (Mathf.Approximately(nextHours, dog.NewDogWhinyHoursRemaining))
+        {
+            return false;
+        }
+
+        dog.NewDogWhinyHoursRemaining = nextHours;
         return true;
     }
 
@@ -2265,12 +3330,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         if (foodItem != null && foodItem.Id == PremiumFoodItemId)
         {
             dog.ModifyNeed(PawPalDogNeed.Food, 0.45f);
-            dog.Energy01 = Mathf.Clamp01(dog.Energy01 + 0.12f);
         }
         else
         {
             dog.ModifyNeed(PawPalDogNeed.Food, 0.35f);
-            dog.Energy01 = Mathf.Clamp01(dog.Energy01 + 0.08f);
         }
     }
 
@@ -2330,34 +3393,68 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         dog.ModifyNeed(PawPalDogNeed.Water, 0.4f);
-        dog.Energy01 = Mathf.Clamp01(dog.Energy01 + 0.04f);
     }
 
     private void EnsureWalkData(PawPalDogState dog)
     {
+        EnsureCanonicalStaminaData(dog);
+    }
+
+    private bool EnsureTrickData(PawPalDogState dog)
+    {
+        PawPalVoiceProfileStore unusedLegacyStore = null;
+        return EnsureTrickData(dog, ref unusedLegacyStore);
+    }
+
+    private bool EnsureTrickData(PawPalDogState dog, ref PawPalVoiceProfileStore legacyVoiceStore)
+    {
         if (dog == null)
         {
-            return;
+            return false;
         }
 
-        if (dog.WalkData == null)
+        int previousVersion = dog.TrickProfileVersion;
+        bool changed = PawPalTrickCatalog.EnsureDogTrickData(dog);
+        if (previousVersion < PawPalTrickSaveDefaults.CurrentTrickProfileVersion)
         {
-            dog.WalkData = new PawPalDogWalkData();
+            changed |= TryMigrateLegacySitVoiceProfile(dog, ref legacyVoiceStore);
         }
 
-        PawPalDogWalkData walkData = dog.WalkData;
-        if (walkData.MaxWalkStamina <= 0.001f)
+        return changed;
+    }
+
+    private bool TryMigrateLegacySitVoiceProfile(PawPalDogState dog, ref PawPalVoiceProfileStore legacyVoiceStore)
+    {
+        if (dog == null || string.IsNullOrEmpty(dog.Id))
         {
-            walkData.MaxWalkStamina = Mathf.Clamp(DefaultMaxWalkStamina + dog.Endurance * 2f, DefaultMaxWalkStamina, MaxWalkStaminaCap);
-            walkData.CurrentWalkStamina = walkData.MaxWalkStamina;
+            return false;
         }
 
-        walkData.MaxWalkStamina = Mathf.Clamp(walkData.MaxWalkStamina, 1f, MaxWalkStaminaCap);
-        walkData.CurrentWalkStamina = Mathf.Clamp(walkData.CurrentWalkStamina, 0f, walkData.MaxWalkStamina);
-        if (walkData.LastStaminaRefreshAtUtcTicks <= 0L)
+        if (legacyVoiceStore == null)
         {
-            walkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+            legacyVoiceStore = new PawPalVoiceProfileStore();
         }
+
+        if (!legacyVoiceStore.IsTrickLearned(dog.Id, PawPalVoiceTrick.Sit, 3))
+        {
+            return false;
+        }
+
+        PawPalTrickDefinition sit = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit);
+        PawPalDogTrickProgress progress = PawPalTrickCatalog.GetOrCreateProgress(dog, PawPalTrickId.Sit);
+        if (progress == null || progress.IsLearned)
+        {
+            return false;
+        }
+
+        progress.IsDiscovered = true;
+        progress.IsLearned = true;
+        progress.MasteryLevel = Mathf.Max(progress.MasteryLevel, 1);
+        progress.MasteryXp = Mathf.Max(progress.MasteryXp, sit != null ? sit.LearnedRequiredXp : 45f);
+        progress.CustomVoiceCommand = PawPalTrickCatalog.GetCommandLabel(PawPalTrickId.Sit);
+        progress.CommandConfidence = Mathf.Max(progress.CommandConfidence, 0.7f);
+        progress.LearnedAtUtcTicks = DateTime.UtcNow.Ticks;
+        return true;
     }
 
     private bool RefreshWalkStamina(PawPalDogState dog, DateTime nowUtc, bool persistRefreshTime)
@@ -2394,6 +3491,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             walkData.LastStaminaRefreshAtUtcTicks = nowUtc.Ticks;
         }
 
+        SyncLegacyEnergyFromStamina(dog);
         return !Mathf.Approximately(previous, walkData.CurrentWalkStamina);
     }
 
@@ -2447,7 +3545,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         dog.ModifyNeed(PawPalDogNeed.Water, -0.08f);
         dog.ModifyNeed(PawPalDogNeed.Food, -0.06f);
         dog.ModifyNeed(PawPalDogNeed.Hygiene, -0.03f);
-        dog.Energy01 = Mathf.Clamp01(dog.Energy01 - 0.04f);
+        SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.04f), out _, out _);
 
         PawPalDogWalkData walkData = dog.WalkData;
         walkData.TotalWalksCompleted++;
@@ -2460,6 +3558,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             walkData.WalkStaminaXp -= WalkStaminaXpNeededPerLevel;
             walkData.MaxWalkStamina = Mathf.Min(MaxWalkStaminaCap, walkData.MaxWalkStamina + WalkStaminaIncreasePerLevel);
         }
+        walkData.CurrentWalkStamina = Mathf.Clamp(walkData.CurrentWalkStamina, 0f, walkData.MaxWalkStamina);
+        SyncLegacyEnergyFromStamina(dog);
 
         if (walkData.TotalWalksCompleted % 3 == 0 && dog.Endurance < 10)
         {
@@ -2596,9 +3696,21 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         PawPalDogState dogState = BuildKnownDogState(dogId);
         if (dogState != null)
         {
+            InitializeNewDogWhinyState(dogState);
             dogs.Add(dogState);
             EnsureDogEquipmentState(dogState.Id);
         }
+    }
+
+    private static void InitializeNewDogWhinyState(PawPalDogState dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        PawPalDogPersonalityProfiles.EnsureProfile(dog);
+        dog.NewDogWhinyHoursRemaining = PawPalDogPersonalityProfiles.GetNewDogWhinyInitialHours(dog.Personality);
     }
 
     private bool HasDog(string dogId)
@@ -3030,14 +4142,23 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     {
         PawPalSaveData saveData = new PawPalSaveData();
         saveData.TrainerState = CloneTrainerState(trainerState);
-        saveData.ActiveDogIndex = activeDogIndex;
+        saveData.ActiveDogIndex = GetSaveActiveDogIndex();
         saveData.NextDailyResetUtcTicks = nextDailyResetUtc.Ticks;
         saveData.LastProcessedTrainerMilestoneLevel = lastProcessedTrainerMilestoneLevel;
-        saveData.ActiveWalkSession = CloneWalkSession(activeWalkSession);
+        saveData.ActiveWalkSession = activeWalkSession != null && IsTemporaryIntroDogId(activeWalkSession.SelectedDogId)
+            ? null
+            : CloneWalkSession(activeWalkSession);
 
         for (int i = 0; i < dogs.Count; i++)
         {
+            if (dogs[i] == null || IsTemporaryIntroDogId(dogs[i].Id))
+            {
+                continue;
+            }
+
+            PawPalDogPersonalityProfiles.EnsureProfile(dogs[i]);
             EnsureWalkData(dogs[i]);
+            EnsureTrickData(dogs[i]);
             saveData.Dogs.Add(CloneDogState(dogs[i]));
         }
 
@@ -3055,6 +4176,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         for (int i = 0; i < dogEquipment.Count; i++)
         {
             PawPalDogEquipmentState state = dogEquipment[i];
+            if (state == null || IsTemporaryIntroDogId(state.DogId))
+            {
+                continue;
+            }
+
             saveData.DogEquipment.Add(new PawPalDogEquipmentState
             {
                 DogId = state.DogId,
@@ -3075,11 +4201,45 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return saveData;
     }
 
+    private int GetSaveActiveDogIndex()
+    {
+        int persistentIndex = 0;
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog == null || IsTemporaryIntroDogId(dog.Id))
+            {
+                continue;
+            }
+
+            if (i == activeDogIndex)
+            {
+                lastPersistentActiveDogIndex = persistentIndex;
+                return persistentIndex;
+            }
+
+            persistentIndex++;
+        }
+
+        if (persistentIndex == 0)
+        {
+            return 0;
+        }
+
+        return Mathf.Clamp(lastPersistentActiveDogIndex, 0, persistentIndex - 1);
+    }
+
+    private bool IsTemporaryIntroDogId(string dogId)
+    {
+        return !string.IsNullOrWhiteSpace(dogId) && temporaryIntroDogIds.Contains(dogId);
+    }
+
     private void RestoreFromSaveData(PawPalSaveData saveData)
     {
         trainerState = CloneTrainerState(saveData.TrainerState);
 
         dogs.Clear();
+        temporaryIntroDogIds.Clear();
         for (int i = 0; i < saveData.Dogs.Count; i++)
         {
             dogs.Add(CloneDogState(saveData.Dogs[i]));
@@ -3095,6 +4255,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             EnsureWalkData(dogs[i]);
         }
 
+        bool migratedDogProfiles = EnsureDogProfiles();
+        bool migratedTrickData = EnsureAllTrickData();
         bool backfilledDogNeeds = BackfillIdenticalDogNeedsIfNeeded();
 
         ownedItems.Clear();
@@ -3151,13 +4313,37 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         activeWalkSession = CloneWalkSession(saveData.ActiveWalkSession);
 
         activeDogIndex = Mathf.Clamp(saveData.ActiveDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
+        lastPersistentActiveDogIndex = activeDogIndex;
         inventoryRevision++;
         shopRevision++;
 
-        if (backfilledDogNeeds || migratedEquipment)
+        if (migratedDogProfiles || migratedTrickData || backfilledDogNeeds || migratedEquipment)
         {
             SaveProfile();
         }
+    }
+
+    private bool EnsureAllTrickData()
+    {
+        bool changed = false;
+        PawPalVoiceProfileStore legacyVoiceStore = null;
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            changed |= EnsureTrickData(dogs[i], ref legacyVoiceStore);
+        }
+
+        return changed;
+    }
+
+    private bool EnsureDogProfiles()
+    {
+        bool changed = false;
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            changed |= PawPalDogPersonalityProfiles.EnsureProfile(dogs[i]);
+        }
+
+        return changed;
     }
 
     private bool MigrateLegacyEquipmentReferences()
@@ -3309,17 +4495,68 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         {
             Id = source.Id,
             DisplayName = source.DisplayName,
+            Gender = source.Gender,
+            Personality = source.Personality,
+            FurColor = source.FurColor,
+            Breed = source.Breed,
+            ProfileVersion = source.ProfileVersion,
             Food01 = source.Food01,
             Water01 = source.Water01,
             Hygiene01 = source.Hygiene01,
             Activity01 = source.Activity01,
             Energy01 = source.Energy01,
             WalkData = CloneWalkData(source.WalkData),
+            TrickProfileVersion = source.TrickProfileVersion,
+            Bond01 = source.Bond01,
+            BondXp = source.BondXp,
+            BondLevel = source.BondLevel,
+            Mood01 = source.Mood01,
+            TrainingFatigue01 = source.TrainingFatigue01,
+            LastTrainingFatigueUpdateUtcTicks = source.LastTrainingFatigueUpdateUtcTicks,
+            Tricks = CloneTrickProgress(source.Tricks),
             Endurance = source.Endurance,
             Mobility = source.Mobility,
             Speed = source.Speed,
-            Focus = source.Focus
+            Focus = source.Focus,
+            NewDogWhinyHoursRemaining = source.NewDogWhinyHoursRemaining
         };
+    }
+
+    private static List<PawPalDogTrickProgress> CloneTrickProgress(List<PawPalDogTrickProgress> source)
+    {
+        List<PawPalDogTrickProgress> clone = new List<PawPalDogTrickProgress>();
+        if (source == null)
+        {
+            return clone;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            PawPalDogTrickProgress progress = source[i];
+            if (progress == null)
+            {
+                continue;
+            }
+
+            clone.Add(new PawPalDogTrickProgress
+            {
+                TrickId = progress.TrickId,
+                IsDiscovered = progress.IsDiscovered,
+                IsLearned = progress.IsLearned,
+                MasteryXp = progress.MasteryXp,
+                MasteryLevel = progress.MasteryLevel,
+                TimesPracticedToday = progress.TimesPracticedToday,
+                TotalSuccessfulAttempts = progress.TotalSuccessfulAttempts,
+                TotalFailedAttempts = progress.TotalFailedAttempts,
+                CustomVoiceCommand = progress.CustomVoiceCommand,
+                CommandConfidence = progress.CommandConfidence,
+                LastPracticedAtUtcTicks = progress.LastPracticedAtUtcTicks,
+                LearnedAtUtcTicks = progress.LearnedAtUtcTicks,
+                LastPracticeDayUtcTicks = progress.LastPracticeDayUtcTicks
+            });
+        }
+
+        return clone;
     }
 
     private static PawPalDogWalkData CloneWalkData(PawPalDogWalkData source)
@@ -3384,6 +4621,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             EventType = source.EventType,
             LocationId = source.LocationId,
             DisplayName = source.DisplayName,
+            BodyText = source.BodyText,
             RewardItemId = source.RewardItemId,
             Progress = source.Progress,
             Resolved = source.Resolved,
@@ -3479,7 +4717,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             && firstDog.Water01 == secondDog.Water01
             && firstDog.Hygiene01 == secondDog.Hygiene01
             && firstDog.Activity01 == secondDog.Activity01
-            && firstDog.Energy01 == secondDog.Energy01;
+            && Mathf.Approximately(GetDogStamina01(firstDog), GetDogStamina01(secondDog));
     }
 
     private static void ApplyDeterministicNeedBackfill(PawPalDogState dog, int dogIndex)
@@ -3528,11 +4766,22 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     private static void SetDogNeeds(PawPalDogState dog, float food, float water, float hygiene, float activity, float energy)
     {
+        if (dog == null)
+        {
+            return;
+        }
+
         dog.Food01 = Mathf.Clamp01(food);
         dog.Water01 = Mathf.Clamp01(water);
         dog.Hygiene01 = Mathf.Clamp01(hygiene);
         dog.Activity01 = Mathf.Clamp01(activity);
         dog.Energy01 = Mathf.Clamp01(energy);
+        EnsureCanonicalStaminaData(dog);
+        if (dog.WalkData != null)
+        {
+            dog.WalkData.CurrentWalkStamina = Mathf.Lerp(0f, dog.WalkData.MaxWalkStamina, dog.Energy01);
+            dog.WalkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+        }
     }
 
     private static PawPalDailyTaskState CloneDailyTaskState(PawPalDailyTaskState source)
