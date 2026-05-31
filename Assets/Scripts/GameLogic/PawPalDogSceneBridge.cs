@@ -1236,15 +1236,24 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         Bounds bounds;
-        float radius = TryGetToyBlockingBounds(spawnedToy, out bounds)
-            ? Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z))
+        float visualRadius = TryGetToyBlockingBounds(spawnedToy, out bounds)
+            ? Mathf.Max(bounds.extents.x, bounds.extents.z)
             : 0.35f;
-        float paddedRadius = radius + 0.18f;
 
         if (metadata != null)
         {
             metadata.ConfigureLargeToyPhysicsAndNavigation();
-            metadata.SetBlocksDogNavigation(true, paddedRadius);
+            if (TryGetToyBlockingBounds(spawnedToy, out bounds))
+            {
+                visualRadius = Mathf.Max(bounds.extents.x, bounds.extents.z);
+            }
+        }
+
+        float navigationRadius = PawPalToyRuntimeMetadata.GetRecommendedLargeToyNavigationBlockRadius(visualRadius);
+
+        if (metadata != null)
+        {
+            metadata.SetBlocksDogNavigation(true, navigationRadius);
         }
 
         PawPalBallBounceAudio.EnsureOn(spawnedToy);
@@ -1256,11 +1265,13 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         obstacle.shape = NavMeshObstacleShape.Capsule;
-        obstacle.radius = paddedRadius;
+        obstacle.radius = navigationRadius;
         obstacle.height = TryGetToyBlockingBounds(spawnedToy, out bounds)
             ? Mathf.Max(0.2f, bounds.size.y)
-            : Mathf.Max(0.2f, paddedRadius * 2f);
-        obstacle.center = Vector3.zero;
+            : Mathf.Max(0.2f, navigationRadius * 2f);
+        obstacle.center = TryGetToyBlockingBounds(spawnedToy, out bounds)
+            ? spawnedToy.transform.InverseTransformPoint(bounds.center)
+            : Vector3.zero;
         obstacle.carving = true;
         obstacle.carveOnlyStationary = false;
         obstacle.carvingMoveThreshold = 0.08f;

@@ -31,6 +31,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     private UiSpriteLibrary spriteLibrary;
     private RectTransform root;
+    private CanvasGroup rootGroup;
     private Image micBackground;
     private Image micIcon;
     private Image micBorder;
@@ -53,6 +54,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private float progressShownAt;
     private float progressFrom01;
     private float progressTo01;
+    private bool visible;
     private bool micListening;
     private bool bondPulseActive;
 
@@ -61,7 +63,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public bool IsVisible
     {
-        get { return gameObject.activeSelf; }
+        get { return visible; }
     }
 
     public void Initialize(UiSpriteLibrary sprites)
@@ -69,17 +71,22 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         spriteLibrary = sprites;
         root = GetComponent<RectTransform>();
         UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
+        rootGroup = gameObject.GetComponent<CanvasGroup>();
+        if (rootGroup == null)
+        {
+            rootGroup = gameObject.AddComponent<CanvasGroup>();
+        }
 
         BuildFloatingCue(root);
         BuildFloatingProgressCue(root);
         BuildMicButton(root);
         BuildCloseButton(root);
-        gameObject.SetActive(false);
+        SetRootVisible(false);
     }
 
     public void Show(PawPalDogState dog, bool micListening, float timeoutSeconds)
     {
-        gameObject.SetActive(true);
+        SetRootVisible(true);
         SetMicListening(micListening);
         SetTimeout(timeoutSeconds);
         SetBondPulse(false);
@@ -94,7 +101,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         trackedHead = null;
         HideCue();
         HideProgressCue();
-        gameObject.SetActive(false);
+        SetRootVisible(false);
     }
 
     public void SetTitle(string text)
@@ -181,7 +188,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!gameObject.activeSelf)
+        if (!visible)
         {
             return;
         }
@@ -189,6 +196,19 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         UpdateCuePosition();
         UpdateProgressCuePosition();
         UpdateMicPulse();
+    }
+
+    private void SetRootVisible(bool isVisible)
+    {
+        visible = isVisible;
+        if (rootGroup == null)
+        {
+            return;
+        }
+
+        rootGroup.alpha = isVisible ? 1f : 0f;
+        rootGroup.interactable = isVisible;
+        rootGroup.blocksRaycasts = isVisible;
     }
 
     private void BuildFloatingCue(RectTransform parent)

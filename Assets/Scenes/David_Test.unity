@@ -3595,13 +3595,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 550098874}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.11841653, y: -0.38091338, z: 0.031965245, w: 0.9164392}
+  m_LocalRotation: {x: -0.12122033, y: 0.022595614, z: -0.01869933, w: 0.9921922}
   m_LocalPosition: {x: 0.0188, y: 0.0204, z: -0.0043}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1316589438}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -13.869, y: 2.915, z: -2.514}
 --- !u!1001 &581412928
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -5051,8 +5051,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 700573927}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.12237658, y: -0.76881295, z: 0.15466842, w: 0.6082995}
-  m_LocalPosition: {x: 2.5933754, y: 3.111, z: 0.20675075}
+  m_LocalRotation: {x: 0.122376576, y: -0.76881295, z: 0.15466839, w: 0.6082995}
+  m_LocalPosition: {x: 2.5933754, y: 3.111, z: 0.20675102}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5563,7 +5563,7 @@ Transform:
   m_GameObject: {fileID: 763385787}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.000004529953, y: 1.5609999, z: -0.111365795}
+  m_LocalPosition: {x: -0.000004529953, y: 1.5610001, z: -0.11136556}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -5584,7 +5584,7 @@ ReflectionProbe:
   m_TimeSlicingMode: 1
   m_Resolution: 128
   m_UpdateFrequency: 0
-  m_BoxSize: {x: 6.774714, y: 4.252, z: 6.9623294}
+  m_BoxSize: {x: 6.774714, y: 4.2520003, z: 6.96233}
   m_BoxOffset: {x: 0, y: 0, z: 0}
   m_NearClip: 0.3
   m_FarClip: 1000
@@ -9211,7 +9211,7 @@ Transform:
   m_GameObject: {fileID: 1230461715}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.679214, y: 2.6609998, z: 0.5248672}
+  m_LocalPosition: {x: 0.679214, y: 2.6610003, z: 0.5248675}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -14794,6 +14794,7 @@ MonoBehaviour:
   minimumMovementCommitDuration: 0.75
   crowdedMovementAbortDuration: 0.55
   agentRadiusFromPersonalSpace: 0.36
+  crowdingRepathInterval: 0.22
   preventDogDogPhysicsPush: 1
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
@@ -14913,12 +14914,17 @@ MonoBehaviour:
   sniffingClip: {fileID: 0}
   scratchAndShakingClip: {fileID: 0}
   shakingX3Clip: {fileID: 0}
+  lightBarkClip: {fileID: 0}
+  darkBarkClip: {fileID: 0}
+  barkAudioVolume: 0.72
   pantingClip: {fileID: 0}
   pantingVolume: 0.42
   annoyedClip: {fileID: 0}
   annoyedVolume: 0.58
   whiningClip: {fileID: 0}
   whiningVolume: 0.5
+  tugGnarlClip: {fileID: 0}
+  tugGnarlVolume: 0.52
   idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
   ambientPantingIntervalRange: {x: 20, y: 32}
@@ -14979,6 +14985,7 @@ MonoBehaviour:
   minimumMovementCommitDuration: 0.75
   crowdedMovementAbortDuration: 0.55
   agentRadiusFromPersonalSpace: 0.36
+  crowdingRepathInterval: 0.22
   preventDogDogPhysicsPush: 1
   animatorOverride: {fileID: 0}
   scratchIdleIndex: 0
@@ -15098,12 +15105,17 @@ MonoBehaviour:
   sniffingClip: {fileID: 0}
   scratchAndShakingClip: {fileID: 0}
   shakingX3Clip: {fileID: 0}
+  lightBarkClip: {fileID: 0}
+  darkBarkClip: {fileID: 0}
+  barkAudioVolume: 0.72
   pantingClip: {fileID: 0}
   pantingVolume: 0.42
   annoyedClip: {fileID: 0}
   annoyedVolume: 0.58
   whiningClip: {fileID: 0}
   whiningVolume: 0.5
+  tugGnarlClip: {fileID: 0}
+  tugGnarlVolume: 0.52
   idleActionVolume: 0.75
   minSecondsBetweenBallBounceSounds: 0.18
   ambientPantingIntervalRange: {x: 20, y: 32}

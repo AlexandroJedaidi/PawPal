@@ -1212,10 +1212,25 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
     private static void DestroyNamedPreviewObject(string objectName)
     {
-        GameObject previewObject = GameObject.Find(objectName);
-        if (previewObject != null)
+        if (string.IsNullOrWhiteSpace(objectName))
         {
+            return;
+        }
+
+        GameObject[] loadedObjects = Resources.FindObjectsOfTypeAll<GameObject>();
+        for (int i = 0; i < loadedObjects.Length; i++)
+        {
+            GameObject previewObject = loadedObjects[i];
+            if (previewObject == null
+                || previewObject.hideFlags != HideFlags.None
+                || !previewObject.scene.IsValid()
+                || !string.Equals(previewObject.name, objectName, System.StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             Destroy(previewObject);
+            break;
         }
     }
 

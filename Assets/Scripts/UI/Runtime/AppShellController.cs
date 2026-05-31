@@ -332,7 +332,7 @@ public class AppShellController : MonoBehaviour
             bool modalVisible = photoModeActive
                 || dogInteractionModeActive
                 || (photoModeView != null && photoModeView.gameObject.activeSelf)
-                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
+                || (dogInteractionModeView != null && dogInteractionModeView.IsVisible);
             modalLayer.gameObject.SetActive(modalVisible);
         }
 
@@ -408,7 +408,7 @@ public class AppShellController : MonoBehaviour
             bool modalVisible = photoModeActive
                 || dogInteractionModeActive
                 || (photoModeView != null && photoModeView.gameObject.activeSelf)
-                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
+                || (dogInteractionModeView != null && dogInteractionModeView.IsVisible);
             modalLayer.gameObject.SetActive(modalVisible);
         }
 
@@ -418,7 +418,7 @@ public class AppShellController : MonoBehaviour
 
     public void HandleDogInteractionModeExitedFromController()
     {
-        if (!dogInteractionModeActive && (dogInteractionModeView == null || !dogInteractionModeView.gameObject.activeSelf))
+        if (!dogInteractionModeActive && (dogInteractionModeView == null || !dogInteractionModeView.IsVisible))
         {
             return;
         }
@@ -449,7 +449,7 @@ public class AppShellController : MonoBehaviour
             bool modalVisible = photoModeActive
                 || dogInteractionModeActive
                 || (photoModeView != null && photoModeView.gameObject.activeSelf)
-                || (dogInteractionModeView != null && dogInteractionModeView.gameObject.activeSelf);
+                || (dogInteractionModeView != null && dogInteractionModeView.IsVisible);
             modalLayer.gameObject.SetActive(modalVisible);
         }
 

@@ -479,6 +479,48 @@ public sealed class PawPalTrickTrainingEditModeTests
     }
 
     [Test]
+    public void LieCannotGainProgressFromSitPoseWhileStillLocked()
+    {
+        PawPalDogState dog = BuildDog();
+        PawPalTrickCatalog.EnsureDogTrickData(dog);
+        PawPalTrickDefinition lie = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Lie);
+
+        PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(
+            dog,
+            lie,
+            PawPalTrainingConfig.CreateRuntimeDefault(),
+            false,
+            false,
+            true);
+
+        Assert.AreEqual(PawPalTrickFailureReason.MissingPrerequisite, result.Reason);
+        Assert.AreEqual(result.PreviousProgress01, result.CurrentProgress01, 0.0001f);
+        Assert.IsFalse(result.MadeProgress);
+    }
+
+    [Test]
+    public void SwipeDownHoldWhileSittingMapsToLieButPlainSwipeDownStaysSit()
+    {
+        PawPalGestureSnapshot heldSwipe = new PawPalGestureSnapshot
+        {
+            Type = PawPalGestureType.SwipeDown,
+            DurationSeconds = PawPalTrickGestureMapper.LieSwipeHoldMinimumSeconds + 0.05f
+        };
+        PawPalGestureSnapshot shortSwipe = new PawPalGestureSnapshot
+        {
+            Type = PawPalGestureType.SwipeDown,
+            DurationSeconds = PawPalTrickGestureMapper.LieSwipeHoldMinimumSeconds - 0.1f
+        };
+
+        Assert.AreEqual(
+            PawPalTrickId.Lie,
+            PawPalTrickGestureMapper.MapGestureToTrick(heldSwipe, PawPalTrickId.Sit, true));
+        Assert.AreEqual(
+            PawPalTrickId.Sit,
+            PawPalTrickGestureMapper.MapGestureToTrick(shortSwipe, PawPalTrickId.Sit, true));
+    }
+
+    [Test]
     public void CoreTricksUseExplicitFocusThresholds()
     {
         Assert.AreEqual(0, PawPalTrickFocusRequirement.GetRequiredFocus(PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit)));
@@ -774,6 +816,68 @@ public sealed class PawPalTrickTrainingEditModeTests
     }
 
     [Test]
+    public void InteractionMissIdleEligibilityOnlyCoversRandomMiss()
+    {
+        GameObject gameObject = new GameObject("MissIdleDog");
+        try
+        {
+            DogRoomAgent dog = gameObject.AddComponent<DogRoomAgent>();
+            Assert.IsTrue(InvokePrivateStatic<bool>(
+                typeof(PawPalDogInteractionModeController),
+                "ShouldPlayInteractionMissIdle",
+                new PawPalTrickAttemptResult
+                {
+                    Success = false,
+                    Reason = PawPalTrickFailureReason.RandomMiss
+                },
+                dog));
+            Assert.IsFalse(InvokePrivateStatic<bool>(
+                typeof(PawPalDogInteractionModeController),
+                "ShouldPlayInteractionMissIdle",
+                new PawPalTrickAttemptResult
+                {
+                    Success = false,
+                    Reason = PawPalTrickFailureReason.LowFocus
+                },
+                dog));
+            Assert.IsFalse(InvokePrivateStatic<bool>(
+                typeof(PawPalDogInteractionModeController),
+                "ShouldPlayInteractionMissIdle",
+                new PawPalTrickAttemptResult
+                {
+                    Success = false,
+                    Reason = PawPalTrickFailureReason.MissingPrerequisite
+                },
+                dog));
+            Assert.IsFalse(InvokePrivateStatic<bool>(
+                typeof(PawPalDogInteractionModeController),
+                "ShouldPlayInteractionMissIdle",
+                new PawPalTrickAttemptResult
+                {
+                    Success = true,
+                    Reason = PawPalTrickFailureReason.None
+                },
+                dog));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(gameObject);
+        }
+    }
+
+    [Test]
+    public void InteractionMissIdleSuffixPoolMatchesExpectedSet()
+    {
+        string[] suffixes = GetPrivateStaticField<string[]>(
+            typeof(DogRoomAgent),
+            "InteractionTrainingMissIdleSuffixes");
+
+        CollectionAssert.AreEqual(
+            new[] { "Idle_1", "Idle_2", "Idle_3", "Idle_4", "Idle_6", "Idle_7" },
+            suffixes);
+    }
+
+    [Test]
     public void PraiseStateEnablesAfterSuccessAndResetsAfterPraiseOrTrickChange()
     {
         GameObject gameObject = new GameObject("TrainingControllerTest");
@@ -897,6 +1001,14 @@ public sealed class PawPalTrickTrainingEditModeTests
         FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field, "Missing field " + fieldName);
         field.SetValue(target, value);
+    }
+
+    private static TResult GetPrivateStaticField<TResult>(Type targetType, string fieldName)
+    {
+        FieldInfo field = targetType.GetField(fieldName, BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(field, "Missing static field " + fieldName);
+        object value = field.GetValue(null);
+        return value is TResult typedValue ? typedValue : default(TResult);
     }
 
     private static TResult InvokeStaticOnRuntimeType<TResult>(string typeName, string methodName, params object[] arguments)

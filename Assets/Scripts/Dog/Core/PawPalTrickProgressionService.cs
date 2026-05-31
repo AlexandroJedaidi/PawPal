@@ -135,11 +135,6 @@ public static class PawPalTrickProgressionService
             PawPalDogTrickProgress requiredProgress = PawPalTrickCatalog.GetProgress(dog, requiredTricks[i]);
             if (requiredProgress == null || !requiredProgress.IsLearned)
             {
-                if (definition.Id == PawPalTrickId.Lie && prerequisitePoseSatisfied)
-                {
-                    continue;
-                }
-
                 return requiredTricks[i];
             }
         }

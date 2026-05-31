@@ -14,6 +14,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float TugMoodGain = 0.008f;
     private const float TugActivityGain = 0.01f;
     private const float TugRewardInterval = 1.35f;
+    private const float TugMinimumHoldDuration = 0.3f;
+    private const int TugRoundsBeforeToyDrop = 2;
     private const float ToyScreenPadding = 28f;
 
     private AppShellController shell;
@@ -30,11 +32,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private float nextPettingRewardTime;
     private float nextTugRewardTime;
     private float ignoreGestureUntil;
+    private float tugStartedAt;
     private bool active;
     private bool micListening;
     private bool dogIsSitting;
     private bool tugActive;
+    private bool tugRoundCounted;
     private int tugPointerId = -1;
+    private int completedTugRounds;
+    private string pendingExitReason = "unknown";
 
     public bool IsActive
     {
@@ -90,12 +96,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         if (remaining <= 0f)
         {
+            pendingExitReason = "timeout";
             ExitDogInteractionMode();
         }
     }
 
     private void OnDisable()
     {
+        pendingExitReason = "controller_disabled";
         ExitDogInteractionMode();
     }
 
@@ -118,6 +126,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         activeDog = dog;
         micListening = keepMicListening;
         dogIsSitting = false;
+        tugRoundCounted = false;
+        completedTugRounds = 0;
+        tugStartedAt = 0f;
         ResetActivity();
 
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
@@ -151,6 +162,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (interactionDirector != null && !interactionDirector.TryCallDogToInteraction(activeDog, ResolveInteractionCamera(), out failureReason))
         {
             SetStatus(string.IsNullOrWhiteSpace(failureReason) ? "Your dog is busy right now." : failureReason);
+            pendingExitReason = "director_start_failed";
             ExitDogInteractionMode();
             return false;
         }
@@ -223,9 +235,17 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return;
         }
 
+        Debug.Log("[DogInteractionMode] Exit reason=" + pendingExitReason
+            + " active=" + active
+            + " dog=" + (activeDog != null ? activeDog.name : "null")
+            + " directorRunning=" + (interactionDirector != null && interactionDirector.IsRunning), this);
+
         active = false;
         tugActive = false;
+        tugRoundCounted = false;
         tugPointerId = -1;
+        completedTugRounds = 0;
+        tugStartedAt = 0f;
         if (attemptRoutine != null)
         {
             StopCoroutine(attemptRoutine);
@@ -265,6 +285,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         {
             shell.HandleDogInteractionModeExitedFromController();
         }
+
+        pendingExitReason = "unknown";
     }
 
     private void HandleGestureRecognized(PawPalGestureSnapshot snapshot)
@@ -318,6 +340,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return false;
         }
 
+        if (!CanAttemptInteractionTrick(dogState, definition, fromVoice, out message))
+        {
+            return false;
+        }
+
         selectedTrick = trickId;
         attemptRoutine = StartCoroutine(TrickAttemptRoutine(definition, fromVoice));
         message = "Training " + definition.DisplayName + ".";
@@ -329,7 +356,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         PawPalDogState dogState = runtime != null ? runtime.ActiveDog : null;
-        bool posePrerequisite = definition.Id != PawPalTrickId.Lie || dogIsSitting || (runtime != null && runtime.IsActiveDogTrickLearned(PawPalTrickId.Sit));
+        bool posePrerequisite = definition.Id != PawPalTrickId.Lie || dogIsSitting;
         PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dogState, definition, trainingConfig, fromVoice, false, posePrerequisite);
         if (runtime != null)
         {
@@ -353,7 +380,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
         else
         {
-            if (result != null && activeDog != null && IsFrustrationEligibleFailureReason(result.Reason))
+            if (ShouldPlayInteractionMissIdle(result, activeDog))
+            {
+                yield return StartCoroutine(activeDog.PlayInteractionTrainingMissIdle());
+            }
+            else if (result != null && activeDog != null && IsFrustrationEligibleFailureReason(result.Reason))
             {
                 activeDog.TryPlayInteractionAnnoyedVocal();
             }
@@ -370,6 +401,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return reason == PawPalTrickFailureReason.RandomMiss
             || reason == PawPalTrickFailureReason.LowFocus
             || reason == PawPalTrickFailureReason.MissingPrerequisite;
+    }
+
+    private static bool ShouldPlayInteractionMissIdle(PawPalTrickAttemptResult result, DogRoomAgent dog)
+    {
+        return result != null
+            && dog != null
+            && !result.Success
+            && result.Reason == PawPalTrickFailureReason.RandomMiss;
     }
 
     private static void ApplyInteractionVocalContext(DogRoomAgent dog, DogVocalContext context)
@@ -427,7 +466,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             }
 
             tugActive = false;
+            tugRoundCounted = false;
             tugPointerId = -1;
+            tugStartedAt = 0f;
+            completedTugRounds = 0;
             return;
         }
 
@@ -496,8 +538,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     {
         tugActive = true;
         tugPointerId = pointerId;
+        tugStartedAt = Time.unscaledTime;
         nextTugRewardTime = Time.unscaledTime + 0.35f;
         ignoreGestureUntil = Time.unscaledTime + 0.25f;
+        tugRoundCounted = false;
         if (activeDog != null)
         {
             activeDog.StartHeldToyTugAnimation();
@@ -506,13 +550,44 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         ResetActivity();
         if (view != null)
         {
-            view.ShowNeutralCue("Hold to tug");
+            view.ShowNeutralCue("Tug " + (completedTugRounds + 1) + "/" + TugRoundsBeforeToyDrop);
         }
     }
 
     private void ContinueTug()
     {
         ResetActivity();
+        if (!tugRoundCounted && Time.unscaledTime - tugStartedAt >= TugMinimumHoldDuration)
+        {
+            tugRoundCounted = true;
+            completedTugRounds++;
+            if (completedTugRounds >= TugRoundsBeforeToyDrop)
+            {
+                completedTugRounds = 0;
+                tugStartedAt = 0f;
+                tugActive = false;
+                tugPointerId = -1;
+                ignoreGestureUntil = Time.unscaledTime + 0.35f;
+                if (activeDog != null)
+                {
+                    activeDog.StopHeldToyTugAnimation();
+                }
+
+                if (attemptRoutine == null)
+                {
+                    attemptRoutine = StartCoroutine(FinishTugSequenceRoutine());
+                }
+
+                ResetActivity();
+                return;
+            }
+
+            if (view != null)
+            {
+                view.ShowNeutralCue("Tug " + (completedTugRounds + 1) + "/" + TugRoundsBeforeToyDrop);
+            }
+        }
+
         if (Time.unscaledTime >= nextTugRewardTime)
         {
             nextTugRewardTime = Time.unscaledTime + TugRewardInterval;
@@ -523,6 +598,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private void EndTug()
     {
         tugActive = false;
+        tugRoundCounted = false;
         tugPointerId = -1;
         ignoreGestureUntil = Time.unscaledTime + 0.35f;
         if (activeDog != null)
@@ -530,7 +606,67 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             activeDog.StopHeldToyTugAnimation();
         }
 
+        tugStartedAt = 0f;
         ResetActivity();
+    }
+
+    private IEnumerator FinishTugSequenceRoutine()
+    {
+        if (view != null)
+        {
+            view.ShowNeutralCue("Drop it");
+        }
+
+        if (activeDog != null)
+        {
+            yield return StartCoroutine(activeDog.PutDownHeldToyForInteraction());
+        }
+
+        if (view != null && activeDog != null && !activeDog.HasHeldToy)
+        {
+            view.ShowUnderstoodCue("Toy down");
+        }
+
+        ResetActivity();
+        attemptRoutine = null;
+    }
+
+    private bool CanAttemptInteractionTrick(PawPalDogState dogState, PawPalTrickDefinition definition, bool fromVoice, out string message)
+    {
+        message = "Training needs an active dog.";
+        if (dogState == null || definition == null)
+        {
+            return false;
+        }
+
+        if (PawPalTrainingModeView.IsLockedByTrainingUiSequence(dogState, definition.Id))
+        {
+            message = PawPalTrickProgressionService.GetFailureText(
+                PawPalTrickFailureReason.MissingPrerequisite,
+                dogState,
+                definition,
+                false);
+            return false;
+        }
+
+        PawPalTrickFailureReason availabilityFailure = PawPalTrickProgressionService.GetAvailabilityFailure(dogState, definition, false);
+        if (availabilityFailure != PawPalTrickFailureReason.None)
+        {
+            message = PawPalTrickProgressionService.GetFailureText(
+                availabilityFailure,
+                dogState,
+                definition,
+                false);
+            return false;
+        }
+
+        if (!fromVoice && definition.Id == PawPalTrickId.Lie && !dogIsSitting)
+        {
+            message = "Sit first.";
+            return false;
+        }
+
+        return true;
     }
 
     private bool IsPointerOverHeldToy(Vector2 screenPosition)

@@ -1,5 +1,7 @@
 public static class PawPalTrickGestureMapper
 {
+    public const float LieSwipeHoldMinimumSeconds = 0.48f;
+
     public static PawPalTrickId MapGestureToTrick(PawPalGestureSnapshot snapshot, PawPalTrickId selectedTrick, bool dogIsSitting)
     {
         if (snapshot == null)
@@ -10,7 +12,9 @@ public static class PawPalTrickGestureMapper
         switch (snapshot.Type)
         {
             case PawPalGestureType.SwipeDown:
-                return selectedTrick == PawPalTrickId.Lie || dogIsSitting ? PawPalTrickId.Lie : PawPalTrickId.Sit;
+                return dogIsSitting && snapshot.DurationSeconds >= LieSwipeHoldMinimumSeconds
+                    ? PawPalTrickId.Lie
+                    : PawPalTrickId.Sit;
             case PawPalGestureType.DragFromBodyPart:
                 return PawPalTrickId.Shake;
             case PawPalGestureType.Tap:

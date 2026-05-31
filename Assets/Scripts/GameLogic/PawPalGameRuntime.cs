@@ -871,6 +871,8 @@ public sealed class PawPalCatalogItemDefinition
 [DisallowMultipleComponent]
 public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
 {
+    private const float LargeToyMinimumNavigationRadius = 0.12f;
+    private const float LargeToyNavigationPadding = 0.04f;
     private static readonly List<PawPalToyRuntimeMetadata> NavigationBlockers = new List<PawPalToyRuntimeMetadata>();
     private static BoxCollider largeToySupportFloor;
     private static bool hasLargeToySupportFloorTop;
@@ -888,6 +890,11 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
     public bool BlocksDogNavigation => blocksDogNavigation;
     public float DogNavigationBlockRadius => Mathf.Max(0.05f, dogNavigationBlockRadius);
     public Vector3 DogNavigationBlockWorldCenter => transform.TransformPoint(dogNavigationBlockCenterLocal);
+
+    public static float GetRecommendedLargeToyNavigationBlockRadius(float visualRadius)
+    {
+        return Mathf.Max(LargeToyMinimumNavigationRadius, Mathf.Max(0.01f, visualRadius) + LargeToyNavigationPadding);
+    }
 
     public static bool TryGetDogNavigationBlockRadius(Transform toy, out float radius)
     {
@@ -990,21 +997,22 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
     public void ConfigureLargeToyPhysicsAndNavigation()
     {
         Bounds bounds;
-        float radius = TryGetToyBlockingBounds(gameObject, out bounds)
-            ? Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z))
+        float visualRadius = TryGetToyBlockingBounds(gameObject, out bounds)
+            ? Mathf.Max(bounds.extents.x, bounds.extents.z)
             : 0.35f;
-        EnsureLargeToyCollider(bounds, radius);
+        float colliderRadius = Mathf.Max(0.18f, visualRadius);
+        EnsureLargeToyCollider(bounds, colliderRadius);
         BoxCollider supportFloor = EnsureLargeToySupportFloor(bounds);
         SnapLargeToyOntoSupportFloor(bounds, supportFloor);
 
         if (TryGetToyBlockingBounds(gameObject, out bounds))
         {
-            radius = Mathf.Max(0.18f, Mathf.Max(bounds.extents.x, bounds.extents.z));
+            visualRadius = Mathf.Max(bounds.extents.x, bounds.extents.z);
         }
 
-        float paddedRadius = radius + 0.28f;
+        float navigationRadius = GetRecommendedLargeToyNavigationBlockRadius(visualRadius);
         dogNavigationBlockCenterLocal = transform.InverseTransformPoint(bounds.center);
-        SetBlocksDogNavigation(true, paddedRadius);
+        SetBlocksDogNavigation(true, navigationRadius);
         PawPalBallBounceAudio.EnsureOn(gameObject);
 
         Rigidbody body = GetComponent<Rigidbody>();
@@ -1027,7 +1035,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
         }
 
         obstacle.shape = NavMeshObstacleShape.Capsule;
-        obstacle.radius = paddedRadius;
+        obstacle.radius = navigationRadius;
         obstacle.height = Mathf.Max(0.2f, bounds.size.y);
         obstacle.center = dogNavigationBlockCenterLocal;
         obstacle.carving = true;
