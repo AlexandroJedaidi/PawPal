@@ -1072,7 +1072,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
         if (holdAnchor == null)
         {
-            GameObject holdObject = new GameObject("PawPalPlayerToyHoldAnchor");
+            GameObject holdObject = new GameObject("PawFriendsPlayerToyHoldAnchor");
             holdObject.hideFlags = HideFlags.HideAndDontSave;
             holdAnchor = holdObject.transform;
             holdAnchor.SetParent(attachedCamera.transform, worldPositionStays: false);
@@ -1080,7 +1080,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
         if (returnAnchor == null)
         {
-            GameObject returnObject = new GameObject("PawPalPlayerFetchReturnAnchor");
+            GameObject returnObject = new GameObject("PawFriendsPlayerFetchReturnAnchor");
             returnObject.hideFlags = HideFlags.HideAndDontSave;
             returnAnchor = returnObject.transform;
         }
@@ -1111,7 +1111,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 
         if (aimPreviewLine == null)
         {
-            GameObject lineObject = new GameObject("PawPalToyThrowAimLine");
+            GameObject lineObject = new GameObject("PawFriendsToyThrowAimLine");
             lineObject.hideFlags = HideFlags.HideAndDontSave;
             aimPreviewLine = lineObject.AddComponent<LineRenderer>();
             aimPreviewLine.positionCount = 2;
@@ -1130,7 +1130,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         if (aimPreviewMarker == null)
         {
             GameObject markerObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            markerObject.name = "PawPalToyThrowAimMarker";
+            markerObject.name = "PawFriendsToyThrowAimMarker";
             markerObject.hideFlags = HideFlags.HideAndDontSave;
             Collider markerCollider = markerObject.GetComponent<Collider>();
             if (markerCollider != null)
@@ -1206,8 +1206,8 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             aimPreviewMarker = null;
         }
 
-        DestroyNamedPreviewObject("PawPalToyThrowAimLine");
-        DestroyNamedPreviewObject("PawPalToyThrowAimMarker");
+        DestroyNamedPreviewObject("PawFriendsToyThrowAimLine");
+        DestroyNamedPreviewObject("PawFriendsToyThrowAimMarker");
     }
 
     private static void DestroyNamedPreviewObject(string objectName)
@@ -1402,7 +1402,7 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             return;
         }
 
-        GameObject audioObject = new GameObject("PawPalPlayerToyPickupAudio");
+        GameObject audioObject = new GameObject("PawFriendsPlayerToyPickupAudio");
         audioObject.hideFlags = HideFlags.DontSave;
         audioObject.transform.position = position;
 

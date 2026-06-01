@@ -1092,7 +1092,7 @@ public sealed class PawPalToyRuntimeMetadata : MonoBehaviour
     {
         if (largeToySupportFloor == null)
         {
-            GameObject floorObject = new GameObject("PawPalLargeToySupportFloor");
+            GameObject floorObject = new GameObject("PawFriendsLargeToySupportFloor");
             floorObject.hideFlags = HideFlags.HideAndDontSave;
             floorObject.layer = 2;
             largeToySupportFloor = floorObject.AddComponent<BoxCollider>();
@@ -1531,7 +1531,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        GameObject runtimeObject = new GameObject("PawPalGameRuntime");
+        GameObject runtimeObject = new GameObject("PawFriendsGameRuntime");
         DontDestroyOnLoad(runtimeObject);
         instance = runtimeObject.AddComponent<PawPalGameRuntime>();
     }

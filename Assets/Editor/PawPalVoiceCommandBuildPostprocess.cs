@@ -6,8 +6,8 @@ using UnityEditor.iOS.Xcode;
 
 public static class PawPalVoiceCommandBuildPostprocess
 {
-    private const string MicrophoneUsageDescription = "PawPal uses the microphone so your dogs can respond to voice commands.";
-    private const string SpeechUsageDescription = "PawPal uses speech recognition so your dogs can react when you say their names and learned tricks.";
+    private const string MicrophoneUsageDescription = "PawFriends uses the microphone so your dogs can respond to voice commands.";
+    private const string SpeechUsageDescription = "PawFriends uses speech recognition so your dogs can react when you say their names and learned tricks.";
 
     [PostProcessBuild(250)]
     public static void OnPostprocessBuild(BuildTarget target, string pathToBuiltProject)

@@ -107,7 +107,7 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
             return;
         }
 
-        GameObject bootstrap = new GameObject("PawPalWalkSceneBootstrap");
+        GameObject bootstrap = new GameObject("PawFriendsWalkSceneBootstrap");
         Object.DontDestroyOnLoad(bootstrap);
         instance = bootstrap.AddComponent<PawPalWalkSceneBootstrap>();
     }
@@ -179,7 +179,7 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
             return;
         }
 
-        GameObject controllerObject = new GameObject("PawPalWalkSceneController");
+        GameObject controllerObject = new GameObject("PawFriendsWalkSceneController");
         PawPalWalkSceneController controller = controllerObject.AddComponent<PawPalWalkSceneController>();
         controller.Initialize(session);
     }

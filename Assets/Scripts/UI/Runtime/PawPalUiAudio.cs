@@ -50,7 +50,7 @@ public sealed class PawPalUiAudio : MonoBehaviour
             return;
         }
 
-        GameObject root = new GameObject("PawPalUiAudio");
+        GameObject root = new GameObject("PawFriendsUiAudio");
         DontDestroyOnLoad(root);
         instance = root.AddComponent<PawPalUiAudio>();
     }

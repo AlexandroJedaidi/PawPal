@@ -154,7 +154,7 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
                 {
                     WarnOnce(
                         "duplicate_scene_dog_" + agent.DogId,
-                        "Multiple DogRoomAgent objects are bound to dogId '" + agent.DogId + "'. PawPal will use the first one it found.");
+                        "Multiple DogRoomAgent objects are bound to dogId '" + agent.DogId + "'. PawFriends will use the first one it found.");
                     continue;
                 }
 

@@ -364,7 +364,7 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
 
         if (detailDogLabel != null)
         {
-            detailDogLabel.text = string.IsNullOrWhiteSpace(record != null ? record.DogName : string.Empty) ? "PawPal" : record.DogName;
+            detailDogLabel.text = string.IsNullOrWhiteSpace(record != null ? record.DogName : string.Empty) ? "PawFriends" : record.DogName;
         }
 
         RefreshFavoriteLabel(record);

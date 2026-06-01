@@ -271,7 +271,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             runtimeSkyboxMaterial = new Material(proceduralSkybox);
         }
 
-        runtimeSkyboxMaterial.name = "PawPal Blue Skybox";
+        runtimeSkyboxMaterial.name = "PawFriends Blue Skybox";
         runtimeSkyboxMaterial.hideFlags = HideFlags.DontSave;
         return runtimeSkyboxMaterial;
     }

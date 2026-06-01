@@ -202,7 +202,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private string lieEndStateName = "LieBellyEnd";
     [SerializeField] private string sitEndStateName = "Sit end";
 
-    [Header("PawPal Bindings")]
+    [Header("PawFriends Bindings")]
     [SerializeField] private string dogId = string.Empty;
     [SerializeField] private Transform collarAnchor;
 

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-[CreateAssetMenu(menuName = "PawPal/Intro/Pet Animation Set", fileName = "PetAnimationSet")]
+[CreateAssetMenu(menuName = "PawFriends/Intro/Pet Animation Set", fileName = "PetAnimationSet")]
 public sealed class PetAnimationSet : ScriptableObject
 {
     public RuntimeAnimatorController RuntimeController;

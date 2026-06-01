@@ -93,7 +93,7 @@ public sealed class PawPalTrickPersonalityModifier
     public float BoredomMultiplier = 1f;
 }
 
-[CreateAssetMenu(menuName = "PawFriends/Training/Trick Definition", fileName = "PawPalTrickDefinition")]
+[CreateAssetMenu(menuName = "PawFriends/Training/Trick Definition", fileName = "PawFriendsTrickDefinition")]
 public sealed class PawPalTrickDefinition : ScriptableObject
 {
     [SerializeField] private PawPalTrickId id;
@@ -271,7 +271,7 @@ public sealed class PawPalTrickDefinition : ScriptableObject
     }
 }
 
-[CreateAssetMenu(menuName = "PawFriends/Training/Training Config", fileName = "PawPalTrainingConfig")]
+[CreateAssetMenu(menuName = "PawFriends/Training/Training Config", fileName = "PawFriendsTrainingConfig")]
 public sealed class PawPalTrainingConfig : ScriptableObject
 {
     [SerializeField, Range(0f, 1f)] private float baseSuccessChance = 0.58f;
@@ -311,7 +311,7 @@ public sealed class PawPalTrainingConfig : ScriptableObject
     public static PawPalTrainingConfig CreateRuntimeDefault()
     {
         PawPalTrainingConfig config = CreateInstance<PawPalTrainingConfig>();
-        config.name = "Runtime PawPal Training Config";
+        config.name = "Runtime PawFriends Training Config";
         return config;
     }
 }

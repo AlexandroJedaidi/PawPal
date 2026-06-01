@@ -1,6 +1,6 @@
 using UnityEngine;
 
-[CreateAssetMenu(menuName = "PawPal/Intro/Fur Variant", fileName = "FurVariant")]
+[CreateAssetMenu(menuName = "PawFriends/Intro/Fur Variant", fileName = "FurVariant")]
 public sealed class FurVariantDefinition : ScriptableObject
 {
     public string VariantId = "default";

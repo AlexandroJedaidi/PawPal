@@ -6,7 +6,7 @@ public enum IntroPetSpecies
     Cat
 }
 
-[CreateAssetMenu(menuName = "PawPal/Intro/Pet Definition", fileName = "IntroPet")]
+[CreateAssetMenu(menuName = "PawFriends/Intro/Pet Definition", fileName = "IntroPet")]
 public sealed class IntroPetDefinition : ScriptableObject
 {
     public string PetId = "pet";

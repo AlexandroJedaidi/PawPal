@@ -1,6 +1,6 @@
 using UnityEngine;
 
-[CreateAssetMenu(menuName = "PawPal/Intro/Scene Asset Catalog", fileName = "IntroSceneAssetCatalog")]
+[CreateAssetMenu(menuName = "PawFriends/Intro/Scene Asset Catalog", fileName = "IntroSceneAssetCatalog")]
 public sealed class IntroSceneAssetCatalog : ScriptableObject
 {
     public GameObject FencePrefab;
