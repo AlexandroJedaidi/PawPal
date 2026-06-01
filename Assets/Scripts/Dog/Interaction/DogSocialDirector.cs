@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
@@ -1102,10 +1103,13 @@ public class DogSocialDirector : MonoBehaviour
             return;
         }
 
-        NavMeshHit hit;
-        if (NavMesh.SamplePosition(dogA.transform.position, out hit, 1.5f, NavMesh.AllAreas))
+        if (!ShouldPreferRuntimeHomeNavMesh())
         {
-            return;
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(dogA.transform.position, out hit, 1.5f, NavMesh.AllAreas))
+            {
+                return;
+            }
         }
 
         attemptedRuntimeNavMeshBuild = true;
@@ -1166,12 +1170,37 @@ public class DogSocialDirector : MonoBehaviour
 
         runtimeNavMeshData.name = "Runtime Dog Procedural NavMesh";
 
+        if (ShouldPreferRuntimeHomeNavMesh())
+        {
+            // The earlier working home-scene behavior came from this carved runtime navmesh,
+            // so remove stale baked surface data before registering the runtime replacement.
+            RemoveBakedHomeNavMeshSurfaceData();
+        }
+
         if (runtimeNavMeshInstance.valid)
         {
             runtimeNavMeshInstance.Remove();
         }
 
         runtimeNavMeshInstance = NavMesh.AddNavMeshData(runtimeNavMeshData);
+    }
+
+    private bool ShouldPreferRuntimeHomeNavMesh()
+    {
+        return gameObject.scene.IsValid()
+            && gameObject.scene.name == DavidTestSceneName
+            && carveGroundedObstacleFootprintsInRuntimeNavMesh;
+    }
+
+    private void RemoveBakedHomeNavMeshSurfaceData()
+    {
+        NavMeshSurface surface = GetComponent<NavMeshSurface>();
+        if (surface == null)
+        {
+            return;
+        }
+
+        surface.RemoveData();
     }
 
     private void AddGroundedObstacleFootprintSources(List<NavMeshBuildSource> sources, float floorY, Bounds navMeshBounds)
@@ -1440,10 +1469,11 @@ public class DogSocialDirector : MonoBehaviour
 
         float currentVolume = backgroundMusicSource.volume;
         ConfigureBackgroundMusicSource();
+        bool clipChanged = backgroundMusicSource.clip != targetClip;
         bool shouldFade = !immediate
             && backgroundMusicSource.isPlaying
             && backgroundMusicSource.clip != null
-            && backgroundMusicSource.clip != targetClip;
+            && clipChanged;
 
         if (shouldFade)
         {
@@ -1452,10 +1482,14 @@ public class DogSocialDirector : MonoBehaviour
             yield return FadeBackgroundMusic(backgroundMusicSource.volume, 0f, fadeDuration);
             backgroundMusicSource.Stop();
         }
+        else if (clipChanged && backgroundMusicSource.isPlaying)
+        {
+            backgroundMusicSource.Stop();
+        }
 
         backgroundMusicSource.clip = targetClip;
         backgroundMusicSource.volume = shouldFade && !immediate ? 0f : targetVolume;
-        if (!backgroundMusicSource.isPlaying)
+        if (clipChanged || !backgroundMusicSource.isPlaying)
         {
             backgroundMusicSource.Play();
         }
