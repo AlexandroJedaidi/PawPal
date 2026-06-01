@@ -376,7 +376,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         PawPalVoiceCommandExecutionResult customResult = TryExecuteCustomCommand(resolvedCommand);
         if (customResult != null && customResult.Handled)
         {
-            message = string.IsNullOrWhiteSpace(customResult.Message) ? message : customResult.Message;
+            message = customResult.Message ?? string.Empty;
             return customResult.Success;
         }
 

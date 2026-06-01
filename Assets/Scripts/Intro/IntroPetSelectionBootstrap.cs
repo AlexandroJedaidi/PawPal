@@ -1,13 +1,27 @@
 using System.Collections;
-using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+#endif
 
 public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 {
     private const float FieldHalfSize = 6f;
+    private const string EditorPreviewRootName = "IntroBackdropPreview";
     private static IntroPetSelectionBootstrap instance;
+#if UNITY_EDITOR
+    private static IntroBackdropRingController editorPreviewController;
+    private static bool editorPreviewInstalled;
+#endif
+
+    private struct EnvironmentBuildResult
+    {
+        public Bounds FieldBounds;
+        public Transform Root;
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void Install()
@@ -21,6 +35,22 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         DontDestroyOnLoad(bootstrap);
         instance = bootstrap.AddComponent<IntroPetSelectionBootstrap>();
     }
+
+#if UNITY_EDITOR
+    [InitializeOnLoadMethod]
+    private static void InstallEditorPreview()
+    {
+        if (editorPreviewInstalled)
+        {
+            return;
+        }
+
+        editorPreviewInstalled = true;
+        EditorApplication.delayCall += RefreshEditorPreview;
+        EditorSceneManager.activeSceneChangedInEditMode += HandleActiveSceneChangedInEditMode;
+        EditorApplication.playModeStateChanged += HandlePlayModeStateChanged;
+    }
+#endif
 
     private void OnEnable()
     {
@@ -54,11 +84,12 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         EnsureEventSystem();
         Camera sceneCamera = EnsureCamera();
         BuildLighting();
-        Bounds fieldBounds = BuildFieldEnvironment();
+        EnvironmentBuildResult environment = BuildFieldEnvironment();
 
         GameObject controllerObject = new GameObject("IntroPetSelectionController");
+        controllerObject.transform.SetParent(environment.Root, false);
         IntroPetSelectionController controller = controllerObject.AddComponent<IntroPetSelectionController>();
-        controller.Initialize(fieldBounds, sceneCamera);
+        controller.Initialize(environment.FieldBounds, sceneCamera);
     }
 
     private static Camera EnsureCamera()
@@ -116,232 +147,118 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         existingSun.intensity = 1.35f;
     }
 
-    private static Bounds BuildFieldEnvironment()
+    private static EnvironmentBuildResult BuildFieldEnvironment()
     {
         IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
-        GameObject root = new GameObject("IntroSunnyField");
+        GameObject root = new GameObject("IntroSceneRuntime");
+        Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
 
-        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        ground.name = "GrassField";
-        ground.transform.SetParent(root.transform, false);
-        ground.transform.localScale = new Vector3(1.45f, 1f, 1.45f);
-        Renderer renderer = ground.GetComponent<Renderer>();
-        if (renderer != null)
+        IntroBackdropRingController backdropRingController = root.AddComponent<IntroBackdropRingController>();
+        backdropRingController.Configure(catalog, fieldBounds);
+
+        IntroTimeOfDayAudioController audioController = root.AddComponent<IntroTimeOfDayAudioController>();
+        audioController.Configure(catalog, backdropRingController);
+
+        return new EnvironmentBuildResult
         {
-            Material grass = BuildColorMaterial("IntroGrassRuntime", new Color32(111, 177, 91, 255));
-            grass.name = "IntroGrassRuntime";
-            renderer.sharedMaterial = grass;
-        }
-
-        SpawnFence(catalog, root.transform);
-        SpawnTrees(catalog, root.transform);
-        SpawnToys(catalog, root.transform);
-        SpawnAmbientAudio(catalog, root.transform);
-
-        return new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
-    }
-
-    private static void SpawnFence(IntroSceneAssetCatalog catalog, Transform root)
-    {
-        GameObject prefab = catalog != null ? catalog.FencePrefab : null;
-        for (int side = 0; side < 4; side++)
-        {
-            for (int i = -3; i <= 3; i++)
-            {
-                Vector3 position;
-                Quaternion rotation;
-                if (side < 2)
-                {
-                    position = new Vector3(i * 1.7f, 0f, side == 0 ? 5.15f : -5.15f);
-                    rotation = Quaternion.Euler(0f, side == 0 ? 0f : 180f, 0f);
-                }
-                else
-                {
-                    position = new Vector3(side == 2 ? 5.75f : -5.75f, 0f, i * 1.55f);
-                    rotation = Quaternion.Euler(0f, side == 2 ? 90f : -90f, 0f);
-                }
-
-                GameObject fence = prefab != null ? InstantiatePrefabRoot(prefab, position, rotation, root, "FencePrefab") : null;
-                if (fence == null)
-                {
-                    fence = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    fence.name = "GardenFence";
-                    fence.transform.SetParent(root, false);
-                    fence.transform.position = position;
-                    fence.transform.rotation = rotation;
-                    fence.transform.localScale = new Vector3(1.55f, 0.42f, 0.08f);
-                    Renderer renderer = fence.GetComponent<Renderer>();
-                    if (renderer != null)
-                    {
-                        renderer.sharedMaterial = BuildColorMaterial("IntroFenceFallback", new Color32(166, 113, 70, 255));
-                    }
-
-                    continue;
-                }
-
-                fence.name = "GardenFence";
-            }
-        }
-    }
-
-    private static void SpawnTrees(IntroSceneAssetCatalog catalog, Transform root)
-    {
-        Vector3[] positions =
-        {
-            new Vector3(-5.7f, 0f, 4.3f),
-            new Vector3(5.2f, 0f, 4.7f),
-            new Vector3(-5.4f, 0f, -4.4f),
-            new Vector3(5.5f, 0f, -4.1f)
+            FieldBounds = fieldBounds,
+            Root = root.transform
         };
+    }
 
-        for (int i = 0; i < positions.Length; i++)
+#if UNITY_EDITOR
+    private static void HandleActiveSceneChangedInEditMode(Scene previousScene, Scene nextScene)
+    {
+        RefreshEditorPreview();
+    }
+
+    private static void HandlePlayModeStateChanged(PlayModeStateChange state)
+    {
+        if (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.EnteredPlayMode)
         {
-            GameObject prefab = catalog != null && i % 2 == 0 ? catalog.BirchTreePrefab : catalog != null ? catalog.AshTreePrefab : null;
-            if (prefab != null)
-            {
-                GameObject tree = InstantiatePrefabRoot(prefab, positions[i], Quaternion.Euler(0f, i * 63f, 0f), root, i % 2 == 0 ? "BirchTreePrefab" : "AshTreePrefab");
-                if (tree == null)
-                {
-                    SpawnFallbackTree(root, positions[i], i * 63f);
-                    continue;
-                }
+            DestroyEditorPreview();
+            return;
+        }
 
-                tree.name = "IntroTree";
-                tree.transform.localScale = Vector3.one * 0.72f;
-            }
-            else
-            {
-                SpawnFallbackTree(root, positions[i], i * 63f);
-            }
+        if (state == PlayModeStateChange.EnteredEditMode)
+        {
+            RefreshEditorPreview();
         }
     }
 
-    private static void SpawnFallbackTree(Transform root, Vector3 position, float yaw)
+    private static void RefreshEditorPreview()
     {
-        GameObject trunk = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        trunk.name = "IntroTreeTrunk";
-        trunk.transform.SetParent(root, false);
-        trunk.transform.position = position + Vector3.up * 0.65f;
-        trunk.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-        trunk.transform.localScale = new Vector3(0.18f, 0.65f, 0.18f);
-        Renderer trunkRenderer = trunk.GetComponent<Renderer>();
-        if (trunkRenderer != null)
+        if (Application.isPlaying)
         {
-            trunkRenderer.sharedMaterial = BuildColorMaterial("IntroTreeTrunkFallback", new Color32(112, 78, 49, 255));
+            DestroyEditorPreview();
+            return;
         }
 
-        GameObject canopy = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        canopy.name = "IntroTreeCanopy";
-        canopy.transform.SetParent(root, false);
-        canopy.transform.position = position + Vector3.up * 1.65f;
-        canopy.transform.localScale = new Vector3(1.05f, 0.85f, 1.05f);
-        Renderer canopyRenderer = canopy.GetComponent<Renderer>();
-        if (canopyRenderer != null)
+        Scene activeScene = EditorSceneManager.GetActiveScene();
+        if (!PawPalIntroSceneFlow.IsIntroScene(activeScene))
         {
-            canopyRenderer.sharedMaterial = BuildColorMaterial("IntroTreeCanopyFallback", new Color32(80, 153, 88, 255));
+            DestroyEditorPreview();
+            return;
         }
+
+        EnsureEditorPreview(activeScene);
     }
 
-    private static void SpawnToys(IntroSceneAssetCatalog catalog, Transform root)
+    private static void EnsureEditorPreview(Scene scene)
     {
-        if (catalog != null && catalog.BigBallPrefab != null)
-        {
-            GameObject ball = InstantiatePrefabRoot(catalog.BigBallPrefab, new Vector3(-2.6f, 0.12f, -1.7f), Quaternion.identity, root, "BigBallPrefab");
-            if (ball != null)
-            {
-                ball.name = "IntroToy_Ball";
-                ball.transform.localScale = Vector3.one * 0.45f;
-            }
-        }
-
-        if (catalog != null && catalog.BonePrefab != null)
-        {
-            GameObject bone = InstantiatePrefabRoot(catalog.BonePrefab, new Vector3(2.7f, 0.05f, -1.2f), Quaternion.Euler(0f, 36f, 0f), root, "BonePrefab");
-            if (bone != null)
-            {
-                bone.name = "IntroToy_Bone";
-                bone.transform.localScale = Vector3.one * 0.55f;
-            }
-        }
-    }
-
-    private static void SpawnAmbientAudio(IntroSceneAssetCatalog catalog, Transform root)
-    {
-        if (catalog == null || catalog.BirdsAmbientClip == null)
+        if (!scene.IsValid() || !scene.isLoaded)
         {
             return;
         }
 
-        AudioSource source = root.gameObject.AddComponent<AudioSource>();
-        source.clip = catalog.BirdsAmbientClip;
-        source.loop = true;
-        source.playOnAwake = true;
-        source.volume = 0.18f;
-        source.spatialBlend = 0f;
-        source.Play();
-    }
-
-    private static Material BuildColorMaterial(string name, Color color)
-    {
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-        if (shader == null)
+        if (editorPreviewController == null)
         {
-            shader = Shader.Find("Standard");
-        }
-
-        if (shader == null)
-        {
-            shader = Shader.Find("Sprites/Default");
-        }
-
-        Material material = new Material(shader);
-        material.name = name;
-        material.color = color;
-        return material;
-    }
-
-    private static GameObject InstantiatePrefabRoot(UnityEngine.Object prefab, Vector3 position, Quaternion rotation, Transform parent, string fieldName)
-    {
-        if (prefab == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            UnityEngine.Object instance = Instantiate(prefab, position, rotation, parent);
-            GameObject root = ExtractGameObject(instance);
-            if (root != null)
+            GameObject existingPreview = GameObject.Find(EditorPreviewRootName);
+            if (existingPreview != null)
             {
-                return root;
+                editorPreviewController = existingPreview.GetComponent<IntroBackdropRingController>();
+            }
+        }
+
+        if (editorPreviewController == null)
+        {
+            GameObject previewRoot = new GameObject(EditorPreviewRootName);
+            previewRoot.hideFlags = HideFlags.DontSaveInEditor;
+            SceneManager.MoveGameObjectToScene(previewRoot, scene);
+            editorPreviewController = previewRoot.AddComponent<IntroBackdropRingController>();
+        }
+
+        IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
+        Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
+        editorPreviewController.Configure(catalog, fieldBounds);
+    }
+
+    private static void DestroyEditorPreview()
+    {
+        if (editorPreviewController == null)
+        {
+            GameObject existingPreview = GameObject.Find(EditorPreviewRootName);
+            if (existingPreview == null)
+            {
+                return;
             }
 
-            Debug.LogWarning("IntroPetSelectionBootstrap could not resolve a GameObject root for " + fieldName + ".");
-        }
-        catch (Exception exception)
-        {
-            Debug.LogWarning("IntroPetSelectionBootstrap failed to instantiate " + fieldName + ": " + exception.Message);
+            editorPreviewController = existingPreview.GetComponent<IntroBackdropRingController>();
+            if (editorPreviewController == null)
+            {
+                UnityEngine.Object.DestroyImmediate(existingPreview);
+                return;
+            }
         }
 
-        return null;
+        GameObject previewObject = editorPreviewController.gameObject;
+        editorPreviewController = null;
+        if (previewObject != null)
+        {
+            UnityEngine.Object.DestroyImmediate(previewObject);
+        }
     }
-
-    private static GameObject ExtractGameObject(UnityEngine.Object instance)
-    {
-        if (instance == null)
-        {
-            return null;
-        }
-
-        GameObject gameObject = instance as GameObject;
-        if (gameObject != null)
-        {
-            return gameObject;
-        }
-
-        Component component = instance as Component;
-        return component != null ? component.gameObject : null;
-    }
+#endif
 
     private static void DisableOtherAudioListeners(Camera primaryCamera)
     {

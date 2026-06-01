@@ -647,14 +647,25 @@ public sealed class PawPalTrickTrainingEditModeTests
         PawPalDogTrickProgress sit = PawPalTrickCatalog.GetOrCreateProgress(activeDog, PawPalTrickId.Sit);
         sit.IsLearned = false;
         sit.CustomVoiceCommand = "sit";
+        PawPalDogTrickProgress lie = PawPalTrickCatalog.GetOrCreateProgress(activeDog, PawPalTrickId.Lie);
+        lie.IsLearned = false;
+        lie.CustomVoiceCommand = "lie";
 
         PawPalVoiceCommandCatalog normalCatalog = PawPalVoiceCommandCatalogBuilder.Build(new[] { activeDog }, activeDog.Id);
         Assert.AreEqual(PawPalResolvedVoiceCommandType.None, normalCatalog.Resolve("sit").Type);
+        Assert.AreEqual(PawPalResolvedVoiceCommandType.None, normalCatalog.Resolve("lie").Type);
 
         PawPalVoiceCommandCatalog interactionCatalog = PawPalVoiceCommandCatalogBuilder.Build(new[] { activeDog }, activeDog.Id, true);
-        PawPalResolvedVoiceCommand resolved = interactionCatalog.Resolve("sit");
-        Assert.AreEqual(PawPalResolvedVoiceCommandType.PerformTrick, resolved.Type);
-        Assert.AreEqual(PawPalTrickId.Sit, resolved.TrickId);
+        PawPalResolvedVoiceCommand sitResolved = interactionCatalog.Resolve("sit");
+        Assert.AreEqual(PawPalResolvedVoiceCommandType.PerformTrick, sitResolved.Type);
+        Assert.AreEqual(PawPalTrickId.Sit, sitResolved.TrickId);
+        Assert.AreEqual(PawPalResolvedVoiceCommandType.None, interactionCatalog.Resolve("lie").Type);
+
+        sit.IsLearned = true;
+        interactionCatalog = PawPalVoiceCommandCatalogBuilder.Build(new[] { activeDog }, activeDog.Id, true);
+        PawPalResolvedVoiceCommand lieResolved = interactionCatalog.Resolve("lie");
+        Assert.AreEqual(PawPalResolvedVoiceCommandType.PerformTrick, lieResolved.Type);
+        Assert.AreEqual(PawPalTrickId.Lie, lieResolved.TrickId);
     }
 
     [Test]
@@ -791,7 +802,7 @@ public sealed class PawPalTrickTrainingEditModeTests
     }
 
     [Test]
-    public void InteractionFrustrationEligibilityOnlyCoversNoProgressReasons()
+    public void InteractionFrustrationEligibilityCoversTrainingFailures()
     {
         Assert.IsTrue(InvokePrivateStatic<bool>(
             typeof(PawPalDogInteractionModeController),
@@ -804,15 +815,31 @@ public sealed class PawPalTrickTrainingEditModeTests
         Assert.IsTrue(InvokePrivateStatic<bool>(
             typeof(PawPalDogInteractionModeController),
             "IsFrustrationEligibleFailureReason",
+            PawPalTrickFailureReason.LowBond));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "IsFrustrationEligibleFailureReason",
+            PawPalTrickFailureReason.LowMood));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "IsFrustrationEligibleFailureReason",
+            PawPalTrickFailureReason.LowEnergy));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "IsFrustrationEligibleFailureReason",
+            PawPalTrickFailureReason.Hungry));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "IsFrustrationEligibleFailureReason",
+            PawPalTrickFailureReason.Thirsty));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "IsFrustrationEligibleFailureReason",
             PawPalTrickFailureReason.MissingPrerequisite));
         Assert.IsFalse(InvokePrivateStatic<bool>(
             typeof(PawPalDogInteractionModeController),
             "IsFrustrationEligibleFailureReason",
-            PawPalTrickFailureReason.Hungry));
-        Assert.IsFalse(InvokePrivateStatic<bool>(
-            typeof(PawPalDogInteractionModeController),
-            "IsFrustrationEligibleFailureReason",
-            PawPalTrickFailureReason.LowMood));
+            PawPalTrickFailureReason.Busy));
     }
 
     [Test]

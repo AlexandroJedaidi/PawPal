@@ -10,6 +10,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float PettingMoodGain = 0.012f;
     private const float PettingActivityGain = 0.006f;
     private const float PettingRewardCooldown = 1.1f;
+    private const float PettingGestureIgnoreSeconds = 0.35f;
     private const float TugBondGain = 0.006f;
     private const float TugMoodGain = 0.008f;
     private const float TugActivityGain = 0.01f;
@@ -18,7 +19,17 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const int TugRoundsBeforeToyDrop = 2;
     private const float ToyScreenPadding = 28f;
     private const float UnexpectedExitGuardSeconds = 10f;
+    private const float FailedTeachReactionDelaySeconds = 0.38f;
+    private const float FailedTeachHeadTiltAngle = 14f;
+    private const float FailedTeachHeadTiltDuration = 0.6f;
     private const string InteractionDebugBuildMarker = "dog-interaction-guard-v1";
+
+    private enum InteractionTrickStartResult
+    {
+        Rejected,
+        StartedAttempt,
+        PlayedFailureReaction
+    }
 
     private AppShellController shell;
     private PawPalDogInteractionModeView view;
@@ -229,9 +240,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(command.TrickId);
         string trickLabel = definition != null ? definition.DisplayName : command.TrickLabel;
-        if (StartTrickAttempt(command.TrickId, true, out message))
+        InteractionTrickStartResult startResult = StartTrickAttempt(command.TrickId, true, out message);
+        if (startResult == InteractionTrickStartResult.StartedAttempt)
         {
             message = "Training " + (string.IsNullOrWhiteSpace(trickLabel) ? command.TrickId.ToString() : trickLabel) + ".";
+            return true;
+        }
+
+        if (startResult == InteractionTrickStartResult.PlayedFailureReaction)
+        {
+            message = string.Empty;
             return true;
         }
 
@@ -348,18 +366,18 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         PawPalTrickId trickId = PawPalTrickGestureMapper.MapGestureToTrick(snapshot, selectedTrick, dogIsSitting);
         string message;
-        if (!StartTrickAttempt(trickId, false, out message))
+        if (StartTrickAttempt(trickId, false, out message) == InteractionTrickStartResult.Rejected)
         {
             SetStatus(message);
         }
     }
 
-    private bool StartTrickAttempt(PawPalTrickId trickId, bool fromVoice, out string message)
+    private InteractionTrickStartResult StartTrickAttempt(PawPalTrickId trickId, bool fromVoice, out string message)
     {
         message = "Training is busy.";
         if (!active || attemptRoutine != null)
         {
-            return false;
+            return InteractionTrickStartResult.Rejected;
         }
 
         PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
@@ -368,25 +386,30 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (definition == null || dogState == null || activeDog == null)
         {
             message = "Training needs an active dog.";
-            return false;
+            return InteractionTrickStartResult.Rejected;
         }
 
         if (activeDog.HasHeldToy)
         {
             message = "Play tug first; your dog is holding a toy.";
-            return false;
+            return InteractionTrickStartResult.Rejected;
         }
 
-        if (!CanAttemptInteractionTrick(dogState, definition, fromVoice, out message))
+        PawPalTrickFailureReason failureReason = GetInteractionAttemptFailure(dogState, definition, fromVoice);
+        if (failureReason != PawPalTrickFailureReason.None)
         {
-            return false;
+            selectedTrick = trickId;
+            attemptRoutine = StartCoroutine(PlayFailedTeachReactionRoutine(failureReason));
+            message = string.Empty;
+            ResetActivity();
+            return InteractionTrickStartResult.PlayedFailureReaction;
         }
 
         selectedTrick = trickId;
         attemptRoutine = StartCoroutine(TrickAttemptRoutine(definition, fromVoice));
         message = "Training " + definition.DisplayName + ".";
         ResetActivity();
-        return true;
+        return InteractionTrickStartResult.StartedAttempt;
     }
 
     private IEnumerator TrickAttemptRoutine(PawPalTrickDefinition definition, bool fromVoice)
@@ -400,7 +423,6 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             runtime.RecordTrickTrainingResult(result);
         }
 
-        string feedbackText = result != null && !string.IsNullOrWhiteSpace(result.FeedbackText) ? result.FeedbackText : "Try again.";
         if (result != null && result.Success && activeDog != null)
         {
             yield return StartCoroutine(activeDog.PlayInteractionTrainingTrick(definition, true));
@@ -417,16 +439,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
         else
         {
-            if (ShouldPlayInteractionMissIdle(result, activeDog))
+            if (result != null && IsFrustrationEligibleFailureReason(result.Reason))
             {
-                yield return StartCoroutine(activeDog.PlayInteractionTrainingMissIdle());
+                yield return StartCoroutine(PlayFailedTeachReactionRoutine(result.Reason));
             }
-            else if (result != null && activeDog != null && IsFrustrationEligibleFailureReason(result.Reason))
-            {
-                activeDog.TryPlayInteractionAnnoyedVocal();
-            }
-
-            SetStatus(feedbackText);
         }
 
         ResetActivity();
@@ -437,6 +453,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     {
         return reason == PawPalTrickFailureReason.RandomMiss
             || reason == PawPalTrickFailureReason.LowFocus
+            || reason == PawPalTrickFailureReason.LowBond
+            || reason == PawPalTrickFailureReason.LowMood
+            || reason == PawPalTrickFailureReason.LowEnergy
+            || reason == PawPalTrickFailureReason.Hungry
+            || reason == PawPalTrickFailureReason.Thirsty
             || reason == PawPalTrickFailureReason.MissingPrerequisite;
     }
 
@@ -458,9 +479,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private void ApplyPettingReward()
     {
+        ignoreGestureUntil = Mathf.Max(ignoreGestureUntil, Time.unscaledTime + PettingGestureIgnoreSeconds);
         if (Time.unscaledTime < nextPettingRewardTime)
         {
-            SetStatus("Gentle scratches.");
             return;
         }
 
@@ -471,10 +492,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             runtime.ApplyActiveDogInteractionBond(PettingBondGain, PettingMoodGain, PettingActivityGain);
         }
 
+        if (activeDog != null)
+        {
+            activeDog.TryPlayImmediateInteractionPantingVocal();
+        }
+
         if (view != null)
         {
-            view.ShowBondCue("Bond +");
-            view.SetBondPulse(true);
+            view.ShowPettingBurst();
         }
     }
 
@@ -491,6 +516,29 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             view.ShowBondCue("Tug");
             view.SetBondPulse(true);
         }
+    }
+
+    private IEnumerator PlayFailedTeachReactionRoutine(PawPalTrickFailureReason reason)
+    {
+        if (activeDog != null)
+        {
+            activeDog.TryPlayImmediateInteractionAnnoyedVocal();
+
+            DogCameraAttention attention = ResolveDogAttention(activeDog);
+            if (attention != null)
+            {
+                attention.RequestHeadTilt(FailedTeachHeadTiltAngle, FailedTeachHeadTiltDuration);
+            }
+        }
+
+        if (view != null)
+        {
+            view.ShowFailedTeachBurst();
+        }
+
+        yield return new WaitForSecondsRealtime(FailedTeachReactionDelaySeconds);
+        ResetActivity();
+        attemptRoutine = null;
     }
 
     private void HandleToyTugInput()
@@ -671,42 +719,30 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         attemptRoutine = null;
     }
 
-    private bool CanAttemptInteractionTrick(PawPalDogState dogState, PawPalTrickDefinition definition, bool fromVoice, out string message)
+    private PawPalTrickFailureReason GetInteractionAttemptFailure(PawPalDogState dogState, PawPalTrickDefinition definition, bool fromVoice)
     {
-        message = "Training needs an active dog.";
         if (dogState == null || definition == null)
         {
-            return false;
+            return PawPalTrickFailureReason.Busy;
         }
 
         if (PawPalTrainingModeView.IsLockedByTrainingUiSequence(dogState, definition.Id))
         {
-            message = PawPalTrickProgressionService.GetFailureText(
-                PawPalTrickFailureReason.MissingPrerequisite,
-                dogState,
-                definition,
-                false);
-            return false;
+            return PawPalTrickFailureReason.MissingPrerequisite;
         }
 
         PawPalTrickFailureReason availabilityFailure = PawPalTrickProgressionService.GetAvailabilityFailure(dogState, definition, false);
         if (availabilityFailure != PawPalTrickFailureReason.None)
         {
-            message = PawPalTrickProgressionService.GetFailureText(
-                availabilityFailure,
-                dogState,
-                definition,
-                false);
-            return false;
+            return availabilityFailure;
         }
 
         if (!fromVoice && definition.Id == PawPalTrickId.Lie && !dogIsSitting)
         {
-            message = "Sit first.";
-            return false;
+            return PawPalTrickFailureReason.MissingPrerequisite;
         }
 
-        return true;
+        return PawPalTrickFailureReason.None;
     }
 
     private bool IsPointerOverHeldToy(Vector2 screenPosition)
@@ -910,6 +946,22 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static DogCameraAttention ResolveDogAttention(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return null;
+        }
+
+        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
+        if (attention != null)
+        {
+            return attention;
+        }
+
+        return dog.gameObject.AddComponent<DogCameraAttention>();
     }
 
     private DogRoomAgent ResolveDog(string dogId)

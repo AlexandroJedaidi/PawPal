@@ -25,10 +25,9 @@ public class HomeScreenView : AppScreenViewBase
     private const float InventoryAddonsY = 442f;
     private const float InventoryRegionX = 69f;
     private const float InventoryRegionY = 485f;
-    private const float BaseAddonsBottomOffset = 98f;
-    private const float StatsAddonsBottomOffset = 232f;
     private const float InventoryNameBottomOffset = 257f;
-    private const float InventoryAddonsBottomOffset = 282f;
+    private const float InventoryPanelBottomOffset = 0f;
+    private const float InventoryAddonsGapAboveNameBar = 5f;
     private const float AddonsHeight = 38f;
     private const float InventoryNameHeight = 44f;
     private const float InventoryPanelHeight = 258f;
@@ -144,7 +143,13 @@ public class HomeScreenView : AppScreenViewBase
         inventoryNameBar.BindDogSwitching(SelectPreviousDog, SelectNextDog);
         inventoryNameRect = inventoryNameBar.GetComponent<RectTransform>();
 
-        inventoryPanel = CreateNode<InventoryPanelView>("InventoryPanel", bottomHudFrame, InventoryRegionX, 528f, 255f, InventoryPanelHeight);
+        inventoryPanel = CreateNode<InventoryPanelView>(
+            "InventoryPanel",
+            bottomHudFrame,
+            InventoryRegionX,
+            BottomHudReferenceHeight - InventoryPanelHeight - InventoryPanelBottomOffset,
+            255f,
+            InventoryPanelHeight);
         inventoryPanel.Initialize(sprites);
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
@@ -326,17 +331,19 @@ public class HomeScreenView : AppScreenViewBase
 
         if (addonsRect != null)
         {
-            float addonsBottomOffset = BaseAddonsBottomOffset;
-            if (detailMode == HomeDetailMode.Stats)
+            if (detailMode == HomeDetailMode.Inventory)
             {
-                addonsBottomOffset = StatsAddonsBottomOffset;
+                float inventoryNameTopY = GetBottomAnchoredY(InventoryNameHeight, InventoryNameBottomOffset);
+                float addonsTopY = Mathf.Max(0f, inventoryNameTopY - AddonsHeight - InventoryAddonsGapAboveNameBar);
+                addonsRect.anchoredPosition = new Vector2(107f, -addonsTopY);
             }
-            else if (detailMode == HomeDetailMode.Inventory)
+            else
             {
-                addonsBottomOffset = InventoryAddonsBottomOffset;
+                float addonsTopY = detailMode == HomeDetailMode.Stats
+                    ? StatsAddonsY
+                    : BaseAddonsY;
+                addonsRect.anchoredPosition = new Vector2(107f, -addonsTopY);
             }
-
-            addonsRect.anchoredPosition = new Vector2(107f, -GetBottomAnchoredY(AddonsHeight, addonsBottomOffset));
         }
 
         if (inventoryNameRect != null)
@@ -350,7 +357,7 @@ public class HomeScreenView : AppScreenViewBase
         {
             inventoryPanelRect.anchoredPosition = new Vector2(
                 InventoryRegionX,
-                -528f);
+                -GetBottomAnchoredY(InventoryPanelHeight, InventoryPanelBottomOffset));
         }
 
         if (needPopup != null)
@@ -730,8 +737,10 @@ public class HomeScreenView : AppScreenViewBase
 
     private float GetBottomAnchoredY(float height, float bottomOffset)
     {
-        float frameHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : UiTheme.ReferenceContentHeight;
-        return Mathf.Max(0f, frameHeight - height - bottomOffset);
+        float hudHeight = bottomHudFrame != null && bottomHudFrame.rect.height > 0f
+            ? bottomHudFrame.rect.height
+            : UiTheme.ReferenceContentHeight;
+        return Mathf.Max(0f, hudHeight - height - bottomOffset);
     }
 
     private void ShowNeedPopup(string message)

@@ -35,6 +35,9 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private Transform neckTransform;
     [SerializeField, Range(0f, 1f)] private float fallbackHeadWeight = 0.65f;
     [SerializeField, Range(0f, 1f)] private float fallbackNeckWeight = 0.25f;
+    [SerializeField] private float reactionHeadTiltAngle = 14f;
+    [SerializeField] private float reactionHeadTiltDuration = 0.6f;
+    [SerializeField, Range(0f, 1f)] private float reactionNeckTiltWeight = 0.4f;
 
     [Header("Nearby Dog Glances")]
     [SerializeField] private bool lookAtNearbyDogs = true;
@@ -91,6 +94,12 @@ public class DogCameraAttention : MonoBehaviour
     private AttentionTargetType smoothedLookTargetType;
     private bool smoothedLookWasSocial;
     private bool hasSmoothedLookPoint;
+    private float headTiltStartedAt;
+    private float headTiltUntil;
+    private float requestedHeadTiltAngle;
+    private float requestedHeadTiltDuration;
+    private Quaternion appliedHeadTilt = Quaternion.identity;
+    private Quaternion appliedNeckTilt = Quaternion.identity;
     private readonly Dictionary<Transform, Transform> cachedHeadTargetsByDog = new Dictionary<Transform, Transform>();
 
     private void Awake()
@@ -164,6 +173,12 @@ public class DogCameraAttention : MonoBehaviour
         cameraLookOverrideUntil = 0f;
         activeTargetType = AttentionTargetType.None;
         activeLookTarget = null;
+        headTiltStartedAt = 0f;
+        headTiltUntil = 0f;
+        requestedHeadTiltAngle = 0f;
+        requestedHeadTiltDuration = 0f;
+        appliedHeadTilt = Quaternion.identity;
+        appliedNeckTilt = Quaternion.identity;
         ResetSmoothedLookPoint();
     }
 
@@ -227,6 +242,16 @@ public class DogCameraAttention : MonoBehaviour
         attentionRoutine = StartCoroutine(AttentionRoutine());
     }
 
+    public void RequestHeadTilt(float angleDegrees, float duration)
+    {
+        float clampedDuration = Mathf.Max(0.1f, duration > 0f ? duration : reactionHeadTiltDuration);
+        float clampedAngle = Mathf.Abs(angleDegrees) > 0.01f ? angleDegrees : reactionHeadTiltAngle;
+        headTiltStartedAt = Time.time;
+        headTiltUntil = headTiltStartedAt + clampedDuration;
+        requestedHeadTiltAngle = clampedAngle;
+        requestedHeadTiltDuration = clampedDuration;
+    }
+
     public Transform GetOwnHeadLookTarget()
     {
         if (headTransform != null)
@@ -263,6 +288,8 @@ public class DogCameraAttention : MonoBehaviour
         {
             aimConstraint.weight = currentWeight;
         }
+
+        ApplyReactionHeadTilt();
     }
 
     private IEnumerator AttentionRoutine()
@@ -369,6 +396,48 @@ public class DogCameraAttention : MonoBehaviour
         if (ShouldApplyBoneFallbackLook())
         {
             ApplyBoneFallbackLook(currentWeight, smoothedTargetPoint);
+        }
+    }
+
+    private void ApplyReactionHeadTilt()
+    {
+        if (headTransform == null)
+        {
+            return;
+        }
+
+        if (appliedHeadTilt != Quaternion.identity)
+        {
+            headTransform.localRotation *= Quaternion.Inverse(appliedHeadTilt);
+            appliedHeadTilt = Quaternion.identity;
+        }
+
+        if (neckTransform != null && neckTransform != headTransform && appliedNeckTilt != Quaternion.identity)
+        {
+            neckTransform.localRotation *= Quaternion.Inverse(appliedNeckTilt);
+            appliedNeckTilt = Quaternion.identity;
+        }
+
+        if (requestedHeadTiltDuration <= 0f || Time.time >= headTiltUntil)
+        {
+            return;
+        }
+
+        float normalized = Mathf.Clamp01((Time.time - headTiltStartedAt) / requestedHeadTiltDuration);
+        float tiltAmount = Mathf.Sin(normalized * Mathf.PI) * requestedHeadTiltAngle;
+        if (Mathf.Abs(tiltAmount) <= 0.01f)
+        {
+            return;
+        }
+
+        appliedHeadTilt = Quaternion.AngleAxis(tiltAmount, Vector3.forward);
+        headTransform.localRotation *= appliedHeadTilt;
+        if (neckTransform != null && neckTransform != headTransform)
+        {
+            appliedNeckTilt = Quaternion.AngleAxis(
+                tiltAmount * Mathf.Clamp01(reactionNeckTiltWeight),
+                Vector3.forward);
+            neckTransform.localRotation *= appliedNeckTilt;
         }
     }
 

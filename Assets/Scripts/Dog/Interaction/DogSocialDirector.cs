@@ -33,6 +33,8 @@ public class DogSocialDirector : MonoBehaviour
     private const string CorgiBarkAssetPath = "Assets/Audio/bark_dark.mp3";
     private const string AmbientCarAssetPath = "Assets/Audio/ambient_car.mp3";
     private const string AmbientBirdsAssetPath = "Assets/Audio/birds_chirping.mp3";
+    private const string NightBackgroundLayerSourceName = "NightBackgroundLayerAudio";
+    private const string NightBackgroundLayerSourceSecondaryName = "NightBackgroundLayerAudio_Secondary";
     private const float AmbientCarVolumeMultiplier = 1.5f;
     private const float DefaultSunriseHour = 7f;
     private const float DefaultSunsetHour = 20f;
@@ -86,7 +88,7 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private AudioClip ambientCarClip;
     [SerializeField] private AudioClip ambientBirdsClip;
     [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = 0.25f;
-    [SerializeField, Range(0f, 1f)] private float nightBackgroundVolume = 0.2f;
+    [SerializeField, Range(0f, 1f)] private float nightBackgroundVolume = 0.3f;
     [SerializeField] private float backgroundMusicSwapFadeDuration = 1.1f;
     [SerializeField, Range(0f, 1f)] private float ambientCarVolume = 0.35f;
     [SerializeField, Range(0f, 1f)] private float ambientBirdsVolume = 0.14f;
@@ -103,6 +105,8 @@ public class DogSocialDirector : MonoBehaviour
     private NavMeshData runtimeNavMeshData;
     private NavMeshDataInstance runtimeNavMeshInstance;
     private AudioSource backgroundMusicSource;
+    private AudioSource nightBackgroundLayerSource;
+    private AudioSource nightBackgroundLayerSecondarySource;
     private AudioSource ambientCarSource;
     private AudioSource ambientBirdsSource;
     private bool ambientBirdsSuppressed;
@@ -240,6 +244,16 @@ public class DogSocialDirector : MonoBehaviour
         if (backgroundMusicSource != null)
         {
             backgroundMusicSource.Stop();
+        }
+
+        if (nightBackgroundLayerSource != null)
+        {
+            nightBackgroundLayerSource.Stop();
+        }
+
+        if (nightBackgroundLayerSecondarySource != null)
+        {
+            nightBackgroundLayerSecondarySource.Stop();
         }
 
         if (ambientCarSource != null)
@@ -1404,6 +1418,42 @@ public class DogSocialDirector : MonoBehaviour
         ConfigureAmbientCarSource();
     }
 
+    private void EnsureNightBackgroundLayerSource()
+    {
+        if (nightBackgroundLayerSource != null)
+        {
+            return;
+        }
+
+        Transform existingChild = transform.Find(NightBackgroundLayerSourceName);
+        if (existingChild != null)
+        {
+            nightBackgroundLayerSource = existingChild.GetComponent<AudioSource>();
+        }
+
+        if (nightBackgroundLayerSource == null)
+        {
+            GameObject audioObject = new GameObject(NightBackgroundLayerSourceName);
+            audioObject.transform.SetParent(transform, false);
+            nightBackgroundLayerSource = audioObject.AddComponent<AudioSource>();
+        }
+
+        Transform existingSecondaryChild = transform.Find(NightBackgroundLayerSourceSecondaryName);
+        if (existingSecondaryChild != null)
+        {
+            nightBackgroundLayerSecondarySource = existingSecondaryChild.GetComponent<AudioSource>();
+        }
+
+        if (nightBackgroundLayerSecondarySource == null)
+        {
+            GameObject audioObject = new GameObject(NightBackgroundLayerSourceSecondaryName);
+            audioObject.transform.SetParent(transform, false);
+            nightBackgroundLayerSecondarySource = audioObject.AddComponent<AudioSource>();
+        }
+
+        ConfigureNightBackgroundLayerSource(0f);
+    }
+
     private void EnsureAmbientBirdsSource()
     {
         if (ambientBirdsSource != null)
@@ -1481,10 +1531,12 @@ public class DogSocialDirector : MonoBehaviour
             float fadeDuration = Mathf.Max(0.01f, backgroundMusicSwapFadeDuration);
             yield return FadeBackgroundMusic(backgroundMusicSource.volume, 0f, fadeDuration);
             backgroundMusicSource.Stop();
+            StopNightBackgroundLayerSource();
         }
         else if (clipChanged && backgroundMusicSource.isPlaying)
         {
             backgroundMusicSource.Stop();
+            StopNightBackgroundLayerSource();
         }
 
         backgroundMusicSource.clip = targetClip;
@@ -1503,6 +1555,8 @@ public class DogSocialDirector : MonoBehaviour
             backgroundMusicSource.volume = targetVolume;
         }
 
+        SyncNightBackgroundLayerSource(targetClip, targetVolume);
+
         backgroundMusicRoutine = null;
     }
 
@@ -1517,6 +1571,27 @@ public class DogSocialDirector : MonoBehaviour
         backgroundMusicSource.loop = true;
         backgroundMusicSource.spatialBlend = 0f;
         backgroundMusicSource.volume = GetActiveBackgroundMusicTargetVolume();
+    }
+
+    private void ConfigureNightBackgroundLayerSource(float volume)
+    {
+        if (nightBackgroundLayerSource == null)
+        {
+            return;
+        }
+
+        nightBackgroundLayerSource.playOnAwake = false;
+        nightBackgroundLayerSource.loop = true;
+        nightBackgroundLayerSource.spatialBlend = 0f;
+        nightBackgroundLayerSource.volume = volume;
+
+        if (nightBackgroundLayerSecondarySource != null)
+        {
+            nightBackgroundLayerSecondarySource.playOnAwake = false;
+            nightBackgroundLayerSecondarySource.loop = true;
+            nightBackgroundLayerSecondarySource.spatialBlend = 0f;
+            nightBackgroundLayerSecondarySource.volume = volume;
+        }
     }
 
     private void EnsureAmbientCarPlayback()
@@ -1537,8 +1612,7 @@ public class DogSocialDirector : MonoBehaviour
             EnsureAmbientBirdsSource();
         }
 
-        ConfigureAmbientCarSource();
-        ConfigureAmbientBirdsSource();
+        ApplyAmbientTimeOfDayAudioState();
         EnsureAmbientBirdsPlayback();
         if (ambientCarRoutine != null)
         {
@@ -1628,7 +1702,9 @@ public class DogSocialDirector : MonoBehaviour
         ambientCarSource.playOnAwake = false;
         ambientCarSource.loop = false;
         ambientCarSource.spatialBlend = 0f;
-        ambientCarSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(ambientCarVolume);
+        ambientCarSource.volume = ShouldPlayDaytimeAmbientSceneEffects()
+            ? PawPalAudioSettings.ApplySoundEffectsVolume(ambientCarVolume)
+            : 0f;
     }
 
     private void ConfigureAmbientBirdsSource()
@@ -1641,7 +1717,9 @@ public class DogSocialDirector : MonoBehaviour
         ambientBirdsSource.playOnAwake = false;
         ambientBirdsSource.loop = false;
         ambientBirdsSource.spatialBlend = 0f;
-        ambientBirdsSource.volume = PawPalAudioSettings.ApplySoundEffectsVolume(ambientBirdsVolume);
+        ambientBirdsSource.volume = ShouldPlayDaytimeAmbientSceneEffects()
+            ? PawPalAudioSettings.ApplySoundEffectsVolume(ambientBirdsVolume)
+            : 0f;
         ambientBirdsSource.clip = ambientBirdsClip;
     }
 
@@ -1658,8 +1736,8 @@ public class DogSocialDirector : MonoBehaviour
     private void HandleAudioSettingsChanged()
     {
         ConfigureBackgroundMusicSource();
-        ConfigureAmbientCarSource();
-        ConfigureAmbientBirdsSource();
+        SyncNightBackgroundLayerSource(backgroundMusicSource != null ? backgroundMusicSource.clip : null, GetActiveBackgroundMusicTargetVolume());
+        ApplyAmbientTimeOfDayAudioState();
     }
 
     private void AutoAssignDavidTestAudio()
@@ -1792,12 +1870,14 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         activeBackgroundAudioMode = targetMode;
+        ApplyAmbientTimeOfDayAudioState();
 
         if (!immediate
             && backgroundMusicSource.clip == targetClip
             && backgroundMusicSource.isPlaying)
         {
             ConfigureBackgroundMusicSource();
+            SyncNightBackgroundLayerSource(targetClip, GetActiveBackgroundMusicTargetVolume());
             return;
         }
 
@@ -1861,6 +1941,107 @@ public class DogSocialDirector : MonoBehaviour
             ? nightBackgroundVolume
             : backgroundMusicVolume;
         return PawPalAudioSettings.ApplyMusicVolume(configuredVolume);
+    }
+
+    private void SyncNightBackgroundLayerSource(AudioClip activeClip, float targetVolume)
+    {
+        if (activeBackgroundAudioMode != BackgroundAudioMode.NightAmbience || activeClip == null || targetVolume <= 0f)
+        {
+            StopNightBackgroundLayerSource();
+            return;
+        }
+
+        EnsureNightBackgroundLayerSource();
+        if (nightBackgroundLayerSource == null)
+        {
+            return;
+        }
+
+        ConfigureNightBackgroundLayerSource(targetVolume);
+        bool clipChanged = nightBackgroundLayerSource.clip != activeClip;
+        nightBackgroundLayerSource.clip = activeClip;
+        bool secondaryClipChanged = nightBackgroundLayerSecondarySource != null && nightBackgroundLayerSecondarySource.clip != activeClip;
+        if (nightBackgroundLayerSecondarySource != null)
+        {
+            nightBackgroundLayerSecondarySource.clip = activeClip;
+        }
+        if (clipChanged && backgroundMusicSource != null && backgroundMusicSource.clip == activeClip)
+        {
+            nightBackgroundLayerSource.time = backgroundMusicSource.time;
+            if (nightBackgroundLayerSecondarySource != null)
+            {
+                nightBackgroundLayerSecondarySource.time = backgroundMusicSource.time;
+            }
+        }
+        else if (secondaryClipChanged && backgroundMusicSource != null && backgroundMusicSource.clip == activeClip && nightBackgroundLayerSecondarySource != null)
+        {
+            nightBackgroundLayerSecondarySource.time = backgroundMusicSource.time;
+        }
+
+        if (!nightBackgroundLayerSource.isPlaying)
+        {
+            nightBackgroundLayerSource.Play();
+        }
+
+        if (nightBackgroundLayerSecondarySource != null && !nightBackgroundLayerSecondarySource.isPlaying)
+        {
+            nightBackgroundLayerSecondarySource.Play();
+        }
+    }
+
+    private void StopNightBackgroundLayerSource()
+    {
+        if (nightBackgroundLayerSource == null)
+        {
+            return;
+        }
+
+        if (nightBackgroundLayerSource.isPlaying)
+        {
+            nightBackgroundLayerSource.Stop();
+        }
+
+        nightBackgroundLayerSource.clip = null;
+        nightBackgroundLayerSource.volume = 0f;
+
+        if (nightBackgroundLayerSecondarySource == null)
+        {
+            return;
+        }
+
+        if (nightBackgroundLayerSecondarySource.isPlaying)
+        {
+            nightBackgroundLayerSecondarySource.Stop();
+        }
+
+        nightBackgroundLayerSecondarySource.clip = null;
+        nightBackgroundLayerSecondarySource.volume = 0f;
+    }
+
+    private bool ShouldPlayDaytimeAmbientSceneEffects()
+    {
+        return GetDesiredBackgroundAudioMode() == BackgroundAudioMode.DayTheme;
+    }
+
+    private void ApplyAmbientTimeOfDayAudioState()
+    {
+        bool allowDaytimeAmbient = ShouldPlayDaytimeAmbientSceneEffects();
+        ambientBirdsSuppressed = !allowDaytimeAmbient;
+
+        ConfigureAmbientCarSource();
+        ConfigureAmbientBirdsSource();
+
+        if (allowDaytimeAmbient)
+        {
+            return;
+        }
+
+        if (ambientCarSource != null)
+        {
+            ambientCarSource.Stop();
+        }
+
+        StopAmbientBirdsPlayback();
     }
 
     private IEnumerator FadeBackgroundMusic(float from, float to, float duration)

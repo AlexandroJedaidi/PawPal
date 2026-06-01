@@ -93,6 +93,7 @@ public class DogRoomAgent : MonoBehaviour
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
+    private const string ImportedLabradorPuppyPettingAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_petting.fbx";
     private const float BigBallHitImpulseScale = 0.75f;
     private const float BigBallHitTorqueScale = 0.75f;
     private const float InterruptedToyMovementRecoveryDuration = 0.18f;
@@ -122,6 +123,11 @@ public class DogRoomAgent : MonoBehaviour
         "Idle_4",
         "Idle_6",
         "Idle_7"
+    };
+    private static readonly string[] ImportedPettingClipSuffixes =
+    {
+        "Petting",
+        "petting"
     };
 
     private static readonly int MoveHash = Animator.StringToHash("Move");
@@ -188,6 +194,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float blockedPathRerouteAngleStep = 30f;
     [SerializeField] private int blockedPathRerouteCandidateCount = 12;
     [SerializeField] private float blockedPathMinimumProgressDelta = 0.02f;
+    [SerializeField] private float proactiveCrowdingStopPadding = 0.08f;
     [SerializeField] private bool preventDogDogPhysicsPush = true;
     [SerializeField] private bool disableDogWorldCollisionResponse = true;
 
@@ -256,8 +263,6 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float minimumSecondsBetweenToyPickups = 12f;
     [SerializeField] private string[] toyNameKeywords = { "ball", "bone", "cattoy" };
     [SerializeField] private float toySearchRadius = 4.25f;
-    [SerializeField] private float toyApproachDistance = 0.45f;
-    [SerializeField] private float maxToyPickupApproachDistance = 0.12f;
     [SerializeField] private float maxToyPickupPlanarDistance = 0.25f;
     [SerializeField] private float maxToyPickupVerticalDistance = 0.2f;
     [SerializeField, Range(0f, 180f)] private float maxToyPickupFacingAngle = 55f;
@@ -332,6 +337,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private Vector2 ambientPantingIntervalRange = new Vector2(20f, 32f);
     [SerializeField] private Vector2 interactionPantingIntervalRange = new Vector2(7f, 13f);
     [SerializeField] private Vector2 whiningIntervalRange = new Vector2(24f, 42f);
+    [SerializeField, Range(0f, 1f)] private float lowNeedWhiningThreshold = 0.25f;
+    [SerializeField] private Vector2 lowNeedWhiningIntervalRange = new Vector2(12f, 24f);
     [SerializeField, Range(0f, 1f)] private float interactionAnnoyedBaseChance = 0.55f;
     [SerializeField] private float interactionAnnoyedBaseCooldown = 7f;
     [SerializeField] private float minimumSecondsBetweenVocals = 0.9f;
@@ -417,8 +424,10 @@ public class DogRoomAgent : MonoBehaviour
     private DogVocalContext vocalContext = DogVocalContext.Ambient;
     private float nextAllowedPantingTime;
     private float nextAllowedWhiningTime;
+    private float nextAllowedLowNeedWhiningTime;
     private float nextAllowedAnnoyedTime;
     private float nextAllowedVocalTime;
+    private bool wasLowPrimaryNeed;
     private readonly List<Collider> dogPhysicsColliders = new List<Collider>();
     private readonly List<Rigidbody> dogPhysicsBodies = new List<Rigidbody>();
     private float nextDogPhysicsIsolationRefreshTime;
@@ -426,6 +435,9 @@ public class DogRoomAgent : MonoBehaviour
     private Vector3 sampledPlanarWorldVelocity;
     private bool hasSampledWorldPosition;
     private uint movementCommandGeneration = 1;
+    private bool activeTravelAvoidanceSuppressed;
+    private ObstacleAvoidanceType suppressedActiveTravelAvoidanceType;
+    private int suppressedActiveTravelAvoidancePriority;
     private float cachedNavigationFootprintRadius = -1f;
     private string movementDebugContext;
     private float nextMovementDebugLogTime;
@@ -438,6 +450,7 @@ public class DogRoomAgent : MonoBehaviour
     private float circadianAwakeOverrideUntilTime;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
+    private Dictionary<string, AnimationClip> editorImportedPettingClips;
 #endif
 
     public bool IsBusy { get; private set; }
@@ -727,12 +740,13 @@ public class DogRoomAgent : MonoBehaviour
                 continue;
             }
 
+            bool shouldTrackDogDogIgnore = preventDogDogPhysicsPush && CanIgnoreDogPhysicsCollider(dogCollider);
             if (disableDogWorldCollisionResponse && !dogCollider.isTrigger)
             {
                 dogCollider.isTrigger = true;
             }
 
-            if (preventDogDogPhysicsPush && CanIgnoreDogPhysicsCollider(dogCollider))
+            if (shouldTrackDogDogIgnore)
             {
                 dogPhysicsColliders.Add(dogCollider);
             }
@@ -824,7 +838,6 @@ public class DogRoomAgent : MonoBehaviour
     {
         return dogCollider != null
             && dogCollider.enabled
-            && !dogCollider.isTrigger
             && dogCollider.gameObject.activeInHierarchy;
     }
 
@@ -1171,6 +1184,36 @@ public class DogRoomAgent : MonoBehaviour
         nextAllowedAnnoyedTime = Time.time + GetInteractionAnnoyedCooldownSeconds(personality);
     }
 
+    public bool TryPlayImmediateInteractionAnnoyedVocal()
+    {
+        if (vocalContext != DogVocalContext.InteractionBoosted
+            || annoyedClip == null
+            || Time.time < nextAllowedAnnoyedTime
+            || !CanPlayVocalNow())
+        {
+            return false;
+        }
+
+        PlayVocalClip(annoyedClip, annoyedVolume);
+        nextAllowedAnnoyedTime = Time.time + GetInteractionAnnoyedCooldownSeconds(GetRuntimePersonality());
+        return true;
+    }
+
+    public bool TryPlayImmediateInteractionPantingVocal()
+    {
+        if (vocalContext != DogVocalContext.InteractionBoosted
+            || pantingClip == null
+            || Time.time < nextAllowedPantingTime
+            || !CanPlayVocalNow())
+        {
+            return false;
+        }
+
+        PlayVocalClip(pantingClip, pantingVolume);
+        nextAllowedPantingTime = Time.time + GetPantingDelaySeconds();
+        return true;
+    }
+
     public bool TryStartFetchToy(GameObject toy, Transform returnTarget, System.Action onCompleted)
     {
         if (toy == null || !CanStartFetchToy)
@@ -1495,6 +1538,12 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         yield return PlayOneShotAnimation(barkStateHash, barkStateName, barkIdleIndex, barkDuration);
+    }
+
+    public bool TryPlayPettingReaction()
+    {
+        // Temporarily disabled while the petting clip export is being corrected.
+        return false;
     }
 
     public IEnumerator PlaySit()
@@ -2290,15 +2339,19 @@ public class DogRoomAgent : MonoBehaviour
         LogMovementDebug("TRAVEL_RELEASED");
 
         float elapsed = 0f;
+        float effectiveBlockedWaitDuration = Mathf.Max(0.05f, Mathf.Min(blockedPathWaitDuration, minimumMovementCommitDuration));
         float blockedWaitElapsed = 0f;
-        float corridorStallDuration = 0f;
-        float previousRemainingDistance = GetTravelRemainingDistance(roomPoint);
         int rerouteAttempts = 0;
         bool pausedForCrowding = false;
         while ((timeout <= 0f || elapsed < timeout) && !HasReachedDestination(reachedDistance, preciseArrival))
         {
             if (!IsMovementCommandCurrent(commandGeneration))
             {
+                if (pausedForCrowding)
+                {
+                    ResumePausedTravel(roomPoint);
+                }
+
                 LogMovementDebug("TRAVEL_ABORT_STALE_IN_LOOP");
                 ReleaseReservedDestination();
                 agent.stoppingDistance = originalStoppingDistance;
@@ -2311,27 +2364,39 @@ public class DogRoomAgent : MonoBehaviour
                 break;
             }
 
-            bool madeProgress = HasTravelProgressed(previousRemainingDistance, roomPoint);
             DogRoomAgent blockingDog;
             bool personalSpaceBlocked;
             bool corridorBlocked = IsPathBlockedByAnotherDog(roomPoint, crowdingPadding, true, out blockingDog, out personalSpaceBlocked);
-            bool velocityIsLow = agent.velocity.sqrMagnitude <= movingVelocityThreshold * movingVelocityThreshold;
-            if (madeProgress)
+            bool blockedByDog = personalSpaceBlocked || corridorBlocked;
+            if (blockedByDog)
             {
-                corridorStallDuration = 0f;
-            }
-            else if (corridorBlocked && velocityIsLow)
-            {
-                corridorStallDuration += Time.deltaTime;
-            }
-            else
-            {
-                corridorStallDuration = 0f;
-            }
+                if (!personalSpaceBlocked
+                    && rerouteAttempts < Mathf.Max(0, blockedPathMaxRerouteAttempts)
+                    && Time.time >= nextAllowedCrowdingRepathTime)
+                {
+                    Vector3 immediateReroutePoint;
+                    if (TryFindBlockedPathReroutePoint(originalRoomPoint, roomPoint, crowdingPadding, out immediateReroutePoint)
+                        && GetPlanarDistance(immediateReroutePoint, roomPoint) > 0.05f
+                        && TryRedirectActiveTravel(immediateReroutePoint, pace, reserveDestination))
+                    {
+                        if (pausedForCrowding)
+                        {
+                            RestoreActiveTravelAvoidance();
+                            pausedForCrowding = false;
+                        }
 
-            bool blockedByDog = personalSpaceBlocked || (corridorBlocked && corridorStallDuration > 0f);
-            if (blockedByDog && elapsed >= Mathf.Max(0f, minimumMovementCommitDuration))
-            {
+                        roomPoint = immediateReroutePoint;
+                        rerouteAttempts++;
+                        blockedWaitElapsed = 0f;
+                        nextAllowedCrowdingRepathTime = Time.time + Mathf.Max(0.05f, crowdingRepathInterval);
+                        LogMovementDebug("TRAVEL_REROUTE_IMMEDIATE roomPoint=" + roomPoint.ToString("F3"));
+                        TickMovementDebug("TRAVEL_TICK");
+                        elapsed += Time.deltaTime;
+                        yield return null;
+                        continue;
+                    }
+                }
+
                 if (!pausedForCrowding)
                 {
                     PauseActiveTravel();
@@ -2341,20 +2406,19 @@ public class DogRoomAgent : MonoBehaviour
                 }
 
                 blockedWaitElapsed += Time.deltaTime;
-                if (blockedWaitElapsed >= Mathf.Max(0.05f, blockedPathWaitDuration)
+                if (blockedWaitElapsed >= effectiveBlockedWaitDuration
                     && rerouteAttempts < Mathf.Max(0, blockedPathMaxRerouteAttempts)
                     && Time.time >= nextAllowedCrowdingRepathTime)
                 {
                     Vector3 reroutePoint;
                     if (TryFindBlockedPathReroutePoint(originalRoomPoint, roomPoint, crowdingPadding, out reroutePoint)
                         && GetPlanarDistance(reroutePoint, roomPoint) > 0.05f
-                        && TryApplyTravelReroute(reroutePoint, roomPoint, reserveDestination))
+                        && TryRedirectActiveTravel(reroutePoint, pace, reserveDestination))
                     {
+                        RestoreActiveTravelAvoidance();
                         roomPoint = reroutePoint;
                         rerouteAttempts++;
                         blockedWaitElapsed = 0f;
-                        corridorStallDuration = 0f;
-                        previousRemainingDistance = GetTravelRemainingDistance(roomPoint);
                         pausedForCrowding = false;
                         nextAllowedCrowdingRepathTime = Time.time + Mathf.Max(0.05f, crowdingRepathInterval);
                         LogMovementDebug("TRAVEL_REROUTE roomPoint=" + roomPoint.ToString("F3"));
@@ -2365,7 +2429,7 @@ public class DogRoomAgent : MonoBehaviour
                     }
                 }
 
-                if (blockedWaitElapsed >= Mathf.Max(0.05f, blockedPathWaitDuration))
+                if (blockedWaitElapsed >= effectiveBlockedWaitDuration)
                 {
                     LogMovementDebug("TRAVEL_BLOCKED_ABORT");
                     break;
@@ -2381,7 +2445,6 @@ public class DogRoomAgent : MonoBehaviour
                 }
             }
 
-            previousRemainingDistance = GetTravelRemainingDistance(roomPoint);
             TickMovementDebug("TRAVEL_TICK");
             elapsed += Time.deltaTime;
             yield return null;
@@ -2499,8 +2562,10 @@ public class DogRoomAgent : MonoBehaviour
             return;
         }
 
+        SuppressActiveTravelAvoidance();
         agent.isStopped = true;
         agent.velocity = Vector3.zero;
+        agent.nextPosition = transform.position;
     }
 
     private void ResumePausedTravel(Vector3 destination)
@@ -2510,11 +2575,38 @@ public class DogRoomAgent : MonoBehaviour
             return;
         }
 
+        RestoreActiveTravelAvoidance();
         agent.isStopped = false;
         if (!agent.hasPath && !agent.pathPending)
         {
             agent.SetDestination(destination);
         }
+    }
+
+    private void SuppressActiveTravelAvoidance()
+    {
+        if (activeTravelAvoidanceSuppressed || agent == null || !agent.enabled)
+        {
+            return;
+        }
+
+        activeTravelAvoidanceSuppressed = true;
+        suppressedActiveTravelAvoidanceType = agent.obstacleAvoidanceType;
+        suppressedActiveTravelAvoidancePriority = agent.avoidancePriority;
+        agent.obstacleAvoidanceType = ObstacleAvoidanceType.NoObstacleAvoidance;
+        agent.avoidancePriority = 99;
+    }
+
+    private void RestoreActiveTravelAvoidance()
+    {
+        if (!activeTravelAvoidanceSuppressed || agent == null || !agent.enabled)
+        {
+            return;
+        }
+
+        activeTravelAvoidanceSuppressed = false;
+        agent.obstacleAvoidanceType = suppressedActiveTravelAvoidanceType;
+        agent.avoidancePriority = suppressedActiveTravelAvoidancePriority;
     }
 
     private float GetTravelRemainingDistance(Vector3 destination)
@@ -2530,12 +2622,6 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return GetPlanarDistance(transform.position, destination);
-    }
-
-    private bool HasTravelProgressed(float previousRemainingDistance, Vector3 destination)
-    {
-        float minimumProgress = Mathf.Max(0.001f, blockedPathMinimumProgressDelta);
-        return previousRemainingDistance - GetTravelRemainingDistance(destination) >= minimumProgress;
     }
 
     private bool TryFindBlockedPathReroutePoint(Vector3 desiredPoint, Vector3 currentPoint, float crowdingPadding, out Vector3 point)
@@ -2580,36 +2666,40 @@ public class DogRoomAgent : MonoBehaviour
         return false;
     }
 
-    private bool TryApplyTravelReroute(Vector3 reroutePoint, Vector3 fallbackPoint, bool reserveDestination)
+    private bool TryRedirectActiveTravel(Vector3 reroutePoint, DogMovementPace pace, bool reserveDestination)
     {
         if (agent == null || !agent.enabled || !agent.isOnNavMesh)
         {
             return false;
         }
 
-        bool updatedReservation = false;
         if (reserveDestination)
         {
             if (!TryReserveDestination(reroutePoint))
             {
                 return false;
             }
-
-            updatedReservation = true;
         }
 
+        StopReleaseAgentRoutine();
+        ApplyPace(pace);
+        pathPrimedForWalk = false;
         agent.isStopped = false;
-        if (agent.SetDestination(reroutePoint))
+        bool acceptedDestination = agent.SetDestination(reroutePoint);
+        if (!acceptedDestination)
         {
-            return true;
+            return false;
         }
 
-        if (updatedReservation)
+        if (animator != null)
         {
-            TryReserveDestination(fallbackPoint);
+            animator.SetInteger(IdleIndexHash, MovementIdleIndex);
+            animator.SetBool(MoveHash, true);
+            animatorSpeedValue = Mathf.Max(animatorSpeedValue, GetAnimatorSpeed(pace) * animatorSpeedScale * 0.7f);
+            animator.SetFloat(SpeedHash, animatorSpeedValue);
         }
 
-        return false;
+        return true;
     }
 
     private IEnumerator FaceWorldPoint(Vector3 worldPosition, float duration)
@@ -2635,6 +2725,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         LogMovementDebug("STOP_AGENT");
         StopReleaseAgentRoutine();
+        RestoreActiveTravelAvoidance();
         if (isPlayingPreMoveTurnAnimation)
         {
             FinishPreMoveTurnAnimation();
@@ -2978,6 +3069,23 @@ public class DogRoomAgent : MonoBehaviour
 
         float now = Time.time;
         PawPalDogState runtimeDog = GetRuntimeDogState();
+        bool hasLowPrimaryNeed = runtimeDog != null && HasLowPrimaryNeed(runtimeDog);
+        if (hasLowPrimaryNeed && !wasLowPrimaryNeed)
+        {
+            nextAllowedLowNeedWhiningTime = now + GetRandomDelay(lowNeedWhiningIntervalRange);
+        }
+
+        wasLowPrimaryNeed = hasLowPrimaryNeed;
+
+        if (hasLowPrimaryNeed
+            && whiningClip != null
+            && now >= nextAllowedLowNeedWhiningTime)
+        {
+            PlayVocalClip(whiningClip, whiningVolume);
+            nextAllowedLowNeedWhiningTime = now + GetRandomDelay(lowNeedWhiningIntervalRange);
+            return;
+        }
+
         if (runtimeDog != null
             && runtimeDog.NewDogWhinyHoursRemaining > 0f
             && whiningClip != null
@@ -3020,6 +3128,22 @@ public class DogRoomAgent : MonoBehaviour
         nextAllowedAnnoyedTime = 0f;
         nextAllowedPantingTime = Time.time + GetPantingDelaySeconds();
         nextAllowedWhiningTime = Time.time + GetRandomDelay(whiningIntervalRange);
+        nextAllowedLowNeedWhiningTime = Time.time + GetRandomDelay(lowNeedWhiningIntervalRange);
+        wasLowPrimaryNeed = false;
+    }
+
+    private bool HasLowPrimaryNeed(PawPalDogState runtimeDog)
+    {
+        if (runtimeDog == null)
+        {
+            return false;
+        }
+
+        float threshold = Mathf.Clamp01(lowNeedWhiningThreshold);
+        return runtimeDog.Food01 < threshold
+            || runtimeDog.Water01 < threshold
+            || runtimeDog.Hygiene01 < threshold
+            || runtimeDog.Activity01 < threshold;
     }
 
     private float GetPantingDelaySeconds()
@@ -5408,6 +5532,54 @@ public class DogRoomAgent : MonoBehaviour
         return TryGetImportedClip(suffix, out clip);
     }
 
+    private bool TryGetImportedPettingClip(out AnimationClip clip)
+    {
+        clip = null;
+        if (!IsLabradorPuppyVariant())
+        {
+            return false;
+        }
+
+#if UNITY_EDITOR
+        Dictionary<string, AnimationClip> clips = GetEditorImportedPettingClips();
+        if (clips == null || clips.Count == 0)
+        {
+            return false;
+        }
+
+        string prefix = GetImportedClipPrefix();
+        for (int i = 0; i < ImportedPettingClipSuffixes.Length; i++)
+        {
+            string suffix = ImportedPettingClipSuffixes[i];
+            if (!string.IsNullOrEmpty(prefix) && clips.TryGetValue(prefix + "|" + suffix, out clip))
+            {
+                return clip != null;
+            }
+
+            if (clips.TryGetValue(suffix, out clip))
+            {
+                return clip != null;
+            }
+        }
+
+        foreach (KeyValuePair<string, AnimationClip> candidate in clips)
+        {
+            for (int i = 0; i < ImportedPettingClipSuffixes.Length; i++)
+            {
+                string suffix = ImportedPettingClipSuffixes[i];
+                if (candidate.Key.EndsWith("|" + suffix, System.StringComparison.Ordinal)
+                    || candidate.Key.EndsWith(suffix, System.StringComparison.Ordinal))
+                {
+                    clip = candidate.Value;
+                    return clip != null;
+                }
+            }
+        }
+#endif
+
+        return false;
+    }
+
     private bool TryGetImportedClip(string suffix, out AnimationClip clip)
     {
         clip = null;
@@ -5550,6 +5722,92 @@ public class DogRoomAgent : MonoBehaviour
         return editorImportedClips;
     }
 
+    private Dictionary<string, AnimationClip> GetEditorImportedPettingClips()
+    {
+        if (editorImportedPettingClips != null)
+        {
+            return editorImportedPettingClips;
+        }
+
+        editorImportedPettingClips = new Dictionary<string, AnimationClip>();
+        string assetPath = GetImportedPettingAnimationAssetPath();
+        if (string.IsNullOrEmpty(assetPath))
+        {
+            return editorImportedPettingClips;
+        }
+
+        Object[] assets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        for (int i = 0; i < assets.Length; i++)
+        {
+            AnimationClip importedClip = assets[i] as AnimationClip;
+            if (importedClip == null || string.IsNullOrEmpty(importedClip.name))
+            {
+                continue;
+            }
+
+            editorImportedPettingClips[importedClip.name] = CreateScaleStrippedEditorClip(importedClip);
+        }
+
+        return editorImportedPettingClips;
+    }
+
+    private static AnimationClip CreateScaleStrippedEditorClip(AnimationClip sourceClip)
+    {
+        if (sourceClip == null)
+        {
+            return null;
+        }
+
+        AnimationClip sanitizedClip = new AnimationClip
+        {
+            name = sourceClip.name,
+            frameRate = sourceClip.frameRate,
+            wrapMode = sourceClip.wrapMode,
+            legacy = sourceClip.legacy
+        };
+
+        EditorCurveBinding[] floatBindings = AnimationUtility.GetCurveBindings(sourceClip);
+        for (int i = 0; i < floatBindings.Length; i++)
+        {
+            EditorCurveBinding binding = floatBindings[i];
+            if (IsScaleCurveBinding(binding))
+            {
+                continue;
+            }
+
+            AnimationCurve curve = AnimationUtility.GetEditorCurve(sourceClip, binding);
+            if (curve != null)
+            {
+                AnimationUtility.SetEditorCurve(sanitizedClip, binding, curve);
+            }
+        }
+
+        EditorCurveBinding[] objectBindings = AnimationUtility.GetObjectReferenceCurveBindings(sourceClip);
+        for (int i = 0; i < objectBindings.Length; i++)
+        {
+            EditorCurveBinding binding = objectBindings[i];
+            ObjectReferenceKeyframe[] keyframes = AnimationUtility.GetObjectReferenceCurve(sourceClip, binding);
+            if (keyframes != null && keyframes.Length > 0)
+            {
+                AnimationUtility.SetObjectReferenceCurve(sanitizedClip, binding, keyframes);
+            }
+        }
+
+        AnimationUtility.SetAnimationEvents(sanitizedClip, AnimationUtility.GetAnimationEvents(sourceClip));
+        sanitizedClip.hideFlags = HideFlags.HideAndDontSave;
+        return sanitizedClip;
+    }
+
+    private static bool IsScaleCurveBinding(EditorCurveBinding binding)
+    {
+        return binding.propertyName == "m_LocalScale.x"
+            || binding.propertyName == "m_LocalScale.y"
+            || binding.propertyName == "m_LocalScale.z"
+            || binding.propertyName == "localScale.x"
+            || binding.propertyName == "localScale.y"
+            || binding.propertyName == "localScale.z";
+    }
+
     private string GetImportedAnimationAssetPath()
     {
         string key = GetBreedKey();
@@ -5584,6 +5842,11 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return null;
+    }
+
+    private string GetImportedPettingAnimationAssetPath()
+    {
+        return IsLabradorPuppyVariant() ? ImportedLabradorPuppyPettingAssetPath : null;
     }
 #endif
 
@@ -5633,15 +5896,15 @@ public class DogRoomAgent : MonoBehaviour
         return prefix + "|" + suffix;
     }
 
+    private bool IsLabradorPuppyVariant()
+    {
+        string source = BuildVariantIdentitySource();
+        return source.Contains("labrador") && source.Contains("puppy");
+    }
+
     private string GetBreedKey()
     {
-        string source = name;
-        if (animator != null && animator.runtimeAnimatorController != null)
-        {
-            source += " " + animator.runtimeAnimatorController.name;
-        }
-
-        source = source.ToLowerInvariant();
+        string source = BuildVariantIdentitySource();
         if (source.Contains("corgi"))
         {
             return "corgi";
@@ -5673,6 +5936,74 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return null;
+    }
+
+    private string BuildVariantIdentitySource()
+    {
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(256);
+        AppendIdentityToken(builder, name);
+
+        if (animator != null)
+        {
+            if (animator.runtimeAnimatorController != null)
+            {
+                AppendIdentityToken(builder, animator.runtimeAnimatorController.name);
+            }
+
+            if (animator.avatar != null)
+            {
+                AppendIdentityToken(builder, animator.avatar.name);
+            }
+        }
+
+        Transform[] children = GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform child = children[i];
+            if (child == null)
+            {
+                continue;
+            }
+
+            AppendIdentityToken(builder, child.name);
+
+            SkinnedMeshRenderer skinnedMesh = child.GetComponent<SkinnedMeshRenderer>();
+            if (skinnedMesh != null)
+            {
+                if (skinnedMesh.sharedMesh != null)
+                {
+                    AppendIdentityToken(builder, skinnedMesh.sharedMesh.name);
+                }
+
+                if (skinnedMesh.sharedMaterial != null)
+                {
+                    AppendIdentityToken(builder, skinnedMesh.sharedMaterial.name);
+                }
+            }
+
+            MeshFilter meshFilter = child.GetComponent<MeshFilter>();
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                AppendIdentityToken(builder, meshFilter.sharedMesh.name);
+            }
+        }
+
+        return builder.ToString().ToLowerInvariant();
+    }
+
+    private static void AppendIdentityToken(System.Text.StringBuilder builder, string value)
+    {
+        if (builder == null || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.Append(' ');
+        }
+
+        builder.Append(value);
     }
 
     private static string GetPhotoStandingIdleClipSuffix(PawPalPhotoPoseId poseId)
@@ -6562,6 +6893,7 @@ public class DogRoomAgent : MonoBehaviour
         goal.y = 0f;
         float selfRadius = GetNavigationFootprintRadius();
         float extraPadding = Mathf.Max(0f, radius);
+        float proactiveStopBuffer = Mathf.Max(0.01f, proactiveCrowdingStopPadding + extraPadding + blockedPathMinimumProgressDelta);
         for (int i = 0; i < ActiveAgents.Count; i++)
         {
             DogRoomAgent other = ActiveAgents[i];
@@ -6573,9 +6905,10 @@ public class DogRoomAgent : MonoBehaviour
             Vector3 otherPosition = other.transform.position;
             otherPosition.y = 0f;
             float requiredDistance = selfRadius + other.GetNavigationFootprintRadius() + extraPadding;
+            float corridorDistanceThreshold = requiredDistance + proactiveStopBuffer;
             bool blocksSteeringSegment = includeSteeringTarget
-                && DistanceToPlanarSegment(otherPosition, start, steeringTarget) <= requiredDistance;
-            bool blocksGoalSegment = DistanceToPlanarSegment(otherPosition, start, goal) <= requiredDistance;
+                && DistanceToPlanarSegment(otherPosition, start, steeringTarget) <= corridorDistanceThreshold;
+            bool blocksGoalSegment = DistanceToPlanarSegment(otherPosition, start, goal) <= corridorDistanceThreshold;
             if (blocksSteeringSegment || blocksGoalSegment)
             {
                 blocker = other;

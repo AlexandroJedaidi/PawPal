@@ -321,7 +321,9 @@ public static class PawPalVoiceCommandCatalogBuilder
                 }
                 else
                 {
-                    if (includeUnlearnedActiveDogTricks && string.Equals(dog.Id, activeDogId, StringComparison.OrdinalIgnoreCase))
+                    if (includeUnlearnedActiveDogTricks
+                        && string.Equals(dog.Id, activeDogId, StringComparison.OrdinalIgnoreCase)
+                        && CanExposeUnlearnedInteractionTrick(dog, trickId))
                     {
                         catalog.AddDogAndTrickCommand(dogPhrase + " " + normalizedTrick, dog.Id, dog.DisplayName, trickId, trickLabel);
                         catalog.AddActiveDogTrickCommand(normalizedTrick, dog.Id, dog.DisplayName, trickId, trickLabel);
@@ -342,6 +344,13 @@ public static class PawPalVoiceCommandCatalogBuilder
         }
 
         return catalog;
+    }
+
+    private static bool CanExposeUnlearnedInteractionTrick(PawPalDogState dog, PawPalTrickId trickId)
+    {
+        PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
+        return definition != null
+            && !PawPalTrickProgressionService.GetFirstMissingPrerequisite(dog, definition, false).HasValue;
     }
 
     public static string ResolveSpokenTrickLabel(PawPalDogTrickProgress progress, PawPalTrickId trickId)

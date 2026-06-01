@@ -21,11 +21,13 @@ public sealed class PawPalUiAudio : MonoBehaviour
     private const string SuccessPopupResourcePath = "Audio/UI/success_popup";
     private const string WhistleResourcePath = "Audio/UI/whistle";
     private const string SparkleResourcePath = "Audio/UI/sparkle";
+    private const string HeartsResourcePath = "Audio/hearts";
 
     private const float ClickVolume = 0.8f;
     private const float SuccessVolume = 1f;
     private const float WhistleVolume = 0.95f;
     private const float SparkleVolume = 0.9f;
+    private const float HeartsVolume = 0.92f;
 
     private static PawPalUiAudio instance;
 
@@ -36,6 +38,7 @@ public sealed class PawPalUiAudio : MonoBehaviour
     private AudioClip successPopupClip;
     private AudioClip whistleClip;
     private AudioClip sparkleClip;
+    private AudioClip heartsClip;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void AutoInstall()
@@ -121,6 +124,17 @@ public sealed class PawPalUiAudio : MonoBehaviour
         instance.PlayClip(instance.sparkleClip, SparkleVolume);
     }
 
+    public static void PlayHearts()
+    {
+        EnsureInstalled();
+        if (instance == null)
+        {
+            return;
+        }
+
+        instance.PlayClip(instance.heartsClip, HeartsVolume);
+    }
+
     private void Awake()
     {
         if (instance != null && instance != this)
@@ -186,6 +200,7 @@ public sealed class PawPalUiAudio : MonoBehaviour
         successPopupClip = LoadClip(SuccessPopupResourcePath);
         whistleClip = LoadClip(WhistleResourcePath);
         sparkleClip = LoadClip(SparkleResourcePath);
+        heartsClip = LoadClip(HeartsResourcePath);
     }
 
     private AudioClip LoadClip(string resourcePath)

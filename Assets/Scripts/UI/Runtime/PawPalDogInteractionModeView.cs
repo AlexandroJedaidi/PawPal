@@ -18,6 +18,11 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private const float ProgressCueDuration = 2.2f;
     private const float ProgressCueScreenLift = 88f;
     private const float ProgressFillAnimDuration = 0.42f;
+    private const float SymbolBurstDuration = 1.2f;
+    private const float SymbolBurstScreenLift = 68f;
+    private const float SymbolBurstRise = 44f;
+    private const float SymbolBurstSpacing = 24f;
+    private const float SymbolBurstFontSize = 24f;
 
     private static readonly Color32 DockFill = new Color32(255, 252, 243, 248);
     private static readonly Color32 DockBorder = new Color32(236, 223, 201, 255);
@@ -28,6 +33,8 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private static readonly Color32 BondAccent = new Color32(103, 178, 151, 255);
     private static readonly Color32 ProgressAccent = new Color32(239, 188, 82, 255);
     private static readonly Color32 ProgressTrack = new Color32(235, 224, 203, 255);
+    private static readonly Color32 HeartBurstColor = new Color32(236, 96, 126, 255);
+    private static readonly Color32 QuestionBurstColor = new Color32(228, 132, 107, 255);
 
     private UiSpriteLibrary spriteLibrary;
     private RectTransform root;
@@ -45,6 +52,11 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private TextMeshProUGUI progressTitle;
     private TextMeshProUGUI progressPercent;
     private Image progressFill;
+    private RectTransform[] symbolRoots;
+    private TextMeshProUGUI[] symbolLabels;
+    private Vector2[] symbolBaseOffsets;
+    private float symbolVisibleUntil;
+    private float symbolShownAt;
     private DogRoomAgent trackedDog;
     private Camera trackedCamera;
     private Transform trackedHead;
@@ -60,7 +72,6 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public event Action CloseRequested;
     public event Action MicRequested;
-
     public bool IsVisible
     {
         get { return visible; }
@@ -79,6 +90,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
         BuildFloatingCue(root);
         BuildFloatingProgressCue(root);
+        BuildFloatingSymbolBurst(root);
         BuildMicButton(root);
         BuildCloseButton(root);
         SetRootVisible(false);
@@ -92,6 +104,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         SetBondPulse(false);
         HideCue();
         HideProgressCue();
+        HideSymbolBurst();
     }
 
     public void Hide()
@@ -101,6 +114,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         trackedHead = null;
         HideCue();
         HideProgressCue();
+        HideSymbolBurst();
         SetRootVisible(false);
     }
 
@@ -186,6 +200,17 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         UpdateProgressCuePosition();
     }
 
+    public void ShowPettingBurst()
+    {
+        ShowSymbolBurst("\u2665", HeartBurstColor);
+        PawPalUiAudio.PlayHearts();
+    }
+
+    public void ShowFailedTeachBurst()
+    {
+        ShowSymbolBurst("?", QuestionBurstColor);
+    }
+
     private void LateUpdate()
     {
         if (!visible)
@@ -195,6 +220,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
         UpdateCuePosition();
         UpdateProgressCuePosition();
+        UpdateSymbolBurstPosition();
         UpdateMicPulse();
     }
 
@@ -337,6 +363,41 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         progressRoot.gameObject.SetActive(false);
     }
 
+    private void BuildFloatingSymbolBurst(RectTransform parent)
+    {
+        symbolRoots = new RectTransform[3];
+        symbolLabels = new TextMeshProUGUI[3];
+        symbolBaseOffsets = new[]
+        {
+            new Vector2(-SymbolBurstSpacing, 2f),
+            new Vector2(0f, -8f),
+            new Vector2(SymbolBurstSpacing, 6f)
+        };
+
+        for (int i = 0; i < symbolRoots.Length; i++)
+        {
+            RectTransform symbolRoot = UiFactory.CreateRect("SymbolBurst_" + i, parent);
+            symbolRoot.anchorMin = new Vector2(0.5f, 0.5f);
+            symbolRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            symbolRoot.pivot = new Vector2(0.5f, 0.5f);
+            symbolRoot.sizeDelta = new Vector2(28f, 28f);
+
+            TextMeshProUGUI label = UiFactory.CreateLabel("Label", symbolRoot, string.Empty, Mathf.RoundToInt(SymbolBurstFontSize), UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+            label.font = UiTheme.NavExtraBoldFont;
+            label.raycastTarget = false;
+            UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
+
+            Shadow shadow = label.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.16f);
+            shadow.effectDistance = new Vector2(0f, -1f);
+            shadow.useGraphicAlpha = true;
+
+            symbolRoot.gameObject.SetActive(false);
+            symbolRoots[i] = symbolRoot;
+            symbolLabels[i] = label;
+        }
+    }
+
     private void BuildMicButton(RectTransform parent)
     {
         micBackground = UiFactory.CreateImage("InteractionMicButton", parent, UiTheme.CircleSprite, DockFill);
@@ -455,6 +516,31 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         UpdateCuePosition();
     }
 
+    private void ShowSymbolBurst(string symbol, Color color)
+    {
+        if (symbolRoots == null || symbolLabels == null)
+        {
+            return;
+        }
+
+        symbolShownAt = Time.unscaledTime;
+        symbolVisibleUntil = symbolShownAt + SymbolBurstDuration;
+        for (int i = 0; i < symbolRoots.Length; i++)
+        {
+            if (symbolRoots[i] == null || symbolLabels[i] == null)
+            {
+                continue;
+            }
+
+            symbolLabels[i].text = symbol;
+            symbolLabels[i].color = color;
+            symbolRoots[i].localScale = Vector3.one;
+            symbolRoots[i].gameObject.SetActive(true);
+        }
+
+        UpdateSymbolBurstPosition();
+    }
+
     private void HideCue()
     {
         cueVisibleUntil = 0f;
@@ -467,6 +553,26 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         {
             cueRoot.gameObject.SetActive(false);
             cueRoot.localScale = Vector3.one;
+        }
+    }
+
+    private void HideSymbolBurst()
+    {
+        symbolVisibleUntil = 0f;
+        if (symbolRoots == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < symbolRoots.Length; i++)
+        {
+            if (symbolRoots[i] == null)
+            {
+                continue;
+            }
+
+            symbolRoots[i].gameObject.SetActive(false);
+            symbolRoots[i].localScale = Vector3.one;
         }
     }
 
@@ -523,6 +629,82 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         float pulse = Mathf.PingPong((Time.unscaledTime + cueAnimationSeed) * 1.6f, 1f);
         float scale = bondPulseActive ? Mathf.Lerp(1f, 1.08f, pulse) : Mathf.Lerp(1f, 1.03f, pulse * 0.4f);
         cueRoot.localScale = new Vector3(scale, scale, 1f);
+    }
+
+    private void UpdateSymbolBurstPosition()
+    {
+        if (symbolRoots == null || symbolLabels == null)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime >= symbolVisibleUntil || trackedDog == null)
+        {
+            HideSymbolBurst();
+            return;
+        }
+
+        Camera camera = trackedCamera != null ? trackedCamera : Camera.main;
+        if (camera == null)
+        {
+            HideSymbolBurst();
+            return;
+        }
+
+        if (trackedHead == null)
+        {
+            trackedHead = ResolveTrackedHead(trackedDog);
+        }
+
+        Vector3 worldPoint = trackedHead != null
+            ? trackedHead.position + Vector3.up * CueHeadOffset
+            : trackedDog.transform.position + new Vector3(0f, 0.45f, 0f);
+        Vector3 screenPoint = camera.WorldToScreenPoint(worldPoint);
+        if (screenPoint.z <= 0f)
+        {
+            for (int i = 0; i < symbolRoots.Length; i++)
+            {
+                if (symbolRoots[i] != null)
+                {
+                    symbolRoots[i].gameObject.SetActive(false);
+                }
+            }
+
+            return;
+        }
+
+        Vector2 localPoint;
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(root, screenPoint, null, out localPoint);
+        localPoint.y += SymbolBurstScreenLift;
+
+        float normalized = Mathf.Clamp01((Time.unscaledTime - symbolShownAt) / Mathf.Max(0.01f, SymbolBurstDuration));
+        float alpha = 1f - normalized;
+        float rise = normalized * SymbolBurstRise;
+        Rect bounds = root.rect;
+        for (int i = 0; i < symbolRoots.Length; i++)
+        {
+            RectTransform symbolRoot = symbolRoots[i];
+            TextMeshProUGUI symbolLabel = symbolLabels[i];
+            if (symbolRoot == null || symbolLabel == null)
+            {
+                continue;
+            }
+
+            Vector2 anchored = localPoint + symbolBaseOffsets[i];
+            anchored.y += rise + i * 6f;
+            float halfWidth = symbolRoot.rect.width * 0.5f;
+            float halfHeight = symbolRoot.rect.height * 0.5f;
+            anchored.x = Mathf.Clamp(anchored.x, bounds.xMin + halfWidth + CueEdgeMargin, bounds.xMax - halfWidth - CueEdgeMargin);
+            anchored.y = Mathf.Clamp(anchored.y, bounds.yMin + halfHeight + CueEdgeMargin, bounds.yMax - halfHeight - CueEdgeMargin);
+            symbolRoot.anchoredPosition = anchored;
+            symbolLabel.alpha = alpha;
+            float scale = Mathf.Lerp(0.9f, 1.08f, Mathf.Sin(normalized * Mathf.PI));
+            symbolRoot.localScale = new Vector3(scale, scale, 1f);
+            if (!symbolRoot.gameObject.activeSelf)
+            {
+                symbolRoot.gameObject.SetActive(true);
+            }
+        }
     }
 
     private void UpdateProgressCuePosition()
