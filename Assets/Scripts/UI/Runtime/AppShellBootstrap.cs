@@ -18,6 +18,7 @@ public class AppShellBootstrap : MonoBehaviour
         GameObject bootstrap = new GameObject("AppShellBootstrap");
         DontDestroyOnLoad(bootstrap);
         instance = bootstrap.AddComponent<AppShellBootstrap>();
+        PawPalAudioSettings.ConfigureRuntimeAudio();
         PawPalUiAudio.EnsureInstalled();
     }
 
@@ -38,6 +39,7 @@ public class AppShellBootstrap : MonoBehaviour
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        PawPalAudioSettings.ConfigureRuntimeAudio();
         EnsureShellForActiveScene();
     }
 

@@ -34,6 +34,7 @@ public class DogCycleCamera : MonoBehaviour
     [Header("Manual Look")]
     [SerializeField] private bool allowManualLook = true;
     [SerializeField] private float manualLookSensitivity = 0.1f;
+    [SerializeField] private float touchLookSensitivity = 90f;
     [SerializeField] private float manualLookRotationSmooth = 3.5f;
     [SerializeField, Range(20f, 180f)] private float manualLookMaxYawRange = 160f;
     [SerializeField] private float manualPitchMin = -35f;
@@ -64,7 +65,7 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private float photoMinPitch = -18f;
     [SerializeField] private float photoMaxPitch = 42f;
     [SerializeField] private float photoOrbitSensitivity = 0.18f;
-    [SerializeField] private float photoTouchOrbitSensitivity = 0.12f;
+    [SerializeField] private float photoTouchOrbitSensitivity = 120f;
     [SerializeField] private float photoZoomStep = 0.08f;
     [SerializeField] private float photoPinchZoomSensitivity = 0.004f;
     [SerializeField] private float photoMinFieldOfView = 28f;
@@ -1028,8 +1029,9 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
-        photoYaw += delta.x * Mathf.Max(0f, sensitivity);
-        photoPitch = Mathf.Clamp(photoPitch - delta.y * Mathf.Max(0f, sensitivity), photoMinPitch, photoMaxPitch);
+        float appliedSensitivity = ResolvePointerSensitivity(delta, sensitivity, false);
+        photoYaw += delta.x * appliedSensitivity;
+        photoPitch = Mathf.Clamp(photoPitch - delta.y * appliedSensitivity, photoMinPitch, photoMaxPitch);
     }
 
     private void AdjustPhotoZoom(float delta)
@@ -1305,11 +1307,36 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
-        manualLookYaw += delta.x * manualLookSensitivity;
+        float appliedSensitivity = ResolvePointerSensitivity(delta, manualLookSensitivity, true);
+        manualLookYaw += delta.x * appliedSensitivity;
         manualLookYaw = ClampManualLookYaw(manualLookYaw);
-        manualLookPitch = Mathf.Clamp(manualLookPitch - (delta.y * manualLookSensitivity), manualPitchMin, manualPitchMax);
+        manualLookPitch = Mathf.Clamp(manualLookPitch - (delta.y * appliedSensitivity), manualPitchMin, manualPitchMax);
         manualLookHoldUntil = Time.time + Mathf.Max(0f, manualLookHoldDuration);
         switchTimer = 0f;
+    }
+
+    private float ResolvePointerSensitivity(Vector2 delta, float configuredSensitivity, bool isManualLook)
+    {
+        float positiveSensitivity = Mathf.Max(0f, configuredSensitivity);
+        if (positiveSensitivity <= 0f)
+        {
+            return 0f;
+        }
+
+        if (Input.touchCount <= 0)
+        {
+            return positiveSensitivity;
+        }
+
+        float referencePixels = Mathf.Max(1f, Mathf.Min(Screen.width, Screen.height));
+        float normalizedDeltaMagnitude = delta.magnitude / referencePixels;
+        if (normalizedDeltaMagnitude <= 0f)
+        {
+            return 0f;
+        }
+
+        float degreesPerScreen = isManualLook ? touchLookSensitivity : photoTouchOrbitSensitivity;
+        return Mathf.Max(0f, degreesPerScreen) / referencePixels;
     }
 
     private void EnsureManualLookAnglesInitialized()

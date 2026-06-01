@@ -452,7 +452,6 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         resolvedSun.color = Color.Lerp(nightSunColor, daySunColor, daylight01);
         resolvedSun.useColorTemperature = true;
         resolvedSun.colorTemperature = Mathf.Lerp(nightSunColorTemperature, daySunColorTemperature, daylight01);
-        resolvedSun.lightmapBakeType = LightmapBakeType.Realtime;
         resolvedSun.shadows = LightShadows.Soft;
         resolvedSun.shadowStrength = Mathf.Lerp(nightSunShadowStrength, daySunShadowStrength, daylight01);
         resolvedSun.shadowBias = sunShadowBias;

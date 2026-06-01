@@ -232,6 +232,7 @@ public class AppShellController : MonoBehaviour
         safeAreaRoot = UiFactory.CreateRect("SafeAreaRoot", transform);
         UiFactory.Stretch(safeAreaRoot, 0f, 0f, 0f, 0f);
         safeAreaFitter = safeAreaRoot.gameObject.AddComponent<SafeAreaFitter>();
+        safeAreaFitter.IgnoreBottomInset = true;
 
         adaptiveLayout = safeAreaRoot.gameObject.AddComponent<AdaptiveLayoutRoot>();
         adaptiveLayout.LayoutChanged += HandleLayoutChanged;
