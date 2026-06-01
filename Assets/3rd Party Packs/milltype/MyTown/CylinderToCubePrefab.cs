@@ -83,6 +83,7 @@ namespace MyTown {
 			}
 		}
 
+		#if UNITY_EDITOR
 		[ContextMenu ("Cylinder to Cube")]
 		void CubeChange () {
 			// Get all the child elements of the prefab
@@ -154,6 +155,7 @@ namespace MyTown {
 				}
 			}
 		}
+		#endif
 
 		void CubeCreate () {
 			GameObject ToObject;

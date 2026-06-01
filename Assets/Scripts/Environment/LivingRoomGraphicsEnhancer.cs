@@ -309,7 +309,6 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         resolvedSun.color = sunColor;
         resolvedSun.useColorTemperature = true;
         resolvedSun.colorTemperature = sunColorTemperature;
-        resolvedSun.lightmapBakeType = LightmapBakeType.Realtime;
         resolvedSun.shadows = LightShadows.Soft;
         resolvedSun.shadowStrength = sunShadowStrength;
         resolvedSun.shadowBias = sunShadowBias;

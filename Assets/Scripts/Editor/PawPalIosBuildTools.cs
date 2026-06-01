@@ -1,18 +1,37 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEngine;
 
 public static class PawPalIosBuildTools
 {
     private const string IosIconPath = "Assets/Branding/pawfriends_app_icon.png";
+    private const string AppleTeamId = "VS27MHUDGU";
+    private const string IosBundleIdentifier = "com.unlimitive.pawfriends";
+    private const string DefaultIosBuildPath = "Builds/iOS";
+    private const string DefaultIosSimulatorBuildPath = "Builds/iOSSimulator";
 
     // Keep the shipping build list here instead of relying on ad-hoc Build Settings toggles.
     private static readonly string[] ReleaseScenePaths =
     {
         "Assets/Scenes/David_Test.unity"
     };
+
+    [MenuItem("PawFriends/Build/iOS/Configure Player Settings")]
+    public static void ConfigureIosPlayerSettings()
+    {
+        PlayerSettings.applicationIdentifier = IosBundleIdentifier;
+        PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, IosBundleIdentifier);
+        PlayerSettings.iOS.appleEnableAutomaticSigning = true;
+        PlayerSettings.iOS.appleDeveloperTeamID = AppleTeamId;
+        PlayerSettings.iOS.targetOSVersionString = "13.0";
+
+        AssetDatabase.SaveAssets();
+        Debug.Log("PawFriends iOS player settings configured for automatic signing.");
+    }
 
     [MenuItem("PawFriends/Build/iOS/Apply App Icons")]
     public static void ApplyIosAppIcons()
@@ -100,6 +119,18 @@ public static class PawPalIosBuildTools
         Debug.LogWarning("Review these enabled scenes before a release build:\n" + string.Join("\n", suspiciousScenes));
     }
 
+    [MenuItem("PawFriends/Build/iOS/Export Xcode Project")]
+    public static void ExportIosXcodeProject()
+    {
+        ExportIosXcodeProjectInternal(DefaultIosBuildPath, false);
+    }
+
+    [MenuItem("PawFriends/Build/iOS/Export Simulator Xcode Project")]
+    public static void ExportIosSimulatorXcodeProject()
+    {
+        ExportIosXcodeProjectInternal(DefaultIosSimulatorBuildPath, true);
+    }
+
     private static void ApplyIconKind(Texture2D icon, IconKind kind)
     {
         int[] sizes = PlayerSettings.GetIconSizes(NamedBuildTarget.iOS, kind);
@@ -116,5 +147,89 @@ public static class PawPalIosBuildTools
         }
 
         PlayerSettings.SetIcons(NamedBuildTarget.iOS, icons, kind);
+    }
+
+    private static void ExportIosXcodeProjectInternal(string relativeBuildPath, bool useSimulatorSdk)
+    {
+        ConfigureIosPlayerSettings();
+        ApplyIosAppIcons();
+        SyncReleaseScenes();
+        ValidateEnabledScenes();
+
+        iOSSdkVersion previousSdkVersion = PlayerSettings.iOS.sdkVersion;
+        object previousSimulatorArchitecture = GetIosSimulatorArchitecture();
+
+        try
+        {
+            PlayerSettings.iOS.sdkVersion = useSimulatorSdk ? iOSSdkVersion.SimulatorSDK : iOSSdkVersion.DeviceSDK;
+            if (useSimulatorSdk)
+            {
+                SetIosSimulatorArchitectureByName("X86_64");
+            }
+
+            string absoluteBuildPath = Path.GetFullPath(relativeBuildPath);
+            Directory.CreateDirectory(absoluteBuildPath);
+
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.iOS, BuildTarget.iOS);
+
+            BuildPlayerOptions options = new BuildPlayerOptions
+            {
+                scenes = ReleaseScenePaths,
+                locationPathName = absoluteBuildPath,
+                target = BuildTarget.iOS,
+                options = BuildOptions.None
+            };
+
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != BuildResult.Succeeded)
+            {
+                Debug.LogError("PawFriends iOS Xcode export failed: " + report.summary.result + ".");
+                return;
+            }
+
+            string buildFlavor = useSimulatorSdk ? "simulator" : "device";
+            Debug.Log("PawFriends iOS " + buildFlavor + " Xcode project exported to " + absoluteBuildPath + ".");
+        }
+        finally
+        {
+            PlayerSettings.iOS.sdkVersion = previousSdkVersion;
+            SetIosSimulatorArchitecture(previousSimulatorArchitecture);
+            AssetDatabase.SaveAssets();
+        }
+    }
+
+    private static object GetIosSimulatorArchitecture()
+    {
+        MethodInfo getter = typeof(PlayerSettings).GetMethod("GetiOSSimulatorArchitecture", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        return getter == null ? null : getter.Invoke(null, null);
+    }
+
+    private static void SetIosSimulatorArchitectureByName(string architectureName)
+    {
+        MethodInfo setter = typeof(PlayerSettings).GetMethod("SetiOSSimulatorArchitecture", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (setter == null)
+        {
+            return;
+        }
+
+        System.Type parameterType = setter.GetParameters()[0].ParameterType;
+        object architectureValue = System.Enum.Parse(parameterType, architectureName);
+        setter.Invoke(null, new[] { architectureValue });
+    }
+
+    private static void SetIosSimulatorArchitecture(object architectureValue)
+    {
+        if (architectureValue == null)
+        {
+            return;
+        }
+
+        MethodInfo setter = typeof(PlayerSettings).GetMethod("SetiOSSimulatorArchitecture", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (setter == null)
+        {
+            return;
+        }
+
+        setter.Invoke(null, new[] { architectureValue });
     }
 }
