@@ -68,6 +68,10 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private bool buildRuntimeNavMeshIfMissing = true;
     [SerializeField] private Vector3 runtimeNavMeshCenter = new Vector3(0f, 0f, 0f);
     [SerializeField] private Vector3 runtimeNavMeshSize = new Vector3(6.4f, 0.12f, 5.6f);
+    [SerializeField] private bool carveGroundedObstacleFootprintsInRuntimeNavMesh = true;
+    [SerializeField] private float runtimeNavMeshObstaclePadding = 0.04f;
+    [SerializeField] private float runtimeNavMeshGroundedObstacleClearance = 0.18f;
+    [SerializeField] private float runtimeNavMeshMinimumObstacleHeight = 0.2f;
 
     [Header("Camera Focus")]
     [SerializeField] private bool focusCameraDuringSocialInteractions = true;
@@ -1135,6 +1139,14 @@ public class DogSocialDirector : MonoBehaviour
         floorSource.area = 0;
         sources.Add(floorSource);
 
+        float runtimeFloorY = dogA != null && dogA.TryGetRoomBounds(out dogRoomBounds)
+            ? dogRoomBounds.min.y
+            : navMeshCenter.y;
+        if (carveGroundedObstacleFootprintsInRuntimeNavMesh)
+        {
+            AddGroundedObstacleFootprintSources(sources, runtimeFloorY, new Bounds(navMeshCenter, navMeshSize));
+        }
+
         Bounds bounds = new Bounds(
             navMeshCenter + Vector3.up,
             new Vector3(navMeshSize.x + 1f, 3f, navMeshSize.z + 1f));
@@ -1160,6 +1172,78 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         runtimeNavMeshInstance = NavMesh.AddNavMeshData(runtimeNavMeshData);
+    }
+
+    private void AddGroundedObstacleFootprintSources(List<NavMeshBuildSource> sources, float floorY, Bounds navMeshBounds)
+    {
+        Collider[] colliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (!ShouldUseRuntimeNavMeshObstacle(collider, floorY, navMeshBounds))
+            {
+                continue;
+            }
+
+            Bounds obstacleBounds = collider.bounds;
+            float obstacleHeight = Mathf.Max(
+                Mathf.Max(0f, obstacleBounds.max.y - floorY),
+                Mathf.Max(0.05f, runtimeNavMeshMinimumObstacleHeight));
+
+            NavMeshBuildSource obstacleSource = new NavMeshBuildSource();
+            obstacleSource.shape = NavMeshBuildSourceShape.Box;
+            obstacleSource.transform = Matrix4x4.TRS(
+                new Vector3(obstacleBounds.center.x, floorY + obstacleHeight * 0.5f, obstacleBounds.center.z),
+                Quaternion.identity,
+                Vector3.one);
+            obstacleSource.size = new Vector3(
+                Mathf.Max(0.05f, obstacleBounds.size.x + runtimeNavMeshObstaclePadding * 2f),
+                obstacleHeight,
+                Mathf.Max(0.05f, obstacleBounds.size.z + runtimeNavMeshObstaclePadding * 2f));
+            obstacleSource.area = 1;
+            sources.Add(obstacleSource);
+        }
+    }
+
+    private bool ShouldUseRuntimeNavMeshObstacle(Collider collider, float floorY, Bounds navMeshBounds)
+    {
+        if (collider == null || !collider.enabled || collider.isTrigger)
+        {
+            return false;
+        }
+
+        if (!collider.bounds.Intersects(navMeshBounds))
+        {
+            return false;
+        }
+
+        if (collider.bounds.min.y > floorY + Mathf.Max(0f, runtimeNavMeshGroundedObstacleClearance))
+        {
+            return false;
+        }
+
+        if (collider.bounds.size.y < Mathf.Max(0.01f, runtimeNavMeshMinimumObstacleHeight))
+        {
+            return false;
+        }
+
+        if (collider.bounds.size.x < 0.05f || collider.bounds.size.z < 0.05f)
+        {
+            return false;
+        }
+
+        if (collider.attachedRigidbody != null && !collider.attachedRigidbody.isKinematic)
+        {
+            return false;
+        }
+
+        if (collider.GetComponentInParent<DogRoomAgent>() != null
+            || collider.GetComponentInParent<PawPalToyRuntimeMetadata>() != null)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private IEnumerator PlayGreetingBarks(DogRoomAgent firstDog, DogRoomAgent secondDog)
@@ -1556,34 +1640,42 @@ public class DogSocialDirector : MonoBehaviour
             backgroundMusicClip = LoadEditorAudioClip(HomeThemeAssetPath);
         }
 
+        PawPalAudioResources.AssignIfMissing(ref backgroundMusicClip, PawPalAudioResources.PawFriendsHome);
+
         if (nightBackgroundClip == null)
         {
             nightBackgroundClip = LoadEditorAudioClip(NightAmbienceEditorAssetPath);
-            if (nightBackgroundClip == null)
-            {
-                nightBackgroundClip = Resources.Load<AudioClip>(NightAmbienceResourcePath);
-            }
         }
+
+        PawPalAudioResources.AssignIfMissing(ref nightBackgroundClip, PawPalAudioResources.NightAmbience);
 
         if (labradorBarkClip == null)
         {
             labradorBarkClip = LoadEditorAudioClip(LabradorBarkAssetPath);
         }
 
+        PawPalAudioResources.AssignIfMissing(ref labradorBarkClip, PawPalAudioResources.BarkLight);
+
         if (corgiBarkClip == null)
         {
             corgiBarkClip = LoadEditorAudioClip(CorgiBarkAssetPath);
         }
+
+        PawPalAudioResources.AssignIfMissing(ref corgiBarkClip, PawPalAudioResources.BarkDark);
 
         if (ambientCarClip == null)
         {
             ambientCarClip = LoadEditorAudioClip(AmbientCarAssetPath);
         }
 
+        PawPalAudioResources.AssignIfMissing(ref ambientCarClip, PawPalAudioResources.AmbientCar);
+
         if (ambientBirdsClip == null)
         {
             ambientBirdsClip = LoadEditorAudioClip(AmbientBirdsAssetPath);
         }
+
+        PawPalAudioResources.AssignIfMissing(ref ambientBirdsClip, PawPalAudioResources.AmbientBirds);
     }
 
     private bool IsDavidTestScene()
@@ -1723,7 +1815,7 @@ public class DogSocialDirector : MonoBehaviour
     {
         if (nightBackgroundClip == null)
         {
-            nightBackgroundClip = Resources.Load<AudioClip>(NightAmbienceResourcePath);
+            nightBackgroundClip = PawPalAudioResources.LoadClip(PawPalAudioResources.NightAmbience);
         }
 
         return nightBackgroundClip;

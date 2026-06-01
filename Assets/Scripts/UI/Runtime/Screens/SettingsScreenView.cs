@@ -37,6 +37,17 @@ public class SettingsScreenView : AppScreenViewBase
         public TextMeshProUGUI PlusLabel;
     }
 
+    private sealed class GraphicsPresetControlVisual
+    {
+        public TextMeshProUGUI ValueLabel;
+        public Button MinusButton;
+        public Button PlusButton;
+        public Image MinusFill;
+        public Image PlusFill;
+        public TextMeshProUGUI MinusLabel;
+        public TextMeshProUGUI PlusLabel;
+    }
+
     private struct NotificationToggleData
     {
         public string Key;
@@ -113,6 +124,7 @@ public class SettingsScreenView : AppScreenViewBase
     private ScrollRect screenScrollRect;
     private VolumeControlVisual musicVolumeControl;
     private VolumeControlVisual soundEffectsVolumeControl;
+    private GraphicsPresetControlVisual graphicsPresetControl;
 
     private SettingsPage currentPage = SettingsPage.Main;
     private SettingsModal currentModal = SettingsModal.None;
@@ -127,13 +139,16 @@ public class SettingsScreenView : AppScreenViewBase
     {
         PawPalAudioSettings.MusicVolumeChanged += RefreshAudioVolumeControls;
         PawPalAudioSettings.SoundEffectsVolumeChanged += RefreshAudioVolumeControls;
+        PawPalGraphicsSettings.GraphicsPresetChanged += RefreshGraphicsPresetControl;
         RefreshAudioVolumeControls();
+        RefreshGraphicsPresetControl();
     }
 
     private void OnDisable()
     {
         PawPalAudioSettings.MusicVolumeChanged -= RefreshAudioVolumeControls;
         PawPalAudioSettings.SoundEffectsVolumeChanged -= RefreshAudioVolumeControls;
+        PawPalGraphicsSettings.GraphicsPresetChanged -= RefreshGraphicsPresetControl;
     }
 
     protected override void BuildContent()
@@ -245,7 +260,8 @@ public class SettingsScreenView : AppScreenViewBase
         BuildHeader(parent, "icon_settings_notfilled", "Settings");
         BuildFooter(parent);
 
-        RectTransform settingsCardTop = BuildCard(parent, "Frame_Settings1", 57f, 126f, 280f, 224f);
+        bool showGraphicsPreset = PawPalGraphicsSettings.SupportsPresetSelector;
+        RectTransform settingsCardTop = BuildCard(parent, "Frame_Settings1", 57f, 126f, 280f, showGraphicsPreset ? 283f : 224f);
         musicVolumeControl = BuildVolumeRow(
             settingsCardTop,
             "Frame_Music",
@@ -279,11 +295,42 @@ public class SettingsScreenView : AppScreenViewBase
                 PawPalAudioSettings.AdjustSoundEffectsVolume(PawPalAudioSettings.VolumeStep);
                 RefreshViewState();
             });
-        BuildDivider(settingsCardTop, 117.5f);
+        float nextDividerY = 117.5f;
+        float notificationsRowY = 133.5f;
+        float languageDividerY = 173.5f;
+        float languageRowY = 189.5f;
+
+        if (showGraphicsPreset)
+        {
+            BuildDivider(settingsCardTop, nextDividerY);
+            graphicsPresetControl = BuildGraphicsPresetRow(
+                settingsCardTop,
+                "Frame_Graphics",
+                131.5f,
+                "icon_energy_brand",
+                "Graphics",
+                delegate
+                {
+                    PawPalGraphicsSettings.AdjustPreset(-1);
+                    RefreshViewState();
+                },
+                delegate
+                {
+                    PawPalGraphicsSettings.AdjustPreset(1);
+                    RefreshViewState();
+                });
+
+            nextDividerY = 176.5f;
+            notificationsRowY = 192.5f;
+            languageDividerY = 232.5f;
+            languageRowY = 248.5f;
+        }
+
+        BuildDivider(settingsCardTop, nextDividerY);
         BuildActionRow(
             settingsCardTop,
             "Frame_Notifications",
-            133.5f,
+            notificationsRowY,
             "icon_notification",
             "Notifications",
             delegate
@@ -292,11 +339,11 @@ public class SettingsScreenView : AppScreenViewBase
                 currentModal = SettingsModal.None;
                 RefreshViewState();
             });
-        BuildDivider(settingsCardTop, 173.5f);
+        BuildDivider(settingsCardTop, languageDividerY);
         BuildActionRow(
             settingsCardTop,
             "Frame_Language",
-            189.5f,
+            languageRowY,
             "icon_language",
             "Language",
             delegate
@@ -306,7 +353,7 @@ public class SettingsScreenView : AppScreenViewBase
                 RefreshViewState();
             });
 
-        RectTransform settingsCardBottom = BuildCard(parent, "Frame_Settings2", 57f, 399f, 280f, 163f);
+        RectTransform settingsCardBottom = BuildCard(parent, "Frame_Settings2", 57f, showGraphicsPreset ? 458f : 399f, 280f, 163f);
         BuildActionRow(
             settingsCardBottom,
             "Frame_Feedback",
@@ -670,6 +717,41 @@ public class SettingsScreenView : AppScreenViewBase
         return visual;
     }
 
+    private GraphicsPresetControlVisual BuildGraphicsPresetRow(RectTransform parent, string name, float y, string iconName, string labelText, UnityEngine.Events.UnityAction onDecrease, UnityEngine.Events.UnityAction onIncrease)
+    {
+        RectTransform row = CreateNode(name, parent, 0f, y, 280f, 34f);
+
+        Image icon = UiFactory.CreateImage("Icon", row, sprites.GetIcon(iconName), TitleColor);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.rectTransform.anchorMin = new Vector2(0f, 1f);
+        icon.rectTransform.anchorMax = new Vector2(0f, 1f);
+        icon.rectTransform.pivot = new Vector2(0f, 1f);
+        icon.rectTransform.sizeDelta = new Vector2(24f, 24f);
+        icon.rectTransform.anchoredPosition = new Vector2(5f, -5f);
+
+        TextMeshProUGUI label = CreateText(row, "Label", labelText, 16, BodyBlack, UiTheme.NavMediumFont, TextAlignmentOptions.Left);
+        label.rectTransform.anchorMin = new Vector2(0f, 1f);
+        label.rectTransform.anchorMax = new Vector2(0f, 1f);
+        label.rectTransform.pivot = new Vector2(0f, 1f);
+        label.rectTransform.sizeDelta = new Vector2(100f, 18f);
+        label.rectTransform.anchoredPosition = new Vector2(39f, -8f);
+
+        GraphicsPresetControlVisual visual = new GraphicsPresetControlVisual();
+        visual.MinusButton = CreateVolumeStepButton(row, "Decrease", "-", 154f, 3f, onDecrease, out visual.MinusFill, out visual.MinusLabel);
+
+        TextMeshProUGUI valueLabel = CreateText(row, "Value", "Balanced", 14, BodyBlack, UiTheme.NavBoldFont, TextAlignmentOptions.Center);
+        valueLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        valueLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
+        valueLabel.rectTransform.pivot = new Vector2(0f, 1f);
+        valueLabel.rectTransform.sizeDelta = new Vector2(70f, 18f);
+        valueLabel.rectTransform.anchoredPosition = new Vector2(174f, -8f);
+        visual.ValueLabel = valueLabel;
+
+        visual.PlusButton = CreateVolumeStepButton(row, "Increase", "+", 246f, 3f, onIncrease, out visual.PlusFill, out visual.PlusLabel);
+        return visual;
+    }
+
     private Button CreateVolumeStepButton(RectTransform parent, string name, string labelText, float x, float y, UnityEngine.Events.UnityAction onClick, out Image fill, out TextMeshProUGUI label)
     {
         RectTransform buttonRect = CreateNode(name, parent, x, y, 28f, 28f);
@@ -870,6 +952,7 @@ public class SettingsScreenView : AppScreenViewBase
         }
 
         RefreshAudioVolumeControls();
+        RefreshGraphicsPresetControl();
 
         foreach (KeyValuePair<string, ToggleVisual> pair in notificationToggleVisuals)
         {
@@ -910,6 +993,25 @@ public class SettingsScreenView : AppScreenViewBase
     {
         ApplyVolumeControlState(musicVolumeControl, PawPalAudioSettings.MusicVolume);
         ApplyVolumeControlState(soundEffectsVolumeControl, PawPalAudioSettings.SoundEffectsVolume);
+    }
+
+    private void RefreshGraphicsPresetControl()
+    {
+        if (graphicsPresetControl == null)
+        {
+            return;
+        }
+
+        PawPalGraphicsPreset preset = PawPalGraphicsSettings.MobilePreset;
+        if (graphicsPresetControl.ValueLabel != null)
+        {
+            graphicsPresetControl.ValueLabel.text = PawPalGraphicsSettings.GetPresetLabel(preset);
+        }
+
+        bool canDecrease = preset > PawPalGraphicsPreset.Battery;
+        bool canIncrease = preset < PawPalGraphicsPreset.Quality;
+        ApplyVolumeStepButtonState(graphicsPresetControl.MinusButton, graphicsPresetControl.MinusFill, graphicsPresetControl.MinusLabel, canDecrease);
+        ApplyVolumeStepButtonState(graphicsPresetControl.PlusButton, graphicsPresetControl.PlusFill, graphicsPresetControl.PlusLabel, canIncrease);
     }
 
     private void ApplyVolumeControlState(VolumeControlVisual control, float volume)

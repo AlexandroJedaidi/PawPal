@@ -588,6 +588,8 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             drinkingClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorDrinkingAudioAssetPath);
         }
 #endif
+        PawPalAudioResources.AssignIfMissing(ref eatingClip, PawPalAudioResources.DogEating);
+        PawPalAudioResources.AssignIfMissing(ref drinkingClip, PawPalAudioResources.DogDrinking);
     }
 
     private void CleanupActiveBowl()

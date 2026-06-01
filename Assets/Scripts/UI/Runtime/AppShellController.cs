@@ -100,7 +100,14 @@ public class AppShellController : MonoBehaviour
     {
         if (dogInteractionModeActive)
         {
-            ExitDogInteractionMode();
+            if (dogInteractionModeController != null && dogInteractionModeController.IsActive)
+            {
+                dogInteractionModeController.RequestShellExit("photo_mode");
+            }
+            else
+            {
+                ExitDogInteractionMode();
+            }
         }
 
         EnsurePhotoModeController();
@@ -161,7 +168,7 @@ public class AppShellController : MonoBehaviour
     {
         if (dogInteractionModeController != null && dogInteractionModeController.IsActive)
         {
-            dogInteractionModeController.ExitDogInteractionMode();
+            dogInteractionModeController.RequestShellExit("shell_request");
             return;
         }
 

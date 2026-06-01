@@ -261,6 +261,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float maxToyPickupPlanarDistance = 0.25f;
     [SerializeField] private float maxToyPickupVerticalDistance = 0.2f;
     [SerializeField, Range(0f, 180f)] private float maxToyPickupFacingAngle = 55f;
+    [SerializeField] private float toyPickupObstructionCheckRadius = 0.03f;
     [SerializeField] private float toyApproachTimeout = 6f;
     [SerializeField] private float fetchToyRepathInterval = 0.18f;
     [SerializeField] private float fetchToyRepathDistance = 0.18f;
@@ -1366,6 +1367,7 @@ public class DogRoomAgent : MonoBehaviour
 
     public void StopHeldToyTugAnimation()
     {
+        bool wasTugAnimationActive = tugLoopAnimationActive || tugLoopAnimationRoutine != null || directClipGraph.IsValid();
         tugLoopAnimationActive = false;
         if (tugLoopAnimationRoutine != null)
         {
@@ -1376,7 +1378,7 @@ public class DogRoomAgent : MonoBehaviour
         StopDirectClipGraph();
         isPlayingOneShotAnimation = false;
         StopTugGnarlAudio();
-        if (animator != null && !isResting && !isSleeping)
+        if (wasTugAnimationActive && animator != null && !isResting && !isSleeping)
         {
             animator.SetBool(MoveHash, false);
             SetNeutralIdle();
@@ -3358,7 +3360,7 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         NavMeshHit hit;
-        return TrySampleRoomPosition(GetToyPickupReferencePosition(candidate), sampleRadius, out hit)
+        return TrySampleRoomPosition(GetDesiredToyPickupRootPosition(candidate), sampleRadius, out hit)
             && CanReachInsideRoom(hit.position);
     }
 
@@ -3561,7 +3563,7 @@ public class DogRoomAgent : MonoBehaviour
         if (!IsToyWithinPickupDistance(toyTransform))
         {
             yield return MoveNearPrecise(
-                GetToyPickupReferencePosition(toyTransform),
+                GetDesiredToyPickupRootPosition(toyTransform),
                 Mathf.Max(1.2f, toyApproachTimeout * 0.35f),
                 DogMovementPace.Walk,
                 Mathf.Max(0.04f, maxToyPickupPlanarDistance * 0.75f));
@@ -3707,18 +3709,7 @@ public class DogRoomAgent : MonoBehaviour
 
     private bool TryGetToyApproachPoint(Transform toy, out Vector3 approachPoint)
     {
-        Vector3 toyReferencePosition = GetToyPickupReferencePosition(toy);
-        Vector3 awayFromToy = transform.position - toyReferencePosition;
-        awayFromToy.y = 0f;
-        if (awayFromToy.sqrMagnitude < 0.001f)
-        {
-            awayFromToy = -transform.forward;
-        }
-
-        float effectiveApproachDistance = Mathf.Min(
-            toyApproachDistance,
-            Mathf.Max(0.01f, maxToyPickupApproachDistance));
-        Vector3 candidate = toyReferencePosition + awayFromToy.normalized * effectiveApproachDistance;
+        Vector3 candidate = GetDesiredToyPickupRootPosition(toy);
         Vector3 roomPoint;
         if (TryGetReachableRoomPoint(candidate, sampleRadius, out roomPoint))
         {
@@ -3726,6 +3717,7 @@ public class DogRoomAgent : MonoBehaviour
             return true;
         }
 
+        Vector3 toyReferencePosition = GetToyPickupReferencePosition(toy);
         if (TryGetReachableRoomPoint(toyReferencePosition, sampleRadius, out roomPoint))
         {
             approachPoint = roomPoint;
@@ -4561,7 +4553,12 @@ public class DogRoomAgent : MonoBehaviour
             return false;
         }
 
-        return IsToyWithinPickupFacingAngle(planarOffset);
+        if (!IsToyWithinPickupFacingAngle(planarOffset))
+        {
+            return false;
+        }
+
+        return IsToyPickupPathClear(toy, interactionOrigin, pickupPoint);
     }
 
     private Vector3 GetToyInteractionOrigin()
@@ -4572,6 +4569,40 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return transform.position + transform.forward * Mathf.Max(0.1f, stoppingDistance);
+    }
+
+    private Vector3 GetDesiredToyPickupRootPosition(Transform toy)
+    {
+        Vector3 interactionOrigin = GetToyInteractionOrigin();
+        Vector3 pickupPoint;
+        if (!TryGetToyPickupTargetPoint(toy, interactionOrigin, out pickupPoint))
+        {
+            pickupPoint = GetToyPickupReferencePosition(toy);
+        }
+
+        Vector3 desiredRootPosition = ComputePickupAlignedRootPosition(transform.position, interactionOrigin, pickupPoint);
+        Vector3 refinedInteractionOrigin = desiredRootPosition + (interactionOrigin - transform.position);
+        if (TryGetToyPickupTargetPoint(toy, refinedInteractionOrigin, out pickupPoint))
+        {
+            desiredRootPosition = ComputePickupAlignedRootPosition(transform.position, interactionOrigin, pickupPoint);
+        }
+
+        return desiredRootPosition;
+    }
+
+    private static Vector3 ComputePickupAlignedRootPosition(Vector3 currentRootPosition, Vector3 interactionOrigin, Vector3 pickupPoint)
+    {
+        Vector3 interactionOffset = GetPlanarInteractionOffset(currentRootPosition, interactionOrigin);
+        Vector3 desiredRootPosition = pickupPoint - interactionOffset;
+        desiredRootPosition.y = currentRootPosition.y;
+        return desiredRootPosition;
+    }
+
+    private static Vector3 GetPlanarInteractionOffset(Vector3 currentRootPosition, Vector3 interactionOrigin)
+    {
+        Vector3 interactionOffset = interactionOrigin - currentRootPosition;
+        interactionOffset.y = 0f;
+        return interactionOffset;
     }
 
     private Vector3 GetToyPickupAlignmentPoint(Transform toy)
@@ -4656,6 +4687,64 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return Vector3.Angle(forward.normalized, planarOffset.normalized) <= Mathf.Clamp(maxToyPickupFacingAngle, 0f, 180f);
+    }
+
+    private bool IsToyPickupPathClear(Transform toy, Vector3 interactionOrigin, Vector3 pickupPoint)
+    {
+        Vector3 direction = pickupPoint - interactionOrigin;
+        float distance = direction.magnitude;
+        if (distance <= 0.0001f)
+        {
+            return true;
+        }
+
+        direction /= distance;
+        float radius = Mathf.Max(0f, toyPickupObstructionCheckRadius);
+
+        if (radius <= 0.0001f)
+        {
+            RaycastHit[] hits = Physics.RaycastAll(
+                interactionOrigin,
+                direction,
+                distance,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore);
+            return !HasBlockingPickupHit(hits, toy);
+        }
+
+        RaycastHit[] sphereHits = Physics.SphereCastAll(
+            interactionOrigin,
+            radius,
+            direction,
+            distance,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        return !HasBlockingPickupHit(sphereHits, toy);
+    }
+
+    private bool HasBlockingPickupHit(RaycastHit[] hits, Transform toy)
+    {
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hitCollider = hits[i].collider;
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            Transform hitTransform = hitCollider.transform;
+            if (hitTransform == null
+                || hitTransform == transform
+                || hitTransform.IsChildOf(transform)
+                || (toy != null && (hitTransform == toy || hitTransform.IsChildOf(toy))))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private Vector3 GetToyDropPosition()
@@ -5417,6 +5506,18 @@ public class DogRoomAgent : MonoBehaviour
             tugGnarlClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorGnarlAudioAssetPath);
         }
 #endif
+        PawPalAudioResources.AssignIfMissing(ref walkingClip, PawPalAudioResources.DogWalk);
+        PawPalAudioResources.AssignIfMissing(ref ballBounceClip, PawPalAudioResources.BallBounce);
+        PawPalAudioResources.AssignIfMissing(ref toyPickupClip, PawPalAudioResources.ToyPickup);
+        PawPalAudioResources.AssignIfMissing(ref sniffingClip, PawPalAudioResources.Sniffing);
+        PawPalAudioResources.AssignIfMissing(ref scratchAndShakingClip, PawPalAudioResources.ScratchAndShaking);
+        PawPalAudioResources.AssignIfMissing(ref shakingX3Clip, PawPalAudioResources.ShakingX3);
+        PawPalAudioResources.AssignIfMissing(ref lightBarkClip, PawPalAudioResources.BarkLight);
+        PawPalAudioResources.AssignIfMissing(ref darkBarkClip, PawPalAudioResources.BarkDark);
+        PawPalAudioResources.AssignIfMissing(ref pantingClip, PawPalAudioResources.DogPanting);
+        PawPalAudioResources.AssignIfMissing(ref annoyedClip, PawPalAudioResources.DogAnnoyed);
+        PawPalAudioResources.AssignIfMissing(ref whiningClip, PawPalAudioResources.DogWhining);
+        PawPalAudioResources.AssignIfMissing(ref tugGnarlClip, PawPalAudioResources.DogGnarl);
     }
 
 #if UNITY_EDITOR
@@ -6245,21 +6346,25 @@ public class DogRoomAgent : MonoBehaviour
 
     private void DisableLegacyControllers()
     {
-        DisableIfPresent<DogMovementController>();
-        DisableIfPresent<DogFreeRoam>();
-        DisableIfPresent<WASDNavMeshMovement>();
-        DisableIfPresent<MoveToClickPoint>();
-        DisableIfPresent<DogIdleController>();
-        DisableIfPresent<DogController>();
-        DisableIfPresent<DogAnimationTester>();
+        DisableAllIfPresentInHierarchy<DogMovementController>();
+        DisableAllIfPresentInHierarchy<DogFreeRoam>();
+        DisableAllIfPresentInHierarchy<AINavMeshControl>();
+        DisableAllIfPresentInHierarchy<WASDNavMeshMovement>();
+        DisableAllIfPresentInHierarchy<MoveToClickPoint>();
+        DisableAllIfPresentInHierarchy<DogIdleController>();
+        DisableAllIfPresentInHierarchy<DogController>();
+        DisableAllIfPresentInHierarchy<DogAnimationTester>();
     }
 
-    private void DisableIfPresent<T>() where T : Behaviour
+    private void DisableAllIfPresentInHierarchy<T>() where T : Behaviour
     {
-        T component = GetComponent<T>();
-        if (component != null)
+        T[] components = GetComponentsInChildren<T>(true);
+        for (int i = 0; i < components.Length; i++)
         {
-            component.enabled = false;
+            if (components[i] != null)
+            {
+                components[i].enabled = false;
+            }
         }
     }
 

@@ -1458,5 +1458,6 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
             toyPickupClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorToyPickupAudioAssetPath);
         }
 #endif
+        PawPalAudioResources.AssignIfMissing(ref toyPickupClip, PawPalAudioResources.ToyPickup);
     }
 }

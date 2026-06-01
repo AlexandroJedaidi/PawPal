@@ -264,7 +264,7 @@ public class MapScreenView : AppScreenViewBase
 
         CreateLocationHotspot(parent, "Kennel", 36f, 240f, 76f, 64f, "Kennel", "icon_kennel_brand", 26f, delegate
         {
-            SetMode(MapMode.KennelAdopt);
+            OpenKennelIntroScene();
         });
 
         CreateLocationHotspot(parent, "DogPark", 137.5f, 375f, 88f, 64f, "Dog park", "icon_park_brand", 30f, delegate
@@ -308,6 +308,14 @@ public class MapScreenView : AppScreenViewBase
         {
             SetMode(MapMode.Base);
         });
+    }
+
+    private static void OpenKennelIntroScene()
+    {
+        if (!PawPalIntroSceneFlow.LoadIntroScene())
+        {
+            Debug.LogWarning("Map kennel transition could not load the IntroPetSelection scene.");
+        }
     }
 
     private void BuildCompetitionState(RectTransform parent)

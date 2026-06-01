@@ -17,6 +17,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float TugMinimumHoldDuration = 0.3f;
     private const int TugRoundsBeforeToyDrop = 2;
     private const float ToyScreenPadding = 28f;
+    private const float UnexpectedExitGuardSeconds = 10f;
+    private const string InteractionDebugBuildMarker = "dog-interaction-guard-v1";
 
     private AppShellController shell;
     private PawPalDogInteractionModeView view;
@@ -33,6 +35,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private float nextTugRewardTime;
     private float ignoreGestureUntil;
     private float tugStartedAt;
+    private float interactionModeEnteredAt;
     private bool active;
     private bool micListening;
     private bool dogIsSitting;
@@ -69,7 +72,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         if (view != null)
         {
-            view.CloseRequested += ExitDogInteractionMode;
+            view.CloseRequested += HandleCloseRequested;
             view.MicRequested += HandleMicRequested;
             view.Hide();
         }
@@ -129,6 +132,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         tugRoundCounted = false;
         completedTugRounds = 0;
         tugStartedAt = 0f;
+        interactionModeEnteredAt = Time.unscaledTime;
         ResetActivity();
 
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
@@ -143,6 +147,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         {
             timeoutSeconds = 15f;
         }
+
+        Debug.Log(
+            "[DogInteractionMode] Enter marker=" + InteractionDebugBuildMarker
+            + " dog=" + activeDog.name
+            + " timeout=" + timeoutSeconds.ToString("F2"),
+            this);
 
         active = true;
         ApplyInteractionVocalContext(activeDog, DogVocalContext.InteractionBoosted);
@@ -235,10 +245,31 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return;
         }
 
+        bool unknownExitReason = string.IsNullOrWhiteSpace(pendingExitReason) || pendingExitReason == "unknown";
+        bool withinUnexpectedExitGuardWindow = active
+            && (Time.unscaledTime - interactionModeEnteredAt) < UnexpectedExitGuardSeconds;
+        bool directorRunning = interactionDirector != null && interactionDirector.IsRunning;
+        if (unknownExitReason)
+        {
+            string unexpectedExitStack = new System.Diagnostics.StackTrace(1, true).ToString();
+            if (directorRunning || withinUnexpectedExitGuardWindow)
+            {
+                Debug.LogWarning(
+                    "[DogInteractionMode] Ignoring unexpected exit."
+                    + " directorRunning=" + directorRunning
+                    + " enteredAgo=" + (Time.unscaledTime - interactionModeEnteredAt).ToString("F2")
+                    + "\n" + unexpectedExitStack,
+                    this);
+                return;
+            }
+
+            Debug.LogWarning("[DogInteractionMode] Unexpected exit stack:\n" + unexpectedExitStack, this);
+        }
+
         Debug.Log("[DogInteractionMode] Exit reason=" + pendingExitReason
             + " active=" + active
             + " dog=" + (activeDog != null ? activeDog.name : "null")
-            + " directorRunning=" + (interactionDirector != null && interactionDirector.IsRunning), this);
+            + " directorRunning=" + directorRunning, this);
 
         active = false;
         tugActive = false;
@@ -287,6 +318,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         pendingExitReason = "unknown";
+    }
+
+    public void RequestShellExit(string reason)
+    {
+        pendingExitReason = string.IsNullOrWhiteSpace(reason) ? "shell_request" : reason;
+        ExitDogInteractionMode();
     }
 
     private void HandleGestureRecognized(PawPalGestureSnapshot snapshot)
@@ -460,7 +497,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     {
         if (activeDog == null || !activeDog.HasHeldToy)
         {
-            if (activeDog != null)
+            // Only stop tug visuals when a tug interaction was actually active.
+            // Calling StopHeldToyTugAnimation() every frame on the no-toy path forces Move=false
+            // and breaks whistle locomotion by kicking the dog back to idle mid-approach.
+            if (activeDog != null && (tugActive || tugPointerId != -1 || tugRoundCounted || completedTugRounds > 0))
             {
                 activeDog.StopHeldToyTugAnimation();
             }
@@ -827,6 +867,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         {
             shell.ToggleDogInteractionMic();
         }
+    }
+
+    private void HandleCloseRequested()
+    {
+        pendingExitReason = "close_button";
+        ExitDogInteractionMode();
     }
 
     private Camera ResolveInteractionCamera()

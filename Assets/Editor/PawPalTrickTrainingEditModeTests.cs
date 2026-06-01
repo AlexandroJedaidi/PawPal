@@ -977,6 +977,44 @@ public sealed class PawPalTrickTrainingEditModeTests
     }
 
     [Test]
+    public void PickupAlignedRootPositionPreservesLargeDogMouthOffset()
+    {
+        Vector3 rootPosition = Vector3.zero;
+        Vector3 interactionOrigin = new Vector3(0f, 0.15f, 0.35f);
+        Vector3 pickupPoint = new Vector3(0.02f, 0.02f, 1.1f);
+
+        Vector3 alignedRoot = InvokePrivateStatic<Vector3>(
+            typeof(DogRoomAgent),
+            "ComputePickupAlignedRootPosition",
+            rootPosition,
+            interactionOrigin,
+            pickupPoint);
+
+        Assert.AreEqual(0.02f, alignedRoot.x, 0.0001f);
+        Assert.AreEqual(0f, alignedRoot.y, 0.0001f);
+        Assert.AreEqual(0.75f, alignedRoot.z, 0.0001f);
+    }
+
+    [Test]
+    public void PickupAlignedRootPositionAdaptsForSmallerDogMouthOffset()
+    {
+        Vector3 rootPosition = Vector3.zero;
+        Vector3 interactionOrigin = new Vector3(0f, 0.08f, 0.18f);
+        Vector3 pickupPoint = new Vector3(-0.03f, 0.01f, 1.1f);
+
+        Vector3 alignedRoot = InvokePrivateStatic<Vector3>(
+            typeof(DogRoomAgent),
+            "ComputePickupAlignedRootPosition",
+            rootPosition,
+            interactionOrigin,
+            pickupPoint);
+
+        Assert.AreEqual(-0.03f, alignedRoot.x, 0.0001f);
+        Assert.AreEqual(0f, alignedRoot.y, 0.0001f);
+        Assert.AreEqual(0.92f, alignedRoot.z, 0.0001f);
+    }
+
+    [Test]
     public void ToyPickupDistanceUsesClosestColliderSurfaceInsteadOfToyRootPosition()
     {
         GameObject dogObject = new GameObject("PickupColliderDog");
@@ -999,6 +1037,38 @@ public sealed class PawPalTrickTrainingEditModeTests
         }
         finally
         {
+            UnityEngine.Object.DestroyImmediate(toyRoot);
+            UnityEngine.Object.DestroyImmediate(dogObject);
+        }
+    }
+
+    [Test]
+    public void ToyPickupDistanceRejectsToyWhenFurnitureBlocksMouthPath()
+    {
+        GameObject dogObject = new GameObject("PickupObstacleDog");
+        GameObject toyRoot = new GameObject("BlockedToyRoot");
+        GameObject blocker = new GameObject("TableLegBlocker");
+        try
+        {
+            DogRoomAgent dog = dogObject.AddComponent<DogRoomAgent>();
+            dogObject.transform.position = Vector3.zero;
+            dogObject.transform.rotation = Quaternion.identity;
+
+            toyRoot.transform.position = new Vector3(0f, 0f, 0.24f);
+            BoxCollider toyCollider = toyRoot.AddComponent<BoxCollider>();
+            toyCollider.size = new Vector3(0.08f, 0.08f, 0.08f);
+
+            blocker.transform.position = new Vector3(0f, 0f, 0.175f);
+            BoxCollider blockerCollider = blocker.AddComponent<BoxCollider>();
+            blockerCollider.size = new Vector3(0.12f, 0.16f, 0.04f);
+
+            Physics.SyncTransforms();
+
+            Assert.IsFalse(InvokePrivate<bool>(dog, "IsToyWithinPickupDistance", toyRoot.transform));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(blocker);
             UnityEngine.Object.DestroyImmediate(toyRoot);
             UnityEngine.Object.DestroyImmediate(dogObject);
         }

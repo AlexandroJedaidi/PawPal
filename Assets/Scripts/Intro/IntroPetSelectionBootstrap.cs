@@ -1,4 +1,5 @@
 using System.Collections;
+using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -81,6 +82,8 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
             camera.gameObject.AddComponent<AudioListener>();
         }
 
+        DisableOtherAudioListeners(camera);
+
         return camera;
     }
 
@@ -158,10 +161,11 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
                     rotation = Quaternion.Euler(0f, side == 2 ? 90f : -90f, 0f);
                 }
 
-                GameObject fence = prefab != null ? Instantiate(prefab, position, rotation, root) : GameObject.CreatePrimitive(PrimitiveType.Cube);
-                fence.name = "GardenFence";
-                if (prefab == null)
+                GameObject fence = prefab != null ? InstantiatePrefabRoot(prefab, position, rotation, root, "FencePrefab") : null;
+                if (fence == null)
                 {
+                    fence = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    fence.name = "GardenFence";
                     fence.transform.SetParent(root, false);
                     fence.transform.position = position;
                     fence.transform.rotation = rotation;
@@ -171,7 +175,11 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
                     {
                         renderer.sharedMaterial = BuildColorMaterial("IntroFenceFallback", new Color32(166, 113, 70, 255));
                     }
+
+                    continue;
                 }
+
+                fence.name = "GardenFence";
             }
         }
     }
@@ -191,7 +199,13 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
             GameObject prefab = catalog != null && i % 2 == 0 ? catalog.BirchTreePrefab : catalog != null ? catalog.AshTreePrefab : null;
             if (prefab != null)
             {
-                GameObject tree = Instantiate(prefab, positions[i], Quaternion.Euler(0f, i * 63f, 0f), root);
+                GameObject tree = InstantiatePrefabRoot(prefab, positions[i], Quaternion.Euler(0f, i * 63f, 0f), root, i % 2 == 0 ? "BirchTreePrefab" : "AshTreePrefab");
+                if (tree == null)
+                {
+                    SpawnFallbackTree(root, positions[i], i * 63f);
+                    continue;
+                }
+
                 tree.name = "IntroTree";
                 tree.transform.localScale = Vector3.one * 0.72f;
             }
@@ -232,16 +246,22 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     {
         if (catalog != null && catalog.BigBallPrefab != null)
         {
-            GameObject ball = Instantiate(catalog.BigBallPrefab, new Vector3(-2.6f, 0.12f, -1.7f), Quaternion.identity, root);
-            ball.name = "IntroToy_Ball";
-            ball.transform.localScale = Vector3.one * 0.45f;
+            GameObject ball = InstantiatePrefabRoot(catalog.BigBallPrefab, new Vector3(-2.6f, 0.12f, -1.7f), Quaternion.identity, root, "BigBallPrefab");
+            if (ball != null)
+            {
+                ball.name = "IntroToy_Ball";
+                ball.transform.localScale = Vector3.one * 0.45f;
+            }
         }
 
         if (catalog != null && catalog.BonePrefab != null)
         {
-            GameObject bone = Instantiate(catalog.BonePrefab, new Vector3(2.7f, 0.05f, -1.2f), Quaternion.Euler(0f, 36f, 0f), root);
-            bone.name = "IntroToy_Bone";
-            bone.transform.localScale = Vector3.one * 0.55f;
+            GameObject bone = InstantiatePrefabRoot(catalog.BonePrefab, new Vector3(2.7f, 0.05f, -1.2f), Quaternion.Euler(0f, 36f, 0f), root, "BonePrefab");
+            if (bone != null)
+            {
+                bone.name = "IntroToy_Bone";
+                bone.transform.localScale = Vector3.one * 0.55f;
+            }
         }
     }
 
@@ -278,6 +298,64 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         material.name = name;
         material.color = color;
         return material;
+    }
+
+    private static GameObject InstantiatePrefabRoot(UnityEngine.Object prefab, Vector3 position, Quaternion rotation, Transform parent, string fieldName)
+    {
+        if (prefab == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            UnityEngine.Object instance = Instantiate(prefab, position, rotation, parent);
+            GameObject root = ExtractGameObject(instance);
+            if (root != null)
+            {
+                return root;
+            }
+
+            Debug.LogWarning("IntroPetSelectionBootstrap could not resolve a GameObject root for " + fieldName + ".");
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning("IntroPetSelectionBootstrap failed to instantiate " + fieldName + ": " + exception.Message);
+        }
+
+        return null;
+    }
+
+    private static GameObject ExtractGameObject(UnityEngine.Object instance)
+    {
+        if (instance == null)
+        {
+            return null;
+        }
+
+        GameObject gameObject = instance as GameObject;
+        if (gameObject != null)
+        {
+            return gameObject;
+        }
+
+        Component component = instance as Component;
+        return component != null ? component.gameObject : null;
+    }
+
+    private static void DisableOtherAudioListeners(Camera primaryCamera)
+    {
+        AudioListener[] listeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < listeners.Length; i++)
+        {
+            AudioListener listener = listeners[i];
+            if (listener == null)
+            {
+                continue;
+            }
+
+            listener.enabled = primaryCamera != null && listener.gameObject == primaryCamera.gameObject;
+        }
     }
 
     private static void EnsureEventSystem()

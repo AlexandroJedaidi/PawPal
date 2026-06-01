@@ -142,6 +142,7 @@ public sealed class PawPalUiAudio : MonoBehaviour
         uiAudioSource.spatialBlend = 0f;
         uiAudioSource.ignoreListenerPause = true;
 
+        EnsureAudioListener();
         LoadAudioClips();
         StartCoroutine(BindButtonsNextFrame());
     }
@@ -158,6 +159,7 @@ public sealed class PawPalUiAudio : MonoBehaviour
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        EnsureAudioListener();
         StartCoroutine(BindButtonsNextFrame());
     }
 
@@ -331,5 +333,57 @@ public sealed class PawPalUiAudio : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static void EnsureAudioListener()
+    {
+        Camera targetCamera = Camera.main;
+        if (targetCamera == null)
+        {
+            Camera[] cameras = FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                if (cameras[i] != null)
+                {
+                    targetCamera = cameras[i];
+                    break;
+                }
+            }
+        }
+
+        AudioListener preferredListener = null;
+        if (targetCamera != null)
+        {
+            preferredListener = targetCamera.GetComponent<AudioListener>();
+            if (preferredListener == null)
+            {
+                preferredListener = targetCamera.gameObject.AddComponent<AudioListener>();
+            }
+        }
+        else if (instance != null)
+        {
+            preferredListener = instance.GetComponent<AudioListener>();
+            if (preferredListener == null)
+            {
+                preferredListener = instance.gameObject.AddComponent<AudioListener>();
+            }
+        }
+
+        if (preferredListener == null)
+        {
+            return;
+        }
+
+        AudioListener[] listeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < listeners.Length; i++)
+        {
+            AudioListener listener = listeners[i];
+            if (listener == null)
+            {
+                continue;
+            }
+
+            listener.enabled = listener == preferredListener;
+        }
     }
 }

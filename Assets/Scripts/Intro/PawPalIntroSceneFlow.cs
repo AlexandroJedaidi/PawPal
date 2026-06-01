@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor.SceneManagement;
+#endif
 
 public static class PawPalIntroSceneFlow
 {
@@ -22,42 +25,44 @@ public static class PawPalIntroSceneFlow
     public static bool LoadHomeScene()
     {
         SetAppShellVisible(true);
-        try
-        {
-            SceneManager.LoadScene(HomeSceneName, LoadSceneMode.Single);
-            return true;
-        }
-        catch
-        {
-            try
-            {
-                SceneManager.LoadScene(HomeScenePath, LoadSceneMode.Single);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        return TryLoadScene(HomeSceneName, HomeScenePath);
     }
 
     public static bool LoadIntroScene()
     {
         SetAppShellVisible(false);
+        return TryLoadScene(IntroSceneName, IntroScenePath);
+    }
+
+    private static bool TryLoadScene(string sceneName, string scenePath)
+    {
         try
         {
-            SceneManager.LoadScene(IntroSceneName, LoadSceneMode.Single);
+            SceneManager.LoadScene(sceneName, LoadSceneMode.Single);
             return true;
         }
         catch
         {
             try
             {
-                SceneManager.LoadScene(IntroScenePath, LoadSceneMode.Single);
+                SceneManager.LoadScene(scenePath, LoadSceneMode.Single);
                 return true;
             }
             catch
             {
+#if UNITY_EDITOR
+                if (Application.isPlaying)
+                {
+                    try
+                    {
+                        EditorSceneManager.LoadSceneInPlayMode(scenePath, new LoadSceneParameters(LoadSceneMode.Single));
+                        return true;
+                    }
+                    catch
+                    {
+                    }
+                }
+#endif
                 return false;
             }
         }

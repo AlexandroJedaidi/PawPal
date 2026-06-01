@@ -160,12 +160,34 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private WindowBackdropImagePlane windowBackdropImagePlane;
     private PawPalTimeOfDayState currentTimeOfDayState;
     private int lastAppliedMinuteStamp = int.MinValue;
+    private static bool sceneBootstrapInstalled;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void InstallSceneBootstrap()
+    {
+        if (sceneBootstrapInstalled)
+        {
+            return;
+        }
+
+        sceneBootstrapInstalled = true;
+        SceneManager.sceneLoaded += HandleSceneLoadedForBootstrap;
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void BootstrapInPlayMode()
     {
-        Scene activeScene = SceneManager.GetActiveScene();
-        if (!activeScene.IsValid() || activeScene.name != AutoBootstrapSceneName)
+        EnsureEnhancerForScene(SceneManager.GetActiveScene());
+    }
+
+    private static void HandleSceneLoadedForBootstrap(Scene scene, LoadSceneMode mode)
+    {
+        EnsureEnhancerForScene(scene);
+    }
+
+    private static void EnsureEnhancerForScene(Scene scene)
+    {
+        if (!scene.IsValid() || scene.name != AutoBootstrapSceneName)
         {
             return;
         }
@@ -177,7 +199,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 #endif
         for (int i = 0; i < enhancers.Length; i++)
         {
-            if (enhancers[i] != null && enhancers[i].gameObject.scene == activeScene)
+            if (enhancers[i] != null && enhancers[i].gameObject.scene == scene)
             {
                 enhancers[i].ApplyGraphics();
                 return;
@@ -275,6 +297,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         currentTimeOfDayState = timeOfDayState;
         lastAppliedMinuteStamp = PawPalTimeOfDayEvaluator.ToMinuteStamp(timeOfDayState);
 
+        if (Application.isPlaying && configureQualityInPlayMode)
+        {
+            PawPalGraphicsSettings.ApplyRuntimeProfile();
+        }
+
         Bounds roomBounds = CalculateSceneBounds();
 
         if (configureRenderSettings)
@@ -316,10 +343,6 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             ConfigureRendererShadows();
         }
 
-        if (Application.isPlaying && configureQualityInPlayMode)
-        {
-            ConfigurePlayModeQuality();
-        }
     }
 
     private void ConfigureRenderSettings()
@@ -439,7 +462,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
         UniversalAdditionalLightData lightData = resolvedSun.GetUniversalAdditionalLightData();
         lightData.usePipelineSettings = false;
-        lightData.softShadowQuality = SoftShadowQuality.High;
+        lightData.softShadowQuality = PawPalGraphicsSettings.GetSoftShadowQuality();
     }
 
     private Light ResolveSun()
@@ -529,19 +552,19 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
                 camera.backgroundColor = backgroundColor;
             }
 
-            camera.allowHDR = true;
-            camera.allowMSAA = true;
+            camera.allowHDR = PawPalGraphicsSettings.EnableHdr;
+            camera.allowMSAA = PawPalGraphicsSettings.EnableCameraMsaa;
             camera.useOcclusionCulling = true;
 
             UniversalAdditionalCameraData cameraData = camera.GetUniversalAdditionalCameraData();
             cameraData.renderShadows = true;
-            cameraData.renderPostProcessing = true;
-            cameraData.requiresDepthOption = CameraOverrideOption.On;
-            cameraData.requiresColorOption = CameraOverrideOption.On;
-            cameraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
-            cameraData.antialiasingQuality = AntialiasingQuality.High;
+            cameraData.renderPostProcessing = PawPalGraphicsSettings.EnablePostProcessing;
+            cameraData.requiresDepthOption = PawPalGraphicsSettings.RequireDepthTexture ? CameraOverrideOption.On : CameraOverrideOption.Off;
+            cameraData.requiresColorOption = PawPalGraphicsSettings.RequireOpaqueTexture ? CameraOverrideOption.On : CameraOverrideOption.Off;
+            cameraData.antialiasing = PawPalGraphicsSettings.GetCameraAntialiasingMode();
+            cameraData.antialiasingQuality = PawPalGraphicsSettings.GetCameraAntialiasingQuality();
             cameraData.stopNaN = true;
-            cameraData.dithering = true;
+            cameraData.dithering = PawPalGraphicsSettings.EnableDithering;
         }
     }
 
@@ -558,7 +581,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
         lookVolume.isGlobal = true;
         lookVolume.priority = 60f;
-        lookVolume.weight = 1f;
+        lookVolume.weight = PawPalGraphicsSettings.EnablePostProcessing ? 1f : 0f;
 
         VolumeProfile profile = lookVolume.profile;
         profile.name = "PawFriends Living Room Look";
@@ -579,14 +602,15 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
         Bloom bloom = GetOrAddVolumeComponent<Bloom>(profile);
         bloom.threshold.Override(1.4f);
-        bloom.intensity.Override(bloomIntensity);
+        bloom.intensity.Override(PawPalGraphicsSettings.GetBloomIntensity(bloomIntensity));
         bloom.scatter.Override(0.35f);
         bloom.tint.Override(Color.white);
-        bloom.highQualityFiltering.Override(true);
-        bloom.maxIterations.Override(6);
+        bloom.highQualityFiltering.Override(PawPalGraphicsSettings.UseHighQualityBloomFiltering);
+        bloom.maxIterations.Override(PawPalGraphicsSettings.GetBloomMaxIterations());
+        bloom.active = PawPalGraphicsSettings.EnableBloom;
 
         Vignette vignette = GetOrAddVolumeComponent<Vignette>(profile);
-        vignette.intensity.Override(vignetteIntensity);
+        vignette.intensity.Override(PawPalGraphicsSettings.GetVignetteIntensity(vignetteIntensity));
         vignette.smoothness.Override(0.42f);
         vignette.rounded.Override(false);
     }
@@ -598,9 +622,9 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         probe.mode = ReflectionProbeMode.Realtime;
         probe.refreshMode = ReflectionProbeRefreshMode.OnAwake;
         probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.IndividualFaces;
-        probe.resolution = 128;
+        probe.resolution = PawPalGraphicsSettings.ReflectionProbeResolution;
         probe.intensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity, currentTimeOfDayState.Daylight01);
-        probe.boxProjection = true;
+        probe.boxProjection = PawPalGraphicsSettings.UseReflectionProbeBoxProjection;
         probe.center = Vector3.zero;
         probe.size = new Vector3(
             Mathf.Max(3f, roomBounds.size.x + 0.6f),
@@ -779,15 +803,6 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
             terrain.shadowCastingMode = ShadowCastingMode.On;
         }
-    }
-
-    private void ConfigurePlayModeQuality()
-    {
-        QualitySettings.shadows = UnityEngine.ShadowQuality.All;
-        QualitySettings.shadowResolution = UnityEngine.ShadowResolution.High;
-        QualitySettings.shadowProjection = ShadowProjection.StableFit;
-        QualitySettings.shadowDistance = Mathf.Max(QualitySettings.shadowDistance, playModeShadowDistance);
-        QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
     }
 
     private Bounds CalculateSceneBounds()

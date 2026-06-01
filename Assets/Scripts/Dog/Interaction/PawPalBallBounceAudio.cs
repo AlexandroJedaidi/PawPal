@@ -146,5 +146,6 @@ public sealed class PawPalBallBounceAudio : MonoBehaviour
             bounceClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorBallBounceAudioAssetPath);
         }
 #endif
+        PawPalAudioResources.AssignIfMissing(ref bounceClip, PawPalAudioResources.BallBounce);
     }
 }
