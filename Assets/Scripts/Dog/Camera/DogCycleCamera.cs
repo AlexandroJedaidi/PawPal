@@ -33,7 +33,9 @@ public class DogCycleCamera : MonoBehaviour
 
     [Header("Manual Look")]
     [SerializeField] private bool allowManualLook = true;
-    [SerializeField] private float manualLookSensitivity = 0.18f;
+    [SerializeField] private float manualLookSensitivity = 0.1f;
+    [SerializeField] private float manualLookRotationSmooth = 3.5f;
+    [SerializeField, Range(20f, 180f)] private float manualLookMaxYawRange = 160f;
     [SerializeField] private float manualPitchMin = -35f;
     [SerializeField] private float manualPitchMax = 35f;
 
@@ -89,6 +91,7 @@ public class DogCycleCamera : MonoBehaviour
     private bool manualLookInitialized;
     private float manualLookYaw;
     private float manualLookPitch;
+    private float manualLookStartYaw;
     private float manualLookHoldUntil;
     private bool mouseDragActive;
     private int activeTouchFingerId = -1;
@@ -538,7 +541,7 @@ public class DogCycleCamera : MonoBehaviour
             }
 
             Quaternion manualTargetRotation = Quaternion.Euler(manualLookPitch, manualLookYaw, 0f);
-            transform.rotation = Quaternion.Slerp(transform.rotation, manualTargetRotation, Time.deltaTime * rotationSmooth);
+            transform.rotation = Quaternion.Slerp(transform.rotation, manualTargetRotation, Time.deltaTime * Mathf.Max(0.01f, manualLookRotationSmooth));
             return;
         }
 
@@ -1278,7 +1281,14 @@ public class DogCycleCamera : MonoBehaviour
 
     private void BeginManualLook(Vector2 pointerPosition)
     {
+        bool continuingManualSession = IsManualLookActive();
         CaptureManualLookAnglesFromTransform();
+        if (!continuingManualSession)
+        {
+            manualLookStartYaw = manualLookYaw;
+        }
+
+        manualLookYaw = ClampManualLookYaw(manualLookYaw);
         lastManualPointerPosition = pointerPosition;
         manualLookHoldUntil = Time.time + Mathf.Max(0f, manualLookHoldDuration);
         switchTimer = 0f;
@@ -1296,6 +1306,7 @@ public class DogCycleCamera : MonoBehaviour
         }
 
         manualLookYaw += delta.x * manualLookSensitivity;
+        manualLookYaw = ClampManualLookYaw(manualLookYaw);
         manualLookPitch = Mathf.Clamp(manualLookPitch - (delta.y * manualLookSensitivity), manualPitchMin, manualPitchMax);
         manualLookHoldUntil = Time.time + Mathf.Max(0f, manualLookHoldDuration);
         switchTimer = 0f;
@@ -1317,6 +1328,14 @@ public class DogCycleCamera : MonoBehaviour
         manualLookYaw = euler.y;
         manualLookPitch = NormalizePitchAngle(euler.x);
         manualLookInitialized = true;
+    }
+
+    private float ClampManualLookYaw(float candidateYaw)
+    {
+        float halfRange = Mathf.Clamp(manualLookMaxYawRange, 20f, 180f) * 0.5f;
+        float deltaFromStart = Mathf.DeltaAngle(manualLookStartYaw, candidateYaw);
+        float clampedDelta = Mathf.Clamp(deltaFromStart, -halfRange, halfRange);
+        return manualLookStartYaw + clampedDelta;
     }
 
     private bool IsManualLookActive()

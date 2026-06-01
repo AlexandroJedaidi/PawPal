@@ -25,11 +25,13 @@ public class HomeScreenView : AppScreenViewBase
     private const float InventoryAddonsY = 442f;
     private const float InventoryRegionX = 69f;
     private const float InventoryRegionY = 485f;
-    private const float BasePanelBottomOffset = 0f;
-    private const float BaseAddonsBottomOffset = 122f;
-    private const float StatsAddonsBottomOffset = 256f;
+    private const float BaseAddonsBottomOffset = 98f;
+    private const float StatsAddonsBottomOffset = 232f;
     private const float InventoryNameBottomOffset = 257f;
-    private const float InventoryAddonsBottomOffset = 306f;
+    private const float InventoryAddonsBottomOffset = 282f;
+    private const float AddonsHeight = 38f;
+    private const float InventoryNameHeight = 44f;
+    private const float InventoryPanelHeight = 258f;
     private const float NeedPopupBottomOffset = 130f;
     private const float BottomHudReferenceHeight = UiTheme.ReferenceContentHeight;
 
@@ -127,7 +129,7 @@ public class HomeScreenView : AppScreenViewBase
 
         BuildTopCameraButton(exactFrame);
 
-        addons = CreateNode<HomeAddonsView>("Addons", bottomHudFrame, 107f, BaseAddonsY, 180f, 38f);
+        addons = CreateNode<HomeAddonsView>("Addons", bottomHudFrame, 107f, BaseAddonsY, 180f, AddonsHeight);
         addons.Initialize(sprites, ToggleMicrophoneMode, ToggleInventoryPanel, EnterDogInteractionByWhistle);
         addonsRect = addons.GetComponent<RectTransform>();
 
@@ -137,12 +139,12 @@ public class HomeScreenView : AppScreenViewBase
         dogDetails.BindTrickRequested(OpenTrainingForTrick);
         dogDetailsRect = dogDetails.GetComponent<RectTransform>();
 
-        inventoryNameBar = CreateNode<InventoryNameBarView>("InventoryNameBar", bottomHudFrame, InventoryRegionX, InventoryRegionY, 255f, 44f);
+        inventoryNameBar = CreateNode<InventoryNameBarView>("InventoryNameBar", bottomHudFrame, InventoryRegionX, InventoryRegionY, 255f, InventoryNameHeight);
         inventoryNameBar.Initialize(sprites);
         inventoryNameBar.BindDogSwitching(SelectPreviousDog, SelectNextDog);
         inventoryNameRect = inventoryNameBar.GetComponent<RectTransform>();
 
-        inventoryPanel = CreateNode<InventoryPanelView>("InventoryPanel", bottomHudFrame, InventoryRegionX, 528f, 255f, 258f);
+        inventoryPanel = CreateNode<InventoryPanelView>("InventoryPanel", bottomHudFrame, InventoryRegionX, 528f, 255f, InventoryPanelHeight);
         inventoryPanel.Initialize(sprites);
         inventoryPanel.Configure(HandleInventoryGetMoreTapped, HandleInventoryCollarTapped, HandleInventoryToyTapped);
         inventoryPanelRect = inventoryPanel.GetComponent<RectTransform>();
@@ -317,32 +319,38 @@ public class HomeScreenView : AppScreenViewBase
         {
             float panelHeight = statsExpanded ? StatsPanelHeight : BasePanelHeight;
             dogDetailsRect.sizeDelta = new Vector2(246f, panelHeight);
-            dogDetailsRect.anchoredPosition = new Vector2(statsExpanded ? StatsPanelX : BasePanelX, -(statsExpanded ? StatsPanelY : BasePanelY));
+            dogDetailsRect.anchoredPosition = new Vector2(
+                statsExpanded ? StatsPanelX : BasePanelX,
+                -(statsExpanded ? StatsPanelY : BasePanelY));
         }
 
         if (addonsRect != null)
         {
-            float addonsY = BaseAddonsY;
+            float addonsBottomOffset = BaseAddonsBottomOffset;
             if (detailMode == HomeDetailMode.Stats)
             {
-                addonsY = StatsAddonsY;
+                addonsBottomOffset = StatsAddonsBottomOffset;
             }
             else if (detailMode == HomeDetailMode.Inventory)
             {
-                addonsY = InventoryAddonsY;
+                addonsBottomOffset = InventoryAddonsBottomOffset;
             }
 
-            addonsRect.anchoredPosition = new Vector2(107f, -addonsY);
+            addonsRect.anchoredPosition = new Vector2(107f, -GetBottomAnchoredY(AddonsHeight, addonsBottomOffset));
         }
 
         if (inventoryNameRect != null)
         {
-            inventoryNameRect.anchoredPosition = new Vector2(InventoryRegionX, -InventoryRegionY);
+            inventoryNameRect.anchoredPosition = new Vector2(
+                InventoryRegionX,
+                -GetBottomAnchoredY(InventoryNameHeight, InventoryNameBottomOffset));
         }
 
         if (inventoryPanelRect != null)
         {
-            inventoryPanelRect.anchoredPosition = new Vector2(InventoryRegionX, -528f);
+            inventoryPanelRect.anchoredPosition = new Vector2(
+                InventoryRegionX,
+                -528f);
         }
 
         if (needPopup != null)

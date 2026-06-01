@@ -21,7 +21,7 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
     public bool TryCallActiveDogToCamera()
     {
         DogRoomAgent dog = ResolveActiveDog();
-        if (!CanStartVoiceAnimation(dog))
+        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
         {
             return false;
         }
@@ -38,7 +38,7 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
             return false;
         }
 
-        if (!CanStartVoiceAnimation(dog))
+        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
         {
             return false;
         }
@@ -55,7 +55,7 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
     public bool TryPerformTrick(PawPalTrickId trick)
     {
         DogRoomAgent dog = ResolveActiveDog();
-        if (!CanStartVoiceAnimation(dog))
+        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
         {
             return false;
         }
@@ -72,7 +72,7 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
             return false;
         }
 
-        if (!CanStartVoiceAnimation(dog))
+        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
         {
             return false;
         }
@@ -153,9 +153,18 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         return dog != null
             && dog.isActiveAndEnabled
             && !dog.IsBusy
-            && !dog.IsPlayingOneShotAnimation
-            && !dog.IsResting
-            && !dog.IsSleeping;
+            && !dog.IsPlayingOneShotAnimation;
+    }
+
+    private static bool PrepareDogForVoiceInteraction(DogRoomAgent dog)
+    {
+        if (dog == null || !dog.isActiveAndEnabled)
+        {
+            return false;
+        }
+
+        dog.WakeForPlayerInteraction();
+        return dog.PrepareForPlayerInteraction(true);
     }
 
     private static bool TryResolveCameraApproachPoint(DogRoomAgent dog, Camera camera, out Vector3 approachPoint)

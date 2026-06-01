@@ -43,6 +43,7 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
 
         if (dog != null)
         {
+            dog.WakeForPlayerInteraction();
             dog.PrepareForPlayerInteraction(true);
         }
 
@@ -59,6 +60,7 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
     public bool TryPose(DogRoomAgent dog, Camera camera, out string failureReason)
     {
         CancelActiveCommand(true);
+        PrepareDogForPhotoCommand(dog);
 
         if (!CanStartPhotoCommand(dog, true, true, out failureReason))
         {
@@ -75,6 +77,7 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
     public bool TryPose(DogRoomAgent dog, Camera camera, PawPalTrickId trickId, out string failureReason)
     {
         CancelActiveCommand(true);
+        PrepareDogForPhotoCommand(dog);
 
         if (!CanStartPhotoCommand(dog, true, true, out failureReason))
         {
@@ -89,6 +92,7 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
     public bool TryPose(DogRoomAgent dog, Camera camera, PawPalPhotoPoseId poseId, out string failureReason)
     {
         CancelActiveCommand(true);
+        PrepareDogForPhotoCommand(dog);
 
         if (!CanStartPhotoCommand(dog, false, true, out failureReason))
         {
@@ -109,6 +113,17 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
     private void StartPhotoRoutine(IEnumerator routine)
     {
         activeRoutine = StartCoroutine(WrapRoutine(routine));
+    }
+
+    private static void PrepareDogForPhotoCommand(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        dog.WakeForPlayerInteraction();
+        dog.PrepareForPlayerInteraction(true);
     }
 
     private IEnumerator WrapRoutine(IEnumerator routine)

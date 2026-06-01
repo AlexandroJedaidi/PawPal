@@ -18,13 +18,24 @@ internal enum DogSocialInteractionType
 [DisallowMultipleComponent]
 public class DogSocialDirector : MonoBehaviour
 {
+    private enum BackgroundAudioMode
+    {
+        DayTheme,
+        NightAmbience
+    }
+
     private const string DavidTestSceneName = "David_Test";
     private const string HomeThemeAssetPath = "Assets/Audio/pawfriends_home.mp3";
+    private const string NightAmbienceEditorAssetPath = "Assets/Resources/Audio/night-ambience.mp3";
+    private const string NightAmbienceResourcePath = "Audio/night-ambience";
     private const string LabradorBarkAssetPath = "Assets/Audio/bark_light.mp3";
     private const string CorgiBarkAssetPath = "Assets/Audio/bark_dark.mp3";
     private const string AmbientCarAssetPath = "Assets/Audio/ambient_car.mp3";
     private const string AmbientBirdsAssetPath = "Assets/Audio/birds_chirping.mp3";
     private const float AmbientCarVolumeMultiplier = 1.5f;
+    private const float DefaultSunriseHour = 7f;
+    private const float DefaultSunsetHour = 20f;
+    private const float DefaultTransitionHours = 1f;
     private const float CozySocialMeetDistance = 0.46f;
     private const float MaximumProximityInteractionStartDistance = 1.35f;
     private const float SocialApproachReachedDistance = 0.1f;
@@ -66,9 +77,12 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private AudioClip labradorBarkClip;
     [SerializeField] private AudioClip corgiBarkClip;
     [SerializeField] private AudioClip backgroundMusicClip;
+    [SerializeField] private AudioClip nightBackgroundClip;
     [SerializeField] private AudioClip ambientCarClip;
     [SerializeField] private AudioClip ambientBirdsClip;
     [SerializeField, Range(0f, 1f)] private float backgroundMusicVolume = 0.25f;
+    [SerializeField, Range(0f, 1f)] private float nightBackgroundVolume = 0.2f;
+    [SerializeField] private float backgroundMusicSwapFadeDuration = 1.1f;
     [SerializeField, Range(0f, 1f)] private float ambientCarVolume = 0.35f;
     [SerializeField, Range(0f, 1f)] private float ambientBirdsVolume = 0.14f;
     [SerializeField] private float ambientCarIntervalSeconds = 60f;
@@ -87,7 +101,10 @@ public class DogSocialDirector : MonoBehaviour
     private AudioSource ambientCarSource;
     private AudioSource ambientBirdsSource;
     private bool ambientBirdsSuppressed;
+    private BackgroundAudioMode activeBackgroundAudioMode;
+    private int lastBackgroundMinuteStamp = int.MinValue;
     private DogCycleCamera resolvedDogCamera;
+    private LivingRoomGraphicsEnhancer livingRoomGraphicsEnhancer;
     private readonly Queue<DogSocialInteractionType> recentInteractionTypes = new Queue<DogSocialInteractionType>();
     private readonly Dictionary<string, float> pairCooldownUntilByKey = new Dictionary<string, float>();
     private DogRoomAgent lastInteractingDogA;
@@ -172,6 +189,16 @@ public class DogSocialDirector : MonoBehaviour
         RefreshAgents();
         EnsureBackgroundMusicPlayback();
         EnsureAmbientCarPlayback();
+    }
+
+    private void Update()
+    {
+        if (!isActiveAndEnabled || !IsDavidTestScene())
+        {
+            return;
+        }
+
+        UpdateBackgroundMusicForTimeOfDay(false);
     }
 
     private void OnDisable()
@@ -637,6 +664,11 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         yield return MoveDogsToPoints(firstDog, pointA, secondDog, pointB);
+        if (!WereSocialMovesSuccessful(firstDog, secondDog))
+        {
+            yield break;
+        }
+
         yield return FaceDogs(firstDog, secondDog);
         yield return PlayGreetingBarks(firstDog, secondDog);
         yield return WagDogs(firstDog, secondDog);
@@ -650,6 +682,11 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         yield return MoveDogsToPoints(firstDog, pointA, secondDog, pointB);
+        if (!WereSocialMovesSuccessful(firstDog, secondDog))
+        {
+            yield break;
+        }
+
         yield return FaceDogs(firstDog, secondDog);
         yield return PlayGreetingBarks(firstDog, secondDog);
 
@@ -658,6 +695,11 @@ public class DogSocialDirector : MonoBehaviour
         if (TryGetPlayfulPairPoints(leadingDog, followingDog, out Vector3 leadingPoint, out Vector3 followingPoint))
         {
             yield return MoveDogsToPoints(leadingDog, leadingPoint, DogMovementPace.Run, followingDog, followingPoint, DogMovementPace.Trot);
+            if (!WereSocialMovesSuccessful(leadingDog, followingDog))
+            {
+                yield break;
+            }
+
             yield return FaceDogs(leadingDog, followingDog);
         }
 
@@ -672,6 +714,11 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         yield return MoveDogsToPoints(firstDog, pointA, secondDog, pointB);
+        if (!WereSocialMovesSuccessful(firstDog, secondDog))
+        {
+            yield break;
+        }
+
         yield return FaceDogs(firstDog, secondDog);
 
         DogRoomAgent invitingDog = Random.value < 0.5f ? firstDog : secondDog;
@@ -683,9 +730,17 @@ public class DogSocialDirector : MonoBehaviour
         {
             Coroutine moveResponder = StartCoroutine(respondingDog.MoveNearSocial(respondingPoint, approachTimeout, DogMovementPace.Run, SocialApproachReachedDistance));
             yield return moveResponder;
+            if (!WasSocialMoveSuccessful(respondingDog))
+            {
+                yield break;
+            }
 
             Coroutine moveInviter = StartCoroutine(invitingDog.MoveNearSocial(invitingPoint, approachTimeout, DogMovementPace.Trot, SocialApproachReachedDistance));
             yield return moveInviter;
+            if (!WasSocialMoveSuccessful(invitingDog))
+            {
+                yield break;
+            }
         }
 
         yield return FaceDogs(invitingDog, respondingDog);
@@ -701,6 +756,11 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         yield return MoveDogsToPoints(firstDog, pointA, secondDog, pointB);
+        if (!WereSocialMovesSuccessful(firstDog, secondDog))
+        {
+            yield break;
+        }
+
         yield return FaceDogs(firstDog, secondDog);
         yield return PlayGreetingBarks(firstDog, secondDog);
 
@@ -731,6 +791,16 @@ public class DogSocialDirector : MonoBehaviour
         Coroutine moveSecond = StartCoroutine(secondDog.MoveNearSocial(secondPoint, approachTimeout, secondPace, SocialApproachReachedDistance));
         yield return moveFirst;
         yield return moveSecond;
+    }
+
+    private static bool WasSocialMoveSuccessful(DogRoomAgent dog)
+    {
+        return dog != null && dog.WasLastTravelSuccessful;
+    }
+
+    private static bool WereSocialMovesSuccessful(DogRoomAgent firstDog, DogRoomAgent secondDog)
+    {
+        return WasSocialMoveSuccessful(firstDog) && WasSocialMoveSuccessful(secondDog);
     }
 
     private IEnumerator FaceDogs(DogRoomAgent firstDog, DogRoomAgent secondDog)
@@ -1238,7 +1308,8 @@ public class DogSocialDirector : MonoBehaviour
     {
         AutoAssignDavidTestAudio();
         EnsureActiveAudioListener();
-        if (backgroundMusicClip == null)
+        AudioClip initialClip = ResolveTargetBackgroundClip(GetDesiredBackgroundAudioMode());
+        if (initialClip == null)
         {
             Debug.LogWarning("DogSocialDirector could not find background music clip for scene '" + SceneManager.GetActiveScene().name + "'.");
             return;
@@ -1250,47 +1321,68 @@ public class DogSocialDirector : MonoBehaviour
             return;
         }
 
-        ConfigureBackgroundMusicSource();
-        backgroundMusicSource.clip = backgroundMusicClip;
-
         if (backgroundMusicRoutine != null)
         {
             StopCoroutine(backgroundMusicRoutine);
         }
 
-        backgroundMusicRoutine = StartCoroutine(PlayBackgroundMusicWhenReady());
+        UpdateBackgroundMusicForTimeOfDay(true);
     }
 
-    private IEnumerator PlayBackgroundMusicWhenReady()
+    private IEnumerator PlayBackgroundMusicWhenReady(AudioClip targetClip, float targetVolume, bool immediate)
     {
-        if (backgroundMusicClip == null || backgroundMusicSource == null)
+        if (targetClip == null || backgroundMusicSource == null)
         {
-            yield break;
-        }
-
-        if (backgroundMusicClip.loadState == AudioDataLoadState.Unloaded)
-        {
-            backgroundMusicClip.LoadAudioData();
-        }
-
-        while (backgroundMusicClip.loadState == AudioDataLoadState.Loading)
-        {
-            yield return null;
-        }
-
-        if (backgroundMusicClip.loadState == AudioDataLoadState.Failed)
-        {
-            Debug.LogWarning("DogSocialDirector could not load background music clip '" + backgroundMusicClip.name + "'.");
             backgroundMusicRoutine = null;
             yield break;
         }
 
-        ConfigureBackgroundMusicSource();
-        backgroundMusicSource.clip = backgroundMusicClip;
+        if (targetClip.loadState == AudioDataLoadState.Unloaded)
+        {
+            targetClip.LoadAudioData();
+        }
 
+        while (targetClip.loadState == AudioDataLoadState.Loading)
+        {
+            yield return null;
+        }
+
+        if (targetClip.loadState == AudioDataLoadState.Failed)
+        {
+            Debug.LogWarning("DogSocialDirector could not load background music clip '" + targetClip.name + "'.");
+            backgroundMusicRoutine = null;
+            yield break;
+        }
+
+        float currentVolume = backgroundMusicSource.volume;
+        ConfigureBackgroundMusicSource();
+        bool shouldFade = !immediate
+            && backgroundMusicSource.isPlaying
+            && backgroundMusicSource.clip != null
+            && backgroundMusicSource.clip != targetClip;
+
+        if (shouldFade)
+        {
+            backgroundMusicSource.volume = currentVolume;
+            float fadeDuration = Mathf.Max(0.01f, backgroundMusicSwapFadeDuration);
+            yield return FadeBackgroundMusic(backgroundMusicSource.volume, 0f, fadeDuration);
+            backgroundMusicSource.Stop();
+        }
+
+        backgroundMusicSource.clip = targetClip;
+        backgroundMusicSource.volume = shouldFade && !immediate ? 0f : targetVolume;
         if (!backgroundMusicSource.isPlaying)
         {
             backgroundMusicSource.Play();
+        }
+
+        if (shouldFade && !immediate)
+        {
+            yield return FadeBackgroundMusic(0f, targetVolume, Mathf.Max(0.01f, backgroundMusicSwapFadeDuration));
+        }
+        else
+        {
+            backgroundMusicSource.volume = targetVolume;
         }
 
         backgroundMusicRoutine = null;
@@ -1306,7 +1398,7 @@ public class DogSocialDirector : MonoBehaviour
         backgroundMusicSource.playOnAwake = false;
         backgroundMusicSource.loop = true;
         backgroundMusicSource.spatialBlend = 0f;
-        backgroundMusicSource.volume = PawPalAudioSettings.ApplyMusicVolume(backgroundMusicVolume);
+        backgroundMusicSource.volume = GetActiveBackgroundMusicTargetVolume();
     }
 
     private void EnsureAmbientCarPlayback()
@@ -1464,6 +1556,15 @@ public class DogSocialDirector : MonoBehaviour
             backgroundMusicClip = LoadEditorAudioClip(HomeThemeAssetPath);
         }
 
+        if (nightBackgroundClip == null)
+        {
+            nightBackgroundClip = LoadEditorAudioClip(NightAmbienceEditorAssetPath);
+            if (nightBackgroundClip == null)
+            {
+                nightBackgroundClip = Resources.Load<AudioClip>(NightAmbienceResourcePath);
+            }
+        }
+
         if (labradorBarkClip == null)
         {
             labradorBarkClip = LoadEditorAudioClip(LabradorBarkAssetPath);
@@ -1525,6 +1626,134 @@ public class DogSocialDirector : MonoBehaviour
         {
             Debug.LogWarning("DogSocialDirector could not find or create an AudioListener.");
         }
+    }
+
+    private void UpdateBackgroundMusicForTimeOfDay(bool immediate)
+    {
+        if (!IsDavidTestScene())
+        {
+            return;
+        }
+
+        AutoAssignDavidTestAudio();
+        EnsureBackgroundMusicSource();
+        if (backgroundMusicSource == null)
+        {
+            return;
+        }
+
+        PawPalTimeOfDayState timeState = ResolveBackgroundMusicTimeOfDayState();
+        int minuteStamp = PawPalTimeOfDayEvaluator.ToMinuteStamp(timeState);
+        BackgroundAudioMode targetMode = timeState.Daylight01 <= 0.001f
+            ? BackgroundAudioMode.NightAmbience
+            : BackgroundAudioMode.DayTheme;
+
+        if (!immediate && minuteStamp == lastBackgroundMinuteStamp && targetMode == activeBackgroundAudioMode)
+        {
+            return;
+        }
+
+        lastBackgroundMinuteStamp = minuteStamp;
+        AudioClip targetClip = ResolveTargetBackgroundClip(targetMode);
+        if (targetClip == null)
+        {
+            if (targetMode == BackgroundAudioMode.DayTheme)
+            {
+                Debug.LogWarning("DogSocialDirector could not resolve the day background music clip.");
+            }
+
+            return;
+        }
+
+        activeBackgroundAudioMode = targetMode;
+
+        if (!immediate
+            && backgroundMusicSource.clip == targetClip
+            && backgroundMusicSource.isPlaying)
+        {
+            ConfigureBackgroundMusicSource();
+            return;
+        }
+
+        if (backgroundMusicRoutine != null)
+        {
+            StopCoroutine(backgroundMusicRoutine);
+        }
+
+        backgroundMusicRoutine = StartCoroutine(PlayBackgroundMusicWhenReady(
+            targetClip,
+            GetActiveBackgroundMusicTargetVolume(),
+            immediate));
+    }
+
+    private BackgroundAudioMode GetDesiredBackgroundAudioMode()
+    {
+        return ResolveBackgroundMusicTimeOfDayState().Daylight01 <= 0.001f
+            ? BackgroundAudioMode.NightAmbience
+            : BackgroundAudioMode.DayTheme;
+    }
+
+    private PawPalTimeOfDayState ResolveBackgroundMusicTimeOfDayState()
+    {
+        if (livingRoomGraphicsEnhancer == null)
+        {
+            livingRoomGraphicsEnhancer = FindFirstObjectByType<LivingRoomGraphicsEnhancer>();
+        }
+
+        if (livingRoomGraphicsEnhancer != null && livingRoomGraphicsEnhancer.gameObject.scene == gameObject.scene)
+        {
+            return livingRoomGraphicsEnhancer.EvaluateTimeOfDayState();
+        }
+
+        return PawPalTimeOfDayEvaluator.Evaluate(
+            true,
+            false,
+            12f,
+            DefaultSunriseHour,
+            DefaultSunsetHour,
+            DefaultTransitionHours);
+    }
+
+    private AudioClip ResolveTargetBackgroundClip(BackgroundAudioMode mode)
+    {
+        return mode == BackgroundAudioMode.NightAmbience ? ResolveNightBackgroundClip() : backgroundMusicClip;
+    }
+
+    private AudioClip ResolveNightBackgroundClip()
+    {
+        if (nightBackgroundClip == null)
+        {
+            nightBackgroundClip = Resources.Load<AudioClip>(NightAmbienceResourcePath);
+        }
+
+        return nightBackgroundClip;
+    }
+
+    private float GetActiveBackgroundMusicTargetVolume()
+    {
+        float configuredVolume = activeBackgroundAudioMode == BackgroundAudioMode.NightAmbience
+            ? nightBackgroundVolume
+            : backgroundMusicVolume;
+        return PawPalAudioSettings.ApplyMusicVolume(configuredVolume);
+    }
+
+    private IEnumerator FadeBackgroundMusic(float from, float to, float duration)
+    {
+        if (backgroundMusicSource == null)
+        {
+            yield break;
+        }
+
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            backgroundMusicSource.volume = Mathf.Lerp(from, to, t);
+            yield return null;
+        }
+
+        backgroundMusicSource.volume = to;
     }
 
     private static AudioClip LoadEditorAudioClip(string assetPath)

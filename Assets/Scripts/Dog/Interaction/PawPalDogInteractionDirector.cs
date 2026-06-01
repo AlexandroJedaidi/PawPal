@@ -18,16 +18,12 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
     private const float CameraApproachToyPadding = 0.14f;
     private const float CameraApproachReachedDistance = 0.16f;
     private const float CameraApproachAlternativePointDistance = 0.35f;
-    private const float BlockerClearanceRadius = 0.72f;
-    private const float BlockerMoveAwayDistance = 1.15f;
-    private const float BlockerMoveTimeout = 2.8f;
     private const float LargeToySuspensionRadius = 0.85f;
     private static int debugSessionCounter;
 
     private Coroutine activeRoutine;
     private DogRoomAgent activeDog;
     private string activeDebugContext;
-    private readonly List<DogRoomAgent> pausedBlockers = new List<DogRoomAgent>();
     private readonly List<SuspendedLargeToyBlocker> suspendedLargeToyBlockers = new List<SuspendedLargeToyBlocker>();
 
     private struct SuspendedLargeToyBlocker
@@ -52,7 +48,6 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
             activeRoutine = null;
         }
 
-        ResumePausedBlockers();
         RestoreSuspendedLargeToyBlockers();
 
         if (activeDog != null)
@@ -79,6 +74,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
             activeDebugContext = "interaction_whistle_" + (++debugSessionCounter);
             dog.BeginMovementDebugSession(activeDebugContext);
             Debug.Log("[DogMoveDebug] " + dog.name + " | " + activeDebugContext + " | DIRECTOR_TRY_CALL", dog);
+            dog.WakeForPlayerInteraction();
             dog.PrepareForPlayerInteraction(true);
         }
 
@@ -119,19 +115,8 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         activeDog = dog;
         try
         {
-            dog.BeginTemporaryNavigationAnchor();
-            try
-            {
-                yield return ClearBlockingDogs(dog, approachPoint);
-            }
-            finally
-            {
-                dog.EndTemporaryNavigationAnchor();
-            }
-
             dog.PauseForSocial(false);
             yield return StartCoroutine(ApproachDogToCamera(dog, camera, approachPoint));
-            ResumePausedBlockers();
             RestoreSuspendedLargeToyBlockers();
             if (!dog.WasLastTravelSuccessful)
             {
@@ -156,7 +141,6 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         }
         finally
         {
-            ResumePausedBlockers();
             RestoreSuspendedLargeToyBlockers();
             if (dog != null)
             {
@@ -195,74 +179,8 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
             }
 
             Debug.Log("[DogMoveDebug] " + dog.name + " | " + activeDebugContext + " | DIRECTOR_APPROACH_RETRY point=" + approachPoint.ToString("F3"), dog);
-            dog.BeginTemporaryNavigationAnchor();
-            try
-            {
-                yield return ClearBlockingDogs(dog, approachPoint);
-            }
-            finally
-            {
-                dog.EndTemporaryNavigationAnchor();
-            }
-
             dog.PauseForSocial(false);
         }
-    }
-
-    private IEnumerator ClearBlockingDogs(DogRoomAgent activeDog, Vector3 approachPoint)
-    {
-        ResumePausedBlockers();
-
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null || dogs.Length == 0 || activeDog == null)
-        {
-            yield break;
-        }
-
-        List<Coroutine> moveRoutines = new List<Coroutine>();
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            DogRoomAgent otherDog = dogs[i];
-            if (!IsDogBlockingInteractionApproach(otherDog, activeDog, approachPoint))
-            {
-                continue;
-            }
-
-            Vector3 moveAwayPoint;
-            if (!TryResolveBlockerMoveAwayPoint(otherDog, activeDog, approachPoint, out moveAwayPoint))
-            {
-                continue;
-            }
-
-            Debug.Log("[DogMoveDebug] " + activeDog.name + " | " + activeDebugContext + " | BLOCKER " + otherDog.name + " moveAway=" + moveAwayPoint.ToString("F3"), activeDog);
-            otherDog.PrepareForPlayerInteraction(false);
-            otherDog.PauseForSocial();
-            pausedBlockers.Add(otherDog);
-            moveRoutines.Add(StartCoroutine(otherDog.MoveNearSocial(
-                moveAwayPoint,
-                BlockerMoveTimeout,
-                DogMovementPace.Trot,
-                CameraApproachReachedDistance)));
-        }
-
-        for (int i = 0; i < moveRoutines.Count; i++)
-        {
-            yield return moveRoutines[i];
-        }
-    }
-
-    private void ResumePausedBlockers()
-    {
-        for (int i = 0; i < pausedBlockers.Count; i++)
-        {
-            DogRoomAgent blocker = pausedBlockers[i];
-            if (blocker != null && blocker.isActiveAndEnabled)
-            {
-                blocker.StartRoaming();
-            }
-        }
-
-        pausedBlockers.Clear();
     }
 
     private void SuspendLargeToyBlockersOnApproach(DogRoomAgent dog, Vector3 approachPoint)
@@ -361,74 +279,6 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
             CameraApproachTimeoutMax);
     }
 
-    private static bool IsDogBlockingInteractionApproach(DogRoomAgent otherDog, DogRoomAgent activeDog, Vector3 approachPoint)
-    {
-        if (otherDog == null
-            || otherDog == activeDog
-            || !otherDog.isActiveAndEnabled)
-        {
-            return false;
-        }
-
-        Vector3 otherPosition = otherDog.transform.position;
-        otherPosition.y = 0f;
-        Vector3 activePosition = activeDog.transform.position;
-        activePosition.y = 0f;
-        Vector3 flatApproach = approachPoint;
-        flatApproach.y = 0f;
-
-        float clearance = Mathf.Max(0.2f, BlockerClearanceRadius);
-        float sqrClearance = clearance * clearance;
-        if ((otherPosition - activePosition).sqrMagnitude <= sqrClearance * 0.7f
-            || (otherPosition - flatApproach).sqrMagnitude <= sqrClearance)
-        {
-            return true;
-        }
-
-        return DistanceToSegment(otherPosition, activePosition, flatApproach) <= clearance * 0.7f;
-    }
-
-    private static bool TryResolveBlockerMoveAwayPoint(DogRoomAgent otherDog, DogRoomAgent activeDog, Vector3 approachPoint, out Vector3 point)
-    {
-        point = otherDog != null ? otherDog.transform.position : Vector3.zero;
-        if (otherDog == null || activeDog == null)
-        {
-            return false;
-        }
-
-        Vector3 awayDirection = otherDog.transform.position - approachPoint;
-        awayDirection.y = 0f;
-        if (awayDirection.sqrMagnitude < 0.001f)
-        {
-            awayDirection = otherDog.transform.position - activeDog.transform.position;
-            awayDirection.y = 0f;
-        }
-
-        if (awayDirection.sqrMagnitude < 0.001f)
-        {
-            awayDirection = Vector3.right;
-        }
-
-        awayDirection.Normalize();
-        Vector3 lateral = Vector3.Cross(Vector3.up, awayDirection).normalized;
-        float[] lateralOffsets = { 0f, 0.4f, -0.4f, 0.72f, -0.72f };
-
-        for (int i = 0; i < lateralOffsets.Length; i++)
-        {
-            Vector3 candidate = otherDog.transform.position
-                + awayDirection * BlockerMoveAwayDistance
-                + lateral * lateralOffsets[i];
-            candidate.y = otherDog.transform.position.y;
-            Vector3 safePoint;
-            if (otherDog.TryGetRoomSafePoint(candidate, 1.2f, out safePoint))
-            {
-                point = safePoint;
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     private static float DistanceToSegment(Vector3 point, Vector3 segmentStart, Vector3 segmentEnd)
     {

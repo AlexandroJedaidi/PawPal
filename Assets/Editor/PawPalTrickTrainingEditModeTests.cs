@@ -924,6 +924,86 @@ public sealed class PawPalTrickTrainingEditModeTests
         }
     }
 
+    [Test]
+    public void ToyPickupDistanceRejectsOffsetPivotWhenVisibleToySurfaceIsTooFarAway()
+    {
+        GameObject dogObject = new GameObject("PickupDistanceDog");
+        GameObject toyRoot = new GameObject("OffsetToyRoot");
+        try
+        {
+            DogRoomAgent dog = dogObject.AddComponent<DogRoomAgent>();
+            dogObject.transform.position = Vector3.zero;
+            dogObject.transform.rotation = Quaternion.identity;
+
+            toyRoot.transform.position = new Vector3(0f, 0f, 0.35f);
+
+            GameObject toyVisual = new GameObject("OffsetToyVisual");
+            toyVisual.transform.SetParent(toyRoot.transform, false);
+            toyVisual.transform.localPosition = new Vector3(0f, 0f, 0.35f);
+            BoxCollider collider = toyVisual.AddComponent<BoxCollider>();
+            collider.size = new Vector3(0.1f, 0.1f, 0.1f);
+
+            Assert.IsFalse(InvokePrivate<bool>(dog, "IsToyWithinPickupDistance", toyRoot.transform));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(toyRoot);
+            UnityEngine.Object.DestroyImmediate(dogObject);
+        }
+    }
+
+    [Test]
+    public void ToyPickupDistanceRejectsToyThatIsWithinReachButBehindFacingAngle()
+    {
+        GameObject dogObject = new GameObject("PickupFacingDog");
+        GameObject toyRoot = new GameObject("RearToyRoot");
+        try
+        {
+            DogRoomAgent dog = dogObject.AddComponent<DogRoomAgent>();
+            dogObject.transform.position = Vector3.zero;
+            dogObject.transform.rotation = Quaternion.identity;
+
+            toyRoot.transform.position = new Vector3(0f, 0f, 0.05f);
+            BoxCollider collider = toyRoot.AddComponent<BoxCollider>();
+            collider.size = new Vector3(0.1f, 0.1f, 0.1f);
+
+            Assert.IsFalse(InvokePrivate<bool>(dog, "IsToyWithinPickupDistance", toyRoot.transform));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(toyRoot);
+            UnityEngine.Object.DestroyImmediate(dogObject);
+        }
+    }
+
+    [Test]
+    public void ToyPickupDistanceUsesClosestColliderSurfaceInsteadOfToyRootPosition()
+    {
+        GameObject dogObject = new GameObject("PickupColliderDog");
+        GameObject toyRoot = new GameObject("FarPivotToyRoot");
+        try
+        {
+            DogRoomAgent dog = dogObject.AddComponent<DogRoomAgent>();
+            dogObject.transform.position = Vector3.zero;
+            dogObject.transform.rotation = Quaternion.identity;
+
+            toyRoot.transform.position = new Vector3(0f, 0f, 0.6f);
+
+            GameObject toyVisual = new GameObject("NearToyVisual");
+            toyVisual.transform.SetParent(toyRoot.transform, false);
+            toyVisual.transform.localPosition = new Vector3(0f, 0f, -0.35f);
+            BoxCollider collider = toyVisual.AddComponent<BoxCollider>();
+            collider.size = new Vector3(0.1f, 0.1f, 0.1f);
+
+            Assert.IsTrue(InvokePrivate<bool>(dog, "IsToyWithinPickupDistance", toyRoot.transform));
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(toyRoot);
+            UnityEngine.Object.DestroyImmediate(dogObject);
+        }
+    }
+
     private static PawPalDogState BuildDog()
     {
         return new PawPalDogState
@@ -979,6 +1059,14 @@ public sealed class PawPalTrickTrainingEditModeTests
         MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method, "Missing method " + methodName);
         method.Invoke(target, arguments);
+    }
+
+    private static TResult InvokePrivate<TResult>(object target, string methodName, params object[] arguments)
+    {
+        MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method, "Missing method " + methodName);
+        object result = method.Invoke(target, arguments);
+        return result is TResult typedResult ? typedResult : default(TResult);
     }
 
     private static TResult InvokePrivateStatic<TResult>(Type targetType, string methodName, params object[] arguments)

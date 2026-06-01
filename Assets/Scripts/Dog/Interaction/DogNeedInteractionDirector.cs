@@ -40,8 +40,6 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
     [SerializeField] private float useLoopDuration = 5f;
     [SerializeField] private Vector3 cameraFocusOffset = new Vector3(0f, 0.35f, 0f);
     [SerializeField] private float otherDogClearanceRadius = 0.85f;
-    [SerializeField] private float otherDogMoveAwayDistance = 1.15f;
-    [SerializeField] private float otherDogMoveTimeout = 3f;
     [SerializeField] private int approachCandidateCount = 12;
 
     [Header("Audio")]
@@ -115,6 +113,12 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             return false;
         }
 
+        dog.WakeForPlayerInteraction();
+        if (!dog.PrepareForPlayerInteraction(true))
+        {
+            return false;
+        }
+
         activeRoutine = StartCoroutine(InteractionRoutine(dog, prefab, need, onCompleted));
         return true;
     }
@@ -152,7 +156,6 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
     {
         bool completed = false;
         int cameraFocusId = 0;
-        List<DogRoomAgent> pausedBlockers = new List<DogRoomAgent>();
         try
         {
             dog.PauseForSocial(false);
@@ -168,10 +171,23 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             }
 
             Vector3 approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
-            yield return ClearOtherDogsFromBowlArea(dog, activeBowl.transform.position, approachPoint, pausedBlockers);
-            approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
             yield return dog.MoveNearPrecise(approachPoint, moveTimeout, DogMovementPace.Walk, preciseArrivalDistance);
-            yield return EnsureDogCloseEnoughForBowlUse(dog, activeBowl.transform.position, approachPoint);
+            if (!IsDogCloseEnoughForBowlUse(dog, activeBowl.transform.position, approachPoint))
+            {
+                approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
+                yield return dog.MoveNearPrecise(
+                    approachPoint,
+                    Mathf.Max(1f, moveTimeout * 0.45f),
+                    DogMovementPace.Walk,
+                    preciseArrivalDistance);
+
+                if (!IsDogCloseEnoughForBowlUse(dog, activeBowl.transform.position, approachPoint))
+                {
+                    Debug.LogWarning("DogNeedInteractionDirector: " + dog.name + " could not reach a natural bowl-use position.");
+                    yield break;
+                }
+            }
+
             yield return dog.FaceTarget(activeBowl.transform, faceDuration);
             StartCoroutine(PlayBowlUseAudio(dog, activeBowl.transform, need, useLoopDuration));
             yield return dog.PlayBowlUse(need == PawPalDogNeed.Water, useLoopDuration);
@@ -197,7 +213,6 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
                 dog.StartRoaming();
             }
 
-            ResumePausedBlockers(pausedBlockers);
             activeRoutine = null;
         }
 
@@ -361,6 +376,36 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return IsPointClearOfOtherDogs(point, dog, Mathf.Max(0.25f, otherDogClearanceRadius * 0.55f));
     }
 
+    private static bool IsPointClearOfOtherDogs(Vector3 point, DogRoomAgent ignoredDog, float radius)
+    {
+        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        if (dogs == null)
+        {
+            return true;
+        }
+
+        float sqrRadius = Mathf.Max(0f, radius) * Mathf.Max(0f, radius);
+        Vector3 flatPoint = point;
+        flatPoint.y = 0f;
+        for (int i = 0; i < dogs.Length; i++)
+        {
+            DogRoomAgent otherDog = dogs[i];
+            if (otherDog == null || otherDog == ignoredDog)
+            {
+                continue;
+            }
+
+            Vector3 otherPosition = otherDog.transform.position;
+            otherPosition.y = 0f;
+            if ((otherPosition - flatPoint).sqrMagnitude < sqrRadius)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private Vector3 ResolvePreferredApproachDirection(DogRoomAgent dog, Vector3 bowlPosition)
     {
         Camera camera = ResolveRoomCamera();
@@ -384,22 +429,6 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         Vector3 fallback = -dog.transform.forward;
         fallback.y = 0f;
         return fallback.sqrMagnitude > 0.001f ? fallback.normalized : Vector3.back;
-    }
-
-    private IEnumerator EnsureDogCloseEnoughForBowlUse(DogRoomAgent dog, Vector3 bowlPosition, Vector3 approachPoint)
-    {
-        if (dog == null || IsDogCloseEnoughForBowlUse(dog, bowlPosition, approachPoint))
-        {
-            yield break;
-        }
-
-        Vector3 retryPoint = ResolveApproachPoint(dog, bowlPosition);
-        yield return dog.MoveNearPrecise(retryPoint, Mathf.Max(1f, moveTimeout * 0.45f), DogMovementPace.Walk, preciseArrivalDistance);
-
-        if (!IsDogCloseEnoughForBowlUse(dog, bowlPosition, retryPoint))
-        {
-            Debug.LogWarning("DogNeedInteractionDirector: " + dog.name + " is still too far from the bowl for a natural " + "eat/drink animation.");
-        }
     }
 
     private bool IsDogCloseEnoughForBowlUse(DogRoomAgent dog, Vector3 bowlPosition, Vector3 approachPoint)
@@ -466,158 +495,6 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
 
         return true;
-    }
-
-    private IEnumerator ClearOtherDogsFromBowlArea(DogRoomAgent activeDog, Vector3 bowlPosition, Vector3 approachPoint, List<DogRoomAgent> pausedBlockers)
-    {
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null || dogs.Length == 0)
-        {
-            yield break;
-        }
-
-        List<Coroutine> moveRoutines = new List<Coroutine>();
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            DogRoomAgent otherDog = dogs[i];
-            if (otherDog == null || otherDog == activeDog || !IsDogBlockingBowlUse(otherDog, activeDog, bowlPosition, approachPoint))
-            {
-                continue;
-            }
-
-            Vector3 moveAwayPoint;
-            if (!TryResolveOtherDogMoveAwayPoint(otherDog, activeDog, bowlPosition, approachPoint, out moveAwayPoint))
-            {
-                continue;
-            }
-
-            otherDog.PauseForSocial();
-            pausedBlockers.Add(otherDog);
-            moveRoutines.Add(StartCoroutine(otherDog.MoveNear(moveAwayPoint, otherDogMoveTimeout, DogMovementPace.Trot)));
-        }
-
-        for (int i = 0; i < moveRoutines.Count; i++)
-        {
-            yield return moveRoutines[i];
-        }
-    }
-
-    private bool IsDogBlockingBowlUse(DogRoomAgent otherDog, DogRoomAgent activeDog, Vector3 bowlPosition, Vector3 approachPoint)
-    {
-        Vector3 dogPosition = otherDog.transform.position;
-        dogPosition.y = 0f;
-        Vector3 activeDogPosition = activeDog.transform.position;
-        activeDogPosition.y = 0f;
-        Vector3 flatBowlPosition = bowlPosition;
-        flatBowlPosition.y = 0f;
-        Vector3 flatApproachPoint = approachPoint;
-        flatApproachPoint.y = 0f;
-
-        float clearance = Mathf.Max(0.2f, otherDogClearanceRadius);
-        float sqrClearance = clearance * clearance;
-        if ((dogPosition - flatBowlPosition).sqrMagnitude <= sqrClearance
-            || (dogPosition - flatApproachPoint).sqrMagnitude <= sqrClearance
-            || (dogPosition - activeDogPosition).sqrMagnitude <= sqrClearance * 0.65f)
-        {
-            return true;
-        }
-
-        return DistanceToSegment(dogPosition, flatBowlPosition, flatApproachPoint) <= clearance * 0.65f;
-    }
-
-    private bool TryResolveOtherDogMoveAwayPoint(DogRoomAgent otherDog, DogRoomAgent activeDog, Vector3 bowlPosition, Vector3 approachPoint, out Vector3 point)
-    {
-        Vector3 awayDirection = otherDog.transform.position - bowlPosition;
-        awayDirection.y = 0f;
-        if (awayDirection.sqrMagnitude < 0.001f)
-        {
-            awayDirection = otherDog.transform.position - activeDog.transform.position;
-            awayDirection.y = 0f;
-        }
-
-        if (awayDirection.sqrMagnitude < 0.001f)
-        {
-            awayDirection = -ResolvePreferredApproachDirection(activeDog, bowlPosition);
-        }
-
-        awayDirection.Normalize();
-        float distance = Mathf.Max(0.4f, otherDogMoveAwayDistance);
-        for (int i = 0; i < 8; i++)
-        {
-            float angle = i == 0 ? 0f : (i % 2 == 0 ? 1f : -1f) * ((i + 1) / 2) * 35f;
-            Vector3 candidateDirection = Quaternion.Euler(0f, angle, 0f) * awayDirection;
-            Vector3 candidate = otherDog.transform.position + candidateDirection * distance;
-            if (otherDog.TryGetRoomSafePoint(candidate, 0.45f, out point)
-                && IsPointClearOfOtherDogs(point, otherDog, Mathf.Max(0.35f, otherDogClearanceRadius * 0.65f))
-                && !IsPointNearBowlUseArea(point, bowlPosition, approachPoint))
-            {
-                return true;
-            }
-        }
-
-        point = otherDog.transform.position + awayDirection * distance;
-        return otherDog.TryGetRoomSafePoint(point, 0.45f, out point);
-    }
-
-    private bool IsPointClearOfOtherDogs(Vector3 point, DogRoomAgent ignoredDog, float radius)
-    {
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null)
-        {
-            return true;
-        }
-
-        float sqrRadius = Mathf.Max(0f, radius) * Mathf.Max(0f, radius);
-        Vector3 flatPoint = point;
-        flatPoint.y = 0f;
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            DogRoomAgent otherDog = dogs[i];
-            if (otherDog == null || otherDog == ignoredDog)
-            {
-                continue;
-            }
-
-            Vector3 otherPosition = otherDog.transform.position;
-            otherPosition.y = 0f;
-            if ((otherPosition - flatPoint).sqrMagnitude < sqrRadius)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private bool IsPointNearBowlUseArea(Vector3 point, Vector3 bowlPosition, Vector3 approachPoint)
-    {
-        Vector3 flatPoint = point;
-        flatPoint.y = 0f;
-        Vector3 flatBowlPosition = bowlPosition;
-        flatBowlPosition.y = 0f;
-        Vector3 flatApproachPoint = approachPoint;
-        flatApproachPoint.y = 0f;
-
-        float clearance = Mathf.Max(0.2f, otherDogClearanceRadius);
-        return (flatPoint - flatBowlPosition).sqrMagnitude <= clearance * clearance
-            || (flatPoint - flatApproachPoint).sqrMagnitude <= clearance * clearance;
-    }
-
-    private void ResumePausedBlockers(List<DogRoomAgent> pausedBlockers)
-    {
-        if (pausedBlockers == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < pausedBlockers.Count; i++)
-        {
-            DogRoomAgent blocker = pausedBlockers[i];
-            if (blocker != null && blocker.isActiveAndEnabled)
-            {
-                blocker.StartRoaming();
-            }
-        }
     }
 
     private static float DistanceToSegment(Vector3 point, Vector3 start, Vector3 end)

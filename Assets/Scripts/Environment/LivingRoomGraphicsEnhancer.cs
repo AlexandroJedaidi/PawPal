@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
@@ -13,6 +14,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private const string WindowFillLightName = "Window Soft Fill";
     private const string SofaFillLightName = "Sofa Warm Fill";
     private const string ReflectionProbeName = "Living Room Reflection Probe";
+    private const string WindowBackdropObjectName = "Window Backdrop";
     private const float RoomFootprintPadding = 0.85f;
     private const float RoomRendererMaxFootprintMultiplier = 1.8f;
     private const float MinimumRoomBoundsHeight = 3.25f;
@@ -25,15 +27,43 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField] private bool configureSkybox;
     [SerializeField] private bool configurePostProcessing = true;
     [SerializeField] private bool configureReflectionProbe = true;
+    [SerializeField] private bool configureWindowBackdrop = true;
     [SerializeField] private bool configureQualityInPlayMode = true;
+
+    [Header("Time Of Day")]
+    [SerializeField] private bool useDeviceLocalTime = true;
+    [SerializeField] private bool usePreviewHour;
+    [SerializeField, Range(0f, 24f)] private float previewHour = 12f;
+    [SerializeField, Range(0f, 24f)] private float sunriseHour = 7f;
+    [SerializeField, Range(0f, 24f)] private float sunsetHour = 20f;
+    [SerializeField, Range(0.1f, 6f)] private float transitionHours = 1f;
+
+    [Header("Pet Circadian")]
+    [SerializeField, Range(0f, 24f)] private float petMorningStartHour = 7f;
+    [SerializeField, Range(0f, 24f)] private float petDaySteadyStartHour = 10f;
+    [SerializeField, Range(0f, 24f)] private float petEveningStartHour = 18.5f;
+    [SerializeField, Range(0f, 24f)] private float petNightStartHour = 22f;
+    [SerializeField, Range(0.1f, 6f)] private float petWakeTransitionHours = 0.75f;
+    [SerializeField, Range(0.1f, 6f)] private float petEveningTransitionHours = 1.25f;
+    [SerializeField] private float petInteractionWakeMinutes = 8f;
 
     [Header("Sun")]
     [SerializeField] private Light sun;
-    [SerializeField] private Vector3 sunEulerAngles = new Vector3(45f, -32f, 0f);
-    [SerializeField] private float sunIntensity = 1.25f;
-    [SerializeField] private Color sunColor = new Color(1f, 0.94f, 0.84f);
-    [SerializeField] private float sunColorTemperature = 6100f;
-    [SerializeField, Range(0f, 1f)] private float sunShadowStrength = 0.78f;
+    [FormerlySerializedAs("sunEulerAngles")]
+    [SerializeField] private Vector3 daySunEulerAngles = new Vector3(45f, -32f, 0f);
+    [SerializeField] private Vector3 nightSunEulerAngles = new Vector3(-18f, -32f, 0f);
+    [FormerlySerializedAs("sunIntensity")]
+    [SerializeField] private float daySunIntensity = 1.25f;
+    [SerializeField] private float nightSunIntensity = 0.08f;
+    [FormerlySerializedAs("sunColor")]
+    [SerializeField] private Color daySunColor = new Color(1f, 0.94f, 0.84f);
+    [SerializeField] private Color nightSunColor = new Color(0.53f, 0.63f, 0.90f);
+    [FormerlySerializedAs("sunColorTemperature")]
+    [SerializeField] private float daySunColorTemperature = 6100f;
+    [SerializeField] private float nightSunColorTemperature = 9000f;
+    [FormerlySerializedAs("sunShadowStrength")]
+    [SerializeField, Range(0f, 1f)] private float daySunShadowStrength = 0.78f;
+    [SerializeField, Range(0f, 1f)] private float nightSunShadowStrength = 0.18f;
     [SerializeField] private float sunShadowBias = 0.025f;
     [SerializeField] private float sunShadowNormalBias = 0.18f;
 
@@ -41,21 +71,47 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField] private bool createFillLights = true;
     [SerializeField] private Light windowFillLight;
     [SerializeField] private Light sofaFillLight;
-    [SerializeField] private float windowFillIntensity = 0.18f;
-    [SerializeField] private float sofaFillIntensity = 0.12f;
+    [FormerlySerializedAs("windowFillIntensity")]
+    [SerializeField] private float dayWindowFillIntensity = 0.18f;
+    [SerializeField] private float nightWindowFillIntensity = 0.04f;
+    [SerializeField] private Color dayWindowFillColor = new Color(1f, 0.80f, 0.55f);
+    [SerializeField] private Color nightWindowFillColor = new Color(0.45f, 0.56f, 0.92f);
+    [FormerlySerializedAs("sofaFillIntensity")]
+    [SerializeField] private float daySofaFillIntensity = 0.12f;
+    [SerializeField] private float nightSofaFillIntensity = 0.05f;
+    [SerializeField] private Color daySofaFillColor = new Color(1f, 0.74f, 0.50f);
+    [SerializeField] private Color nightSofaFillColor = new Color(0.67f, 0.65f, 0.80f);
 
     [Header("Ambient")]
-    [SerializeField, Range(0f, 2f)] private float ambientIntensity = 0.55f;
-    [SerializeField, Range(0f, 2f)] private float reflectionIntensity = 0.35f;
-    [SerializeField] private Color ambientSky = new Color(0.70f, 0.72f, 0.72f);
-    [SerializeField] private Color ambientEquator = new Color(0.45f, 0.43f, 0.39f);
-    [SerializeField] private Color ambientGround = new Color(0.14f, 0.13f, 0.12f);
+    [FormerlySerializedAs("ambientIntensity")]
+    [SerializeField, Range(0f, 2f)] private float dayAmbientIntensity = 0.55f;
+    [SerializeField, Range(0f, 2f)] private float nightAmbientIntensity = 0.28f;
+    [FormerlySerializedAs("reflectionIntensity")]
+    [SerializeField, Range(0f, 2f)] private float dayReflectionIntensity = 0.35f;
+    [SerializeField, Range(0f, 2f)] private float nightReflectionIntensity = 0.18f;
+    [FormerlySerializedAs("ambientSky")]
+    [SerializeField] private Color dayAmbientSky = new Color(0.70f, 0.72f, 0.72f);
+    [SerializeField] private Color nightAmbientSky = new Color(0.16f, 0.20f, 0.31f);
+    [FormerlySerializedAs("ambientEquator")]
+    [SerializeField] private Color dayAmbientEquator = new Color(0.45f, 0.43f, 0.39f);
+    [SerializeField] private Color nightAmbientEquator = new Color(0.12f, 0.13f, 0.18f);
+    [FormerlySerializedAs("ambientGround")]
+    [SerializeField] private Color dayAmbientGround = new Color(0.14f, 0.13f, 0.12f);
+    [SerializeField] private Color nightAmbientGround = new Color(0.05f, 0.05f, 0.07f);
 
     [Header("Skybox")]
-    [SerializeField] private Color skyboxTint = new Color(0.42f, 0.70f, 1f);
-    [SerializeField] private Color skyboxGroundColor = new Color(0.32f, 0.47f, 0.60f);
-    [SerializeField, Range(0f, 8f)] private float skyboxExposure = 1.08f;
-    [SerializeField, Range(0f, 5f)] private float skyboxAtmosphereThickness = 0.85f;
+    [FormerlySerializedAs("skyboxTint")]
+    [SerializeField] private Color daySkyboxTint = new Color(0.42f, 0.70f, 1f);
+    [SerializeField] private Color nightSkyboxTint = new Color(0.05f, 0.08f, 0.16f);
+    [FormerlySerializedAs("skyboxGroundColor")]
+    [SerializeField] private Color daySkyboxGroundColor = new Color(0.32f, 0.47f, 0.60f);
+    [SerializeField] private Color nightSkyboxGroundColor = new Color(0.02f, 0.03f, 0.07f);
+    [FormerlySerializedAs("skyboxExposure")]
+    [SerializeField, Range(0f, 8f)] private float daySkyboxExposure = 1.08f;
+    [SerializeField, Range(0f, 8f)] private float nightSkyboxExposure = 0.35f;
+    [FormerlySerializedAs("skyboxAtmosphereThickness")]
+    [SerializeField, Range(0f, 5f)] private float daySkyboxAtmosphereThickness = 0.85f;
+    [SerializeField, Range(0f, 5f)] private float nightSkyboxAtmosphereThickness = 0.45f;
 
     [Header("Look")]
     [SerializeField] private float exposure = -0.08f;
@@ -101,6 +157,9 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private Volume lookVolume;
     private Material runtimeSkyboxMaterial;
+    private WindowBackdropImagePlane windowBackdropImagePlane;
+    private PawPalTimeOfDayState currentTimeOfDayState;
+    private int lastAppliedMinuteStamp = int.MinValue;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void BootstrapInPlayMode()
@@ -146,16 +205,45 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         }
     }
 
+    private void Update()
+    {
+        if (!applyOnEnable || !gameObject.scene.IsValid() || !gameObject.scene.isLoaded)
+        {
+            return;
+        }
+
+        PawPalTimeOfDayState nextState = EvaluateTimeOfDayState();
+        int nextMinuteStamp = PawPalTimeOfDayEvaluator.ToMinuteStamp(nextState);
+        if (nextMinuteStamp == lastAppliedMinuteStamp)
+        {
+            return;
+        }
+
+        ApplyGraphics(nextState);
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        sunIntensity = Mathf.Max(0f, sunIntensity);
+        daySunIntensity = Mathf.Max(0f, daySunIntensity);
+        nightSunIntensity = Mathf.Max(0f, nightSunIntensity);
         sunShadowBias = Mathf.Max(0f, sunShadowBias);
         sunShadowNormalBias = Mathf.Max(0f, sunShadowNormalBias);
-        windowFillIntensity = Mathf.Max(0f, windowFillIntensity);
-        sofaFillIntensity = Mathf.Max(0f, sofaFillIntensity);
-        skyboxExposure = Mathf.Max(0f, skyboxExposure);
-        skyboxAtmosphereThickness = Mathf.Max(0f, skyboxAtmosphereThickness);
+        dayWindowFillIntensity = Mathf.Max(0f, dayWindowFillIntensity);
+        nightWindowFillIntensity = Mathf.Max(0f, nightWindowFillIntensity);
+        daySofaFillIntensity = Mathf.Max(0f, daySofaFillIntensity);
+        nightSofaFillIntensity = Mathf.Max(0f, nightSofaFillIntensity);
+        daySkyboxExposure = Mathf.Max(0f, daySkyboxExposure);
+        nightSkyboxExposure = Mathf.Max(0f, nightSkyboxExposure);
+        daySkyboxAtmosphereThickness = Mathf.Max(0f, daySkyboxAtmosphereThickness);
+        nightSkyboxAtmosphereThickness = Mathf.Max(0f, nightSkyboxAtmosphereThickness);
+        transitionHours = Mathf.Clamp(transitionHours, 0.1f, 6f);
+        petDaySteadyStartHour = Mathf.Clamp(petDaySteadyStartHour, petMorningStartHour, 24f);
+        petEveningStartHour = Mathf.Clamp(petEveningStartHour, petDaySteadyStartHour, 24f);
+        petNightStartHour = Mathf.Clamp(petNightStartHour, petEveningStartHour, 24f);
+        petWakeTransitionHours = Mathf.Clamp(petWakeTransitionHours, 0.1f, 6f);
+        petEveningTransitionHours = Mathf.Clamp(petEveningTransitionHours, 0.1f, 6f);
+        petInteractionWakeMinutes = Mathf.Max(1f, petInteractionWakeMinutes);
         playModeShadowDistance = Mathf.Max(1f, playModeShadowDistance);
     }
 #endif
@@ -163,10 +251,29 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [ContextMenu("Apply Graphics Now")]
     public void ApplyGraphics()
     {
+        ApplyGraphics(EvaluateTimeOfDayState());
+    }
+
+    public PawPalTimeOfDayState EvaluateTimeOfDayState()
+    {
+        return PawPalTimeOfDayEvaluator.Evaluate(
+            useDeviceLocalTime,
+            usePreviewHour,
+            previewHour,
+            sunriseHour,
+            sunsetHour,
+            transitionHours);
+    }
+
+    private void ApplyGraphics(PawPalTimeOfDayState timeOfDayState)
+    {
         if (!gameObject.scene.IsValid() || !gameObject.scene.isLoaded)
         {
             return;
         }
+
+        currentTimeOfDayState = timeOfDayState;
+        lastAppliedMinuteStamp = PawPalTimeOfDayEvaluator.ToMinuteStamp(timeOfDayState);
 
         Bounds roomBounds = CalculateSceneBounds();
 
@@ -197,6 +304,13 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             ConfigureRoomReflectionProbe(roomBounds);
         }
 
+        if (configureWindowBackdrop)
+        {
+            EnsureWindowBackdrop();
+        }
+
+        ConfigurePetCircadianBehavior();
+
         if (enablePetShadows || enableRoomReceiveShadows)
         {
             ConfigureRendererShadows();
@@ -210,12 +324,13 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void ConfigureRenderSettings()
     {
+        float daylight01 = currentTimeOfDayState.Daylight01;
         RenderSettings.ambientMode = AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = ambientSky;
-        RenderSettings.ambientEquatorColor = ambientEquator;
-        RenderSettings.ambientGroundColor = ambientGround;
-        RenderSettings.ambientIntensity = ambientIntensity;
-        RenderSettings.reflectionIntensity = reflectionIntensity;
+        RenderSettings.ambientSkyColor = Color.Lerp(nightAmbientSky, dayAmbientSky, daylight01);
+        RenderSettings.ambientEquatorColor = Color.Lerp(nightAmbientEquator, dayAmbientEquator, daylight01);
+        RenderSettings.ambientGroundColor = Color.Lerp(nightAmbientGround, dayAmbientGround, daylight01);
+        RenderSettings.ambientIntensity = Mathf.Lerp(nightAmbientIntensity, dayAmbientIntensity, daylight01);
+        RenderSettings.reflectionIntensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity, daylight01);
         RenderSettings.reflectionBounces = 1;
 
         if (configureSkybox)
@@ -226,23 +341,24 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void ConfigureSkybox()
     {
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
         Material skybox = ResolveRuntimeSkyboxMaterial();
         if (skybox == null)
         {
             return;
         }
 
-        SetMaterialColor(skybox, "_SkyTint", skyboxTint);
-        SetMaterialColor(skybox, "_Tint", skyboxTint);
-        SetMaterialColor(skybox, "_Color", skyboxTint);
-        SetMaterialColor(skybox, "_GroundColor", skyboxGroundColor);
-        SetMaterialFloat(skybox, "_Exposure", skyboxExposure);
-        SetMaterialFloat(skybox, "_AtmosphereThickness", skyboxAtmosphereThickness);
+        float daylight01 = currentTimeOfDayState.Daylight01;
+        Color skyTint = Color.Lerp(nightSkyboxTint, daySkyboxTint, daylight01);
+        Color skyGroundColor = Color.Lerp(nightSkyboxGroundColor, daySkyboxGroundColor, daylight01);
+        float skyExposure = Mathf.Lerp(nightSkyboxExposure, daySkyboxExposure, daylight01);
+        float skyAtmosphereThickness = Mathf.Lerp(nightSkyboxAtmosphereThickness, daySkyboxAtmosphereThickness, daylight01);
+
+        SetMaterialColor(skybox, "_SkyTint", skyTint);
+        SetMaterialColor(skybox, "_Tint", skyTint);
+        SetMaterialColor(skybox, "_Color", skyTint);
+        SetMaterialColor(skybox, "_GroundColor", skyGroundColor);
+        SetMaterialFloat(skybox, "_Exposure", skyExposure);
+        SetMaterialFloat(skybox, "_AtmosphereThickness", skyAtmosphereThickness);
 
         RenderSettings.skybox = skybox;
         DynamicGI.UpdateEnvironment();
@@ -300,18 +416,22 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             return;
         }
 
+        float daylight01 = currentTimeOfDayState.Daylight01;
         sun = resolvedSun;
         RenderSettings.sun = resolvedSun;
 
         resolvedSun.type = LightType.Directional;
-        resolvedSun.transform.rotation = Quaternion.Euler(sunEulerAngles);
-        resolvedSun.intensity = sunIntensity;
-        resolvedSun.color = sunColor;
+        resolvedSun.transform.rotation = Quaternion.Slerp(
+            Quaternion.Euler(nightSunEulerAngles),
+            Quaternion.Euler(daySunEulerAngles),
+            daylight01);
+        resolvedSun.intensity = Mathf.Lerp(nightSunIntensity, daySunIntensity, daylight01);
+        resolvedSun.color = Color.Lerp(nightSunColor, daySunColor, daylight01);
         resolvedSun.useColorTemperature = true;
-        resolvedSun.colorTemperature = sunColorTemperature;
+        resolvedSun.colorTemperature = Mathf.Lerp(nightSunColorTemperature, daySunColorTemperature, daylight01);
         resolvedSun.lightmapBakeType = LightmapBakeType.Realtime;
         resolvedSun.shadows = LightShadows.Soft;
-        resolvedSun.shadowStrength = sunShadowStrength;
+        resolvedSun.shadowStrength = Mathf.Lerp(nightSunShadowStrength, daySunShadowStrength, daylight01);
         resolvedSun.shadowBias = sunShadowBias;
         resolvedSun.shadowNormalBias = sunShadowNormalBias;
         resolvedSun.shadowNearPlane = 0.1f;
@@ -362,6 +482,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void ConfigureFillLights(Bounds roomBounds)
     {
+        float daylight01 = currentTimeOfDayState.Daylight01;
         Light windowLight = ResolveOrCreateLight(ref windowFillLight, WindowFillLightName, LightType.Spot);
         Vector3 windowPosition = new Vector3(
             roomBounds.max.x - Mathf.Max(0.35f, roomBounds.size.x * 0.08f),
@@ -371,26 +492,28 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         windowLight.transform.position = windowPosition;
         AimAt(windowLight.transform, roomBounds.center + new Vector3(-roomBounds.extents.x * 0.25f, 0.25f, -roomBounds.extents.z * 0.15f));
         windowLight.type = LightType.Spot;
-        windowLight.intensity = windowFillIntensity;
+        windowLight.intensity = Mathf.Lerp(nightWindowFillIntensity, dayWindowFillIntensity, daylight01);
         windowLight.range = Mathf.Max(4f, roomBounds.extents.magnitude * 0.7f);
         windowLight.spotAngle = 82f;
         windowLight.innerSpotAngle = 48f;
-        windowLight.color = new Color(1f, 0.80f, 0.55f);
+        windowLight.color = Color.Lerp(nightWindowFillColor, dayWindowFillColor, daylight01);
         windowLight.shadows = LightShadows.None;
         windowLight.renderMode = LightRenderMode.Auto;
 
         Light sofaLight = ResolveOrCreateLight(ref sofaFillLight, SofaFillLightName, LightType.Point);
         sofaLight.transform.position = roomBounds.center + new Vector3(roomBounds.extents.x * 0.22f, Mathf.Max(1.25f, roomBounds.extents.y * 0.55f), roomBounds.extents.z * 0.2f);
         sofaLight.type = LightType.Point;
-        sofaLight.intensity = sofaFillIntensity;
+        sofaLight.intensity = Mathf.Lerp(nightSofaFillIntensity, daySofaFillIntensity, daylight01);
         sofaLight.range = Mathf.Max(2.5f, roomBounds.size.x * 0.35f);
-        sofaLight.color = new Color(1f, 0.74f, 0.50f);
+        sofaLight.color = Color.Lerp(nightSofaFillColor, daySofaFillColor, daylight01);
         sofaLight.shadows = LightShadows.None;
         sofaLight.renderMode = LightRenderMode.Auto;
     }
 
     private void ConfigureCameras()
     {
+        float daylight01 = currentTimeOfDayState.Daylight01;
+        Color backgroundColor = Color.Lerp(nightSkyboxTint, daySkyboxTint, daylight01);
         Camera[] cameras = FindSceneObjects<Camera>();
         for (int i = 0; i < cameras.Length; i++)
         {
@@ -403,7 +526,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             if (configureSkybox)
             {
                 camera.clearFlags = CameraClearFlags.Skybox;
-                camera.backgroundColor = skyboxTint;
+                camera.backgroundColor = backgroundColor;
             }
 
             camera.allowHDR = true;
@@ -476,7 +599,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         probe.refreshMode = ReflectionProbeRefreshMode.OnAwake;
         probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.IndividualFaces;
         probe.resolution = 128;
-        probe.intensity = reflectionIntensity;
+        probe.intensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity, currentTimeOfDayState.Daylight01);
         probe.boxProjection = true;
         probe.center = Vector3.zero;
         probe.size = new Vector3(
@@ -489,6 +612,120 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         {
             probe.RenderProbe();
         }
+    }
+
+    private void EnsureWindowBackdrop()
+    {
+        if (windowBackdropImagePlane == null)
+        {
+            Transform child = transform.Find(WindowBackdropObjectName);
+            if (child != null)
+            {
+                windowBackdropImagePlane = child.GetComponent<WindowBackdropImagePlane>();
+            }
+
+            if (windowBackdropImagePlane == null)
+            {
+                windowBackdropImagePlane = FindExistingWindowBackdropImagePlane();
+            }
+
+            if (windowBackdropImagePlane == null)
+            {
+                GameObject childObject = new GameObject(WindowBackdropObjectName);
+                childObject.transform.SetParent(transform, false);
+                windowBackdropImagePlane = childObject.AddComponent<WindowBackdropImagePlane>();
+            }
+        }
+
+        windowBackdropImagePlane.ConfigureTimeSettings(
+            useDeviceLocalTime,
+            usePreviewHour,
+            previewHour,
+            sunriseHour,
+            sunsetHour,
+            transitionHours);
+
+        if (ChildNeedsBackdropRebuild(windowBackdropImagePlane))
+        {
+            windowBackdropImagePlane.Rebuild();
+        }
+    }
+
+    private bool ChildNeedsBackdropRebuild(WindowBackdropImagePlane backdrop)
+    {
+        if (backdrop == null)
+        {
+            return false;
+        }
+
+        Transform backdropTransform = backdrop.transform;
+        return backdropTransform.Find("GeneratedWindowBackdropImage") == null;
+    }
+
+    private WindowBackdropImagePlane FindExistingWindowBackdropImagePlane()
+    {
+        WindowBackdropImagePlane[] backdrops = FindSceneObjects<WindowBackdropImagePlane>();
+        for (int i = 0; i < backdrops.Length; i++)
+        {
+            WindowBackdropImagePlane candidate = backdrops[i];
+            if (!IsSceneObject(candidate) || candidate == windowBackdropImagePlane)
+            {
+                continue;
+            }
+
+            return candidate;
+        }
+
+        return null;
+    }
+
+    private void ConfigurePetCircadianBehavior()
+    {
+        DogRoomAgent[] agents = FindSceneObjects<DogRoomAgent>();
+        if (agents == null || agents.Length == 0)
+        {
+            return;
+        }
+
+        PawPalPetCircadianState petState = PawPalTimeOfDayEvaluator.EvaluatePetCircadian(
+            currentTimeOfDayState.LocalHour,
+            petMorningStartHour,
+            petDaySteadyStartHour,
+            petEveningStartHour,
+            petNightStartHour,
+            petWakeTransitionHours,
+            petEveningTransitionHours);
+        DogCircadianProfile profile = BuildPetCircadianProfile(petState);
+
+        for (int i = 0; i < agents.Length; i++)
+        {
+            DogRoomAgent agent = agents[i];
+            if (!IsSceneObject(agent))
+            {
+                continue;
+            }
+
+            agent.ApplyCircadianProfile(profile);
+        }
+    }
+
+    private DogCircadianProfile BuildPetCircadianProfile(PawPalPetCircadianState petState)
+    {
+        float activity01 = Mathf.Clamp01(petState.Activity01);
+        float sleepiness01 = Mathf.Clamp01(petState.Sleepiness01);
+        DogCircadianProfile profile = DogCircadianProfile.Default;
+        profile.ForceSleep = petState.ForceSleep;
+        profile.RoamWaitMultiplier = Mathf.Lerp(1.7f, 0.72f, activity01);
+        profile.AmbientIdleChanceMultiplier = Mathf.Lerp(1.08f, 0.88f, activity01);
+        profile.BarkChanceMultiplier = petState.ForceSleep ? 0f : Mathf.Lerp(0.18f, 1.1f, activity01);
+        profile.ChillChanceMultiplier = Mathf.Lerp(0.65f, 1.95f, sleepiness01);
+        profile.SleepChanceMultiplier = petState.ForceSleep ? 0.25f : Mathf.Lerp(0.25f, 2.8f, sleepiness01);
+        profile.ToyInterestMultiplier = petState.ForceSleep ? 0f : Mathf.Lerp(0.12f, 1.35f, activity01);
+        profile.TrotChanceMultiplier = petState.ForceSleep ? 0f : Mathf.Lerp(0.45f, 1.45f, activity01);
+        profile.MinimumForcedSleepDuration = 45f;
+        profile.MaximumForcedSleepDuration = 90f;
+        profile.InteractionWakeOverrideSeconds = Mathf.Max(60f, petInteractionWakeMinutes * 60f);
+        return profile;
     }
 
     private void ConfigureRendererShadows()
