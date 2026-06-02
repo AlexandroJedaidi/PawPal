@@ -89,6 +89,15 @@ public static class PawPalAudioSettings
         return Mathf.RoundToInt(Mathf.Clamp01(volume) * 100f);
     }
 
+    public static void ConfigureRuntimeAudio()
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+        AudioSettings.Mobile.stopAudioOutputOnMute = false;
+#endif
+        AudioListener.pause = false;
+        AudioListener.volume = 1f;
+    }
+
     private static void EnsureLoaded()
     {
         if (loaded)

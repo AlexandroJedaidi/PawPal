@@ -5,6 +5,10 @@ using UnityEngine;
 public class SafeAreaFitter : MonoBehaviour
 {
     [SerializeField] private RectTransform target;
+    [SerializeField] private bool ignoreLeftInset;
+    [SerializeField] private bool ignoreRightInset;
+    [SerializeField] private bool ignoreTopInset;
+    [SerializeField] private bool ignoreBottomInset;
 
     private Rect lastSafeArea;
     private Vector2Int lastScreenSize;
@@ -12,6 +16,30 @@ public class SafeAreaFitter : MonoBehaviour
     public RectTransform Target
     {
         get { return target != null ? target : target = transform as RectTransform; }
+    }
+
+    public bool IgnoreLeftInset
+    {
+        get { return ignoreLeftInset; }
+        set { ignoreLeftInset = value; }
+    }
+
+    public bool IgnoreRightInset
+    {
+        get { return ignoreRightInset; }
+        set { ignoreRightInset = value; }
+    }
+
+    public bool IgnoreTopInset
+    {
+        get { return ignoreTopInset; }
+        set { ignoreTopInset = value; }
+    }
+
+    public bool IgnoreBottomInset
+    {
+        get { return ignoreBottomInset; }
+        set { ignoreBottomInset = value; }
     }
 
     private void OnEnable()
@@ -40,10 +68,33 @@ public class SafeAreaFitter : MonoBehaviour
 
         Vector2 anchorMin = safeArea.position;
         Vector2 anchorMax = safeArea.position + safeArea.size;
-        anchorMin.x /= Mathf.Max(Screen.width, 1);
-        anchorMin.y /= Mathf.Max(Screen.height, 1);
-        anchorMax.x /= Mathf.Max(Screen.width, 1);
-        anchorMax.y /= Mathf.Max(Screen.height, 1);
+        float screenWidth = Mathf.Max(Screen.width, 1);
+        float screenHeight = Mathf.Max(Screen.height, 1);
+
+        anchorMin.x /= screenWidth;
+        anchorMin.y /= screenHeight;
+        anchorMax.x /= screenWidth;
+        anchorMax.y /= screenHeight;
+
+        if (ignoreLeftInset)
+        {
+            anchorMin.x = 0f;
+        }
+
+        if (ignoreBottomInset)
+        {
+            anchorMin.y = 0f;
+        }
+
+        if (ignoreRightInset)
+        {
+            anchorMax.x = 1f;
+        }
+
+        if (ignoreTopInset)
+        {
+            anchorMax.y = 1f;
+        }
 
         Target.anchorMin = anchorMin;
         Target.anchorMax = anchorMax;

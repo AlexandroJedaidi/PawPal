@@ -2171,6 +2171,9 @@ public class DogRoomAgent : MonoBehaviour
     {
         float minDelay = Mathf.Max(0f, initialAmbientLieDownDelayRange.x);
         float maxDelay = Mathf.Max(minDelay, initialAmbientLieDownDelayRange.y);
+        minDelay = Mathf.Min(minDelay, 8f);
+        maxDelay = Mathf.Min(maxDelay, 20f);
+        maxDelay = Mathf.Max(minDelay, maxDelay);
         nextAllowedAmbientLieDownTime = Time.time + Random.Range(minDelay, maxDelay);
         nextAllowedAmbientSleepTime = Mathf.Max(nextAllowedAmbientSleepTime, nextAllowedAmbientLieDownTime);
     }
