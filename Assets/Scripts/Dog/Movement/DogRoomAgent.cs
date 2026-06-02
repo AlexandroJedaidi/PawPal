@@ -95,6 +95,7 @@ public class DogRoomAgent : MonoBehaviour
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
+    private const string ImportedLabradorPuppyAnimationAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx";
     private const string ImportedLabradorPuppyPettingAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_petting.fbx";
     private const float BigBallHitImpulseScale = 0.75f;
     private const float BigBallHitTorqueScale = 0.75f;
@@ -6172,7 +6173,9 @@ public class DogRoomAgent : MonoBehaviour
 
         if (key == "labrador")
         {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx";
+            return IsLabradorPuppyVariant()
+                ? ImportedLabradorPuppyAnimationAssetPath
+                : "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx";
         }
 
         if (key == "husky")

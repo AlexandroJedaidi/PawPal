@@ -20,11 +20,15 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
 
     [Header("Brush")]
     [SerializeField] private GameObject brushPrefab;
-    [SerializeField] private Vector3 brushSpawnOffset = new Vector3(0.34f, -0.16f, 0.15f);
-    [SerializeField] private Vector3 brushSpawnEuler = new Vector3(12f, 200f, 82f);
-    [SerializeField] private Vector3 brushDragOffset = new Vector3(0f, -0.06f, 0.02f);
+    [SerializeField] private Vector3 heldViewportPosition = new Vector3(0.66f, 0.42f, 0.68f);
+    [SerializeField] private Vector3 heldLocalEulerAngles = new Vector3(12f, 200f, 82f);
+    [SerializeField] private float heldVisualScaleMultiplier = 1.1f;
+    [SerializeField] private bool moveHeldBrushWithPointer = true;
+    [SerializeField] private float heldPointerMoveSensitivity = 1f;
+    [SerializeField] private Vector2 heldViewportMin = new Vector2(0.36f, 0.24f);
+    [SerializeField] private Vector2 heldViewportMax = new Vector2(0.84f, 0.74f);
+    [SerializeField] private float heldMoveFollowSharpness = 18f;
     [SerializeField] private float brushPickupRadiusPixels = 132f;
-    [SerializeField] private float brushPointerDepthOffset = 0.18f;
     [SerializeField] private float minimumBrushPixelsPerSecond = 42f;
 
     [Header("Scene References")]
@@ -39,15 +43,18 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     [SerializeField] private float starBurstInterval = 0.55f;
     [SerializeField] private float barkIntervalMin = 2.8f;
     [SerializeField] private float barkIntervalMax = 4.8f;
+    [SerializeField] private float dogApproachSampleRadius = 1.6f;
+    [SerializeField] private float dogApproachDistance = 0.82f;
+    [SerializeField] private float dogApproachSideOffset = 0.58f;
+    [SerializeField] private float dogApproachWideSideOffset = 0.92f;
 
     [Header("Placement")]
-    [SerializeField] private float spawnDistanceFromCamera = 0.92f;
+    [SerializeField] private float catSpawnDistanceFromCamera = 0.92f;
     [SerializeField] private float groundRayHeight = 3f;
     [SerializeField] private float groundRayDistance = 8f;
     [SerializeField] private float floorPadding = 0.03f;
     [SerializeField] private float safePointRadius = 1.25f;
     [SerializeField] private bool presentRightSideToCamera = true;
-    [SerializeField] private Vector3 cameraFocusOffset = new Vector3(0f, 0.35f, 0f);
 
     [Header("Grooming Zones")]
     [SerializeField] private Vector3 dogZoneCenter = new Vector3(0f, 0.46f, 0.02f);
@@ -66,6 +73,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private Coroutine vocalRoutine;
     private GameObject activeBrush;
     private AudioSource scratchAudioSource;
+    private Transform holdAnchor;
     private RectTransform rewardBurstRoot;
     private RectTransform[] rewardBurstSymbols;
     private Image[] rewardBurstImages;
@@ -75,7 +83,9 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private bool brushingActive;
     private float brushingElapsed;
     private float nextBurstAt;
+    private Vector2 pickupPointerPosition;
     private Vector2 lastPointerPosition;
+    private Vector3 currentHeldViewportPosition;
     private readonly Vector2[] rewardBurstBaseOffsets =
     {
         new Vector2(-SymbolBurstSpacing, 2f),
@@ -153,32 +163,26 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private IEnumerator GroomingRoutine(PawPalRoomPetHandle pet, Action onCompleted)
     {
         bool completed = false;
-        int cameraFocusId = 0;
-        DogCycleCamera resolvedDogCamera = ResolveDogCamera();
 
         try
         {
             pet.PauseForSocial(false);
             yield return pet.PutDownHeldToyForInteraction();
 
-            Vector3 presentationPoint = ResolvePresentationPoint(pet);
-            yield return pet.MoveNearPrecise(presentationPoint, moveTimeout, DogMovementPace.Walk, preciseArrivalDistance);
+            yield return MovePetIntoGroomingPresentation(pet);
+            if (pet.IsDog && pet.DogAgent != null && !pet.DogAgent.WasLastTravelSuccessful)
+            {
+                yield break;
+            }
+
             yield return RotatePetSideOn(pet);
 
             activeBrush = Instantiate(ResolveBrushPrefab());
             activeBrush.name = ResolveBrushPrefab().name;
-            PositionBrush(pet);
+            PrepareHeldBrush();
             EnsureScratchAudioSource();
 
-            if (pet.IsDog && resolvedDogCamera != null)
-            {
-                cameraFocusId = resolvedDogCamera.BeginPairFocus(
-                    pet.RootTransform,
-                    activeBrush.transform,
-                    DogCameraFocusPriority.NeedInteraction,
-                    cameraFocusOffset);
-            }
-            else
+            if (!pet.IsDog)
             {
                 FocusCatInteractionCamera(pet);
             }
@@ -190,7 +194,11 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             nextBurstAt = 0f;
             brushHeld = false;
             brushingActive = false;
+            pickupPointerPosition = Input.mousePosition;
             lastPointerPosition = Input.mousePosition;
+            currentHeldViewportPosition = heldViewportPosition;
+            UpdateHoldAnchor();
+            ApplyHeldBrushTransform();
 
             if (vocalRoutine != null)
             {
@@ -201,6 +209,8 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
 
             while (brushingElapsed < Mathf.Max(0.1f, targetBrushingSeconds))
             {
+                UpdateHoldAnchor();
+                ApplyHeldBrushTransform();
                 UpdateBrushInteraction(pet);
 
                 if (brushingActive)
@@ -227,11 +237,6 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         }
         finally
         {
-            if (resolvedDogCamera != null && cameraFocusId != 0)
-            {
-                resolvedDogCamera.EndFocus(cameraFocusId);
-            }
-
             if (vocalRoutine != null)
             {
                 StopCoroutine(vocalRoutine);
@@ -293,6 +298,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         if (Input.GetMouseButtonDown(0) && IsPointerNearBrush(camera, pointerPosition))
         {
             brushHeld = true;
+            pickupPointerPosition = pointerPosition;
             lastPointerPosition = pointerPosition;
         }
 
@@ -309,50 +315,11 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             return;
         }
 
-        Plane dragPlane = BuildBrushDragPlane(pet, camera);
-        Ray pointerRay = camera.ScreenPointToRay(pointerPosition);
-        float distance;
-        if (!dragPlane.Raycast(pointerRay, out distance))
-        {
-            brushingActive = false;
-            return;
-        }
-
-        Vector3 unclampedWorldPoint = pointerRay.GetPoint(distance) + ResolveCameraTangentOffset(camera);
-        Vector3 clampedWorldPoint = ClampBrushWorldPoint(pet, unclampedWorldPoint);
-        activeBrush.transform.position = clampedWorldPoint;
-
         float pointerSpeed = (pointerPosition - lastPointerPosition).magnitude / Mathf.Max(0.0001f, Time.unscaledDeltaTime);
         lastPointerPosition = pointerPosition;
 
-        Vector3 localPoint = pet.RootTransform.InverseTransformPoint(activeBrush.transform.position);
+        Vector3 localPoint = pet.RootTransform.InverseTransformPoint(GetBrushInteractionPoint());
         brushingActive = pointerSpeed >= Mathf.Max(1f, minimumBrushPixelsPerSecond) && IsWithinGroomingZone(pet, localPoint);
-    }
-
-    private Plane BuildBrushDragPlane(PawPalRoomPetHandle pet, Camera camera)
-    {
-        Vector3 planeNormal = camera.transform.forward;
-        Vector3 planePoint = pet.FocusTransform != null ? pet.FocusTransform.position : pet.RootTransform.position;
-        planePoint += planeNormal * brushPointerDepthOffset;
-        return new Plane(-planeNormal, planePoint);
-    }
-
-    private Vector3 ResolveCameraTangentOffset(Camera camera)
-    {
-        return (camera.transform.right * brushDragOffset.x)
-            + (camera.transform.up * brushDragOffset.y)
-            + (camera.transform.forward * brushDragOffset.z);
-    }
-
-    private Vector3 ClampBrushWorldPoint(PawPalRoomPetHandle pet, Vector3 worldPoint)
-    {
-        Vector3 localPoint = pet.RootTransform.InverseTransformPoint(worldPoint);
-        Vector3 dragExtents = pet.IsDog ? dogDragHalfExtents : catDragHalfExtents;
-        Vector3 zoneCenter = pet.IsDog ? dogZoneCenter : catZoneCenter;
-        localPoint.x = Mathf.Clamp(localPoint.x, zoneCenter.x - dragExtents.x, zoneCenter.x + dragExtents.x);
-        localPoint.y = Mathf.Clamp(localPoint.y, zoneCenter.y - dragExtents.y, zoneCenter.y + dragExtents.y);
-        localPoint.z = Mathf.Clamp(localPoint.z, zoneCenter.z - dragExtents.z, zoneCenter.z + dragExtents.z);
-        return pet.RootTransform.TransformPoint(localPoint);
     }
 
     private bool IsWithinGroomingZone(PawPalRoomPetHandle pet, Vector3 localPoint)
@@ -371,13 +338,39 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             return false;
         }
 
-        Vector3 screenPoint = camera.WorldToScreenPoint(activeBrush.transform.position);
+        Vector3 screenPoint = camera.WorldToScreenPoint(GetBrushInteractionPoint());
         if (screenPoint.z <= 0f)
         {
             return false;
         }
 
         return Vector2.Distance(pointerPosition, screenPoint) <= Mathf.Max(16f, brushPickupRadiusPixels);
+    }
+
+    private IEnumerator MovePetIntoGroomingPresentation(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid || pet.RootTransform == null)
+        {
+            yield break;
+        }
+
+        Camera camera = ResolveRoomCamera();
+        Vector3 presentationPoint;
+        if (pet.IsDog && pet.DogAgent != null && camera != null && TryResolveDogCameraApproachPoint(pet.DogAgent, camera, out presentationPoint))
+        {
+            yield return pet.MoveNearPlayerInteraction(presentationPoint, moveTimeout, DogMovementPace.Trot, preciseArrivalDistance);
+            if (pet.DogAgent.WasLastTravelSuccessful)
+            {
+                yield break;
+            }
+        }
+
+        presentationPoint = ResolvePresentationPoint(pet);
+        yield return pet.MoveNearPlayerInteraction(
+            presentationPoint,
+            moveTimeout,
+            pet.IsDog ? DogMovementPace.Trot : DogMovementPace.Walk,
+            preciseArrivalDistance);
     }
 
     private IEnumerator PlayPeriodicVocals(PawPalRoomPetHandle pet)
@@ -437,36 +430,36 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         pet.RootTransform.rotation = targetRotation;
     }
 
-    private void PositionBrush(PawPalRoomPetHandle pet)
+    private void PrepareHeldBrush()
     {
-        if (activeBrush == null || pet == null || !pet.IsValid)
+        if (activeBrush == null)
         {
             return;
         }
 
-        Camera camera = ResolveRoomCamera();
-        if (camera == null)
+        EnsureHoldAnchor();
+        Rigidbody body = activeBrush.GetComponent<Rigidbody>();
+        if (body != null)
         {
-            camera = Camera.main;
+            body.isKinematic = true;
+            body.useGravity = false;
         }
 
-        Transform focus = pet.FocusTransform != null ? pet.FocusTransform : pet.RootTransform;
-        Vector3 worldPosition = focus.position;
-        if (camera != null)
+        Collider[] colliders = activeBrush.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
         {
-            worldPosition += (camera.transform.right * brushSpawnOffset.x)
-                + (camera.transform.up * brushSpawnOffset.y)
-                + (camera.transform.forward * brushSpawnOffset.z);
-        }
-        else
-        {
-            worldPosition += brushSpawnOffset;
+            if (colliders[i] != null)
+            {
+                colliders[i].enabled = false;
+            }
         }
 
-        activeBrush.transform.position = ResolveFloorPosition(activeBrush, worldPosition);
-        activeBrush.transform.rotation = camera != null
-            ? camera.transform.rotation * Quaternion.Euler(brushSpawnEuler)
-            : Quaternion.Euler(brushSpawnEuler);
+        if (activeBrush.GetComponent<PawPalPlayerHeldToyMarker>() == null)
+        {
+            activeBrush.AddComponent<PawPalPlayerHeldToyMarker>();
+        }
+
+        activeBrush.transform.localScale *= Mathf.Max(0.01f, heldVisualScaleMultiplier);
     }
 
     private void EnsureScratchAudioSource()
@@ -544,7 +537,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             forward = pet.RootTransform.forward;
         }
 
-        return camera.transform.position + forward.normalized * Mathf.Max(0.2f, spawnDistanceFromCamera);
+        return camera.transform.position + forward.normalized * Mathf.Max(0.2f, catSpawnDistanceFromCamera);
     }
 
     private Vector3 ResolveFloorPosition(GameObject target, Vector3 requestedPosition)
@@ -669,6 +662,225 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         }
 
         return dogCamera;
+    }
+
+    private void EnsureHoldAnchor()
+    {
+        Camera camera = ResolveRoomCamera();
+        if (camera == null)
+        {
+            return;
+        }
+
+        if (holdAnchor == null)
+        {
+            GameObject holdObject = new GameObject("PawFriendsPlayerBrushHoldAnchor");
+            holdObject.hideFlags = HideFlags.HideAndDontSave;
+            holdAnchor = holdObject.transform;
+            holdAnchor.SetParent(camera.transform, false);
+        }
+    }
+
+    private void UpdateHoldAnchor()
+    {
+        Camera camera = ResolveRoomCamera();
+        if (camera == null)
+        {
+            return;
+        }
+
+        EnsureHoldAnchor();
+        if (holdAnchor == null)
+        {
+            return;
+        }
+
+        Vector3 targetViewportPoint = GetTargetHeldViewportPosition();
+        if (activeBrush != null && heldMoveFollowSharpness > 0f)
+        {
+            float t = 1f - Mathf.Exp(-heldMoveFollowSharpness * Time.deltaTime);
+            currentHeldViewportPosition = Vector3.Lerp(currentHeldViewportPosition, targetViewportPoint, t);
+        }
+        else
+        {
+            currentHeldViewportPosition = targetViewportPoint;
+        }
+
+        Vector3 viewportPoint = currentHeldViewportPosition;
+        viewportPoint.z = Mathf.Max(0.05f, viewportPoint.z);
+        holdAnchor.position = camera.ViewportToWorldPoint(viewportPoint);
+        holdAnchor.rotation = camera.transform.rotation * Quaternion.Euler(heldLocalEulerAngles);
+    }
+
+    private Vector3 GetTargetHeldViewportPosition()
+    {
+        if (!moveHeldBrushWithPointer || activeBrush == null || !brushHeld)
+        {
+            return heldViewportPosition;
+        }
+
+        Vector2 screenSize = new Vector2(Mathf.Max(1, Screen.width), Mathf.Max(1, Screen.height));
+        Vector2 pointerDelta = (Vector2)Input.mousePosition - pickupPointerPosition;
+        Vector2 viewportDelta = new Vector2(pointerDelta.x / screenSize.x, pointerDelta.y / screenSize.y)
+            * Mathf.Max(0f, heldPointerMoveSensitivity);
+
+        Vector2 viewport = new Vector2(heldViewportPosition.x, heldViewportPosition.y) + viewportDelta;
+        viewport.x = Mathf.Clamp(viewport.x, Mathf.Min(heldViewportMin.x, heldViewportMax.x), Mathf.Max(heldViewportMin.x, heldViewportMax.x));
+        viewport.y = Mathf.Clamp(viewport.y, Mathf.Min(heldViewportMin.y, heldViewportMax.y), Mathf.Max(heldViewportMin.y, heldViewportMax.y));
+        return new Vector3(viewport.x, viewport.y, heldViewportPosition.z);
+    }
+
+    private void ApplyHeldBrushTransform()
+    {
+        if (activeBrush == null || holdAnchor == null)
+        {
+            return;
+        }
+
+        activeBrush.transform.SetPositionAndRotation(holdAnchor.position, holdAnchor.rotation);
+        AlignHeldBrushVisualToAnchor();
+    }
+
+    private void AlignHeldBrushVisualToAnchor()
+    {
+        if (activeBrush == null || holdAnchor == null)
+        {
+            return;
+        }
+
+        Bounds bounds;
+        if (!TryGetVisualBounds(activeBrush, out bounds))
+        {
+            return;
+        }
+
+        activeBrush.transform.position += holdAnchor.position - bounds.center;
+    }
+
+    private Vector3 GetBrushInteractionPoint()
+    {
+        if (activeBrush == null)
+        {
+            return Vector3.zero;
+        }
+
+        Bounds bounds;
+        if (TryGetVisualBounds(activeBrush, out bounds))
+        {
+            return bounds.center;
+        }
+
+        return activeBrush.transform.position;
+    }
+
+    private static bool TryGetVisualBounds(GameObject target, out Bounds bounds)
+    {
+        bounds = default;
+        bool hasBounds = false;
+        if (target == null)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            bounds.Encapsulate(renderer.bounds);
+        }
+
+        return hasBounds;
+    }
+
+    private bool TryResolveDogCameraApproachPoint(DogRoomAgent dog, Camera camera, out Vector3 approachPoint)
+    {
+        approachPoint = dog != null ? dog.transform.position : Vector3.zero;
+        if (dog == null || camera == null)
+        {
+            return false;
+        }
+
+        Vector3 forward = camera.transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = dog.transform.position - camera.transform.position;
+            forward.y = 0f;
+        }
+
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = -dog.transform.forward;
+        }
+
+        Vector3 right = camera.transform.right;
+        right.y = 0f;
+        if (right.sqrMagnitude < 0.001f)
+        {
+            right = Vector3.Cross(Vector3.up, forward).normalized;
+        }
+        else
+        {
+            right.Normalize();
+        }
+
+        float bestScore = float.MaxValue;
+        bool foundCandidate = false;
+        float[] sideOffsets =
+        {
+            0f,
+            -dogApproachSideOffset,
+            dogApproachSideOffset,
+            -dogApproachWideSideOffset,
+            dogApproachWideSideOffset
+        };
+
+        for (int i = 0; i < sideOffsets.Length; i++)
+        {
+            Vector3 candidate = camera.transform.position
+                + forward.normalized * Mathf.Max(0.2f, dogApproachDistance)
+                + right * sideOffsets[i];
+            candidate.y = dog.transform.position.y;
+
+            Vector3 safePoint;
+            if (!dog.TryGetRoomSafePoint(candidate, dogApproachSampleRadius, out safePoint))
+            {
+                continue;
+            }
+
+            if (dog.IsToyBlockingPathTo(safePoint, 0.14f))
+            {
+                continue;
+            }
+
+            float pathDistance;
+            float score = dog.TryEstimateRoomPathDistance(safePoint, out pathDistance)
+                ? pathDistance + Mathf.Abs(sideOffsets[i]) * 0.08f
+                : Vector3.Distance(dog.transform.position, safePoint);
+
+            if (score >= bestScore)
+            {
+                continue;
+            }
+
+            bestScore = score;
+            approachPoint = safePoint;
+            foundCandidate = true;
+        }
+
+        return foundCandidate;
     }
 
     private void ShowNeedCompletionBurst(PawPalRoomPetHandle pet)
@@ -926,6 +1138,12 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         {
             Destroy(activeBrush);
             activeBrush = null;
+        }
+
+        if (holdAnchor != null)
+        {
+            Destroy(holdAnchor.gameObject);
+            holdAnchor = null;
         }
 
         HideInputBlocker();

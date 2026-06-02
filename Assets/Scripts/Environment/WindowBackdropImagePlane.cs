@@ -40,6 +40,10 @@ public class WindowBackdropImagePlane : MonoBehaviour
     [SerializeField] private Vector2 autoSizePadding = new Vector2(1.25f, 0.75f);
     [SerializeField] private float distance = 10f;
     [SerializeField] private Vector3 localOffset = new Vector3(0f, 0.5f, 0f);
+    [SerializeField] private bool useManualCardTransform;
+    [SerializeField] private Vector3 manualCardLocalPosition = new Vector3(-0.07f, -0.63f, -1.84f);
+    [SerializeField] private Vector3 manualCardLocalEulerAngles = Vector3.zero;
+    [SerializeField] private Vector3 manualCardLocalScale = new Vector3(14f, 7.583333f, 1.166667f);
     [SerializeField] private Color tint = Color.white;
     [SerializeField]
     private string[] windowNameKeywords =
@@ -96,6 +100,9 @@ public class WindowBackdropImagePlane : MonoBehaviour
         autoSizePadding.y = Mathf.Max(0f, autoSizePadding.y);
         distance = Mathf.Max(0.01f, distance);
         transitionHours = Mathf.Clamp(transitionHours, 0.1f, 6f);
+        manualCardLocalScale.x = Mathf.Max(0.01f, manualCardLocalScale.x);
+        manualCardLocalScale.y = Mathf.Max(0.01f, manualCardLocalScale.y);
+        manualCardLocalScale.z = Mathf.Max(0.01f, manualCardLocalScale.z);
 
         if (!Application.isPlaying && rebuildInEditMode)
         {
@@ -109,11 +116,6 @@ public class WindowBackdropImagePlane : MonoBehaviour
 #if UNITY_EDITOR
         CancelQueuedEditorRebuild();
 #endif
-        if (!Application.isPlaying)
-        {
-            ClearGenerated();
-        }
-
         ReleaseMaterials();
     }
 
@@ -144,7 +146,6 @@ public class WindowBackdropImagePlane : MonoBehaviour
     [ContextMenu("Rebuild Window Image Plane")]
     public void Rebuild()
     {
-        ClearGenerated();
         ReleaseMaterials();
         ClearLegacyGenerated();
 
@@ -160,22 +161,37 @@ public class WindowBackdropImagePlane : MonoBehaviour
         Vector2 resolvedSize;
         ResolvePlacement(out position, out rotation, out resolvedSize);
 
-        Transform generatedRoot = new GameObject(GeneratedRootName).transform;
-        generatedRoot.SetParent(transform, false);
+        Transform generatedRoot = EnsureGeneratedRoot();
         generatedRoot.position = position;
         generatedRoot.rotation = rotation;
         generatedRoot.localScale = Vector3.one;
 
+        dayRenderer = null;
+        nightRenderer = null;
+
         if (resolvedDayTexture != null)
         {
             dayMaterial = CreateMaterial(resolvedDayTexture);
-            dayRenderer = CreateCard(DayCardName, generatedRoot, resolvedSize, 0f, dayMaterial);
+            dayRenderer = CreateOrUpdateCard(DayCardName, generatedRoot, resolvedSize, 0f, dayMaterial);
+        }
+        else
+        {
+            DestroyCardIfPresent(generatedRoot, DayCardName);
         }
 
         if (resolvedNightTexture != null)
         {
             nightMaterial = CreateMaterial(resolvedNightTexture);
-            nightRenderer = CreateCard(NightCardName, generatedRoot, resolvedSize, 0.002f, nightMaterial);
+            nightRenderer = CreateOrUpdateCard(NightCardName, generatedRoot, resolvedSize, 0.002f, nightMaterial);
+        }
+        else
+        {
+            DestroyCardIfPresent(generatedRoot, NightCardName);
+        }
+
+        if (resolvedDayTexture == null && resolvedNightTexture == null)
+        {
+            DestroyTransformIfEmpty(generatedRoot);
         }
 
         ApplyBackdropState();
@@ -184,7 +200,11 @@ public class WindowBackdropImagePlane : MonoBehaviour
     [ContextMenu("Clear Window Image Plane")]
     public void ClearGenerated()
     {
-        DestroyGeneratedChildrenByName(GeneratedRootName);
+        Transform generatedRoot = FindDirectChildByName(GeneratedRootName);
+        if (generatedRoot != null)
+        {
+            DestroyTransform(generatedRoot);
+        }
 
         dayRenderer = null;
         nightRenderer = null;
@@ -452,21 +472,137 @@ public class WindowBackdropImagePlane : MonoBehaviour
     {
         GameObject card = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
         card.transform.SetParent(parent, false);
-        card.transform.localPosition = new Vector3(0f, 0f, localDepthOffset);
-        card.transform.localRotation = Quaternion.identity;
-        card.transform.localScale = new Vector3(cardSize.x, cardSize.y, 1f);
+        ApplyCardTransform(card.transform, cardSize, localDepthOffset);
 
         MeshFilter meshFilter = card.GetComponent<MeshFilter>();
         meshFilter.sharedMesh = GetQuadMesh();
 
         MeshRenderer meshRenderer = card.GetComponent<MeshRenderer>();
+        ApplyRendererSettings(meshRenderer, material);
+        return meshRenderer;
+    }
+
+    private Renderer CreateOrUpdateCard(string name, Transform parent, Vector2 cardSize, float localDepthOffset, Material material)
+    {
+        Transform existing = parent.Find(name);
+        if (existing == null)
+        {
+            return CreateCard(name, parent, cardSize, localDepthOffset, material);
+        }
+
+        existing.SetParent(parent, false);
+        ApplyCardTransform(existing, cardSize, localDepthOffset);
+
+        MeshFilter meshFilter = existing.GetComponent<MeshFilter>();
+        if (meshFilter == null)
+        {
+            meshFilter = existing.gameObject.AddComponent<MeshFilter>();
+        }
+
+        meshFilter.sharedMesh = GetQuadMesh();
+
+        MeshRenderer meshRenderer = existing.GetComponent<MeshRenderer>();
+        if (meshRenderer == null)
+        {
+            meshRenderer = existing.gameObject.AddComponent<MeshRenderer>();
+        }
+
+        ApplyRendererSettings(meshRenderer, material);
+        return meshRenderer;
+    }
+
+    private void ApplyCardTransform(Transform cardTransform, Vector2 cardSize, float localDepthOffset)
+    {
+        if (useManualCardTransform)
+        {
+            Vector3 manualPosition = manualCardLocalPosition;
+            manualPosition.z += localDepthOffset;
+            cardTransform.localPosition = manualPosition;
+            cardTransform.localRotation = Quaternion.Euler(manualCardLocalEulerAngles);
+            cardTransform.localScale = manualCardLocalScale;
+        }
+        else
+        {
+            cardTransform.localPosition = new Vector3(0f, 0f, localDepthOffset);
+            cardTransform.localRotation = Quaternion.identity;
+            cardTransform.localScale = new Vector3(cardSize.x, cardSize.y, 1f);
+        }
+    }
+
+    private static void ApplyRendererSettings(MeshRenderer meshRenderer, Material material)
+    {
         meshRenderer.sharedMaterial = material;
         meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
         meshRenderer.receiveShadows = false;
         meshRenderer.lightProbeUsage = LightProbeUsage.Off;
         meshRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
         meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
-        return meshRenderer;
+    }
+
+    private Transform EnsureGeneratedRoot()
+    {
+        Transform existing = FindDirectChildByName(GeneratedRootName);
+        if (existing != null)
+        {
+            return existing;
+        }
+
+        GameObject rootObject = new GameObject(GeneratedRootName);
+        rootObject.transform.SetParent(transform, false);
+        return rootObject.transform;
+    }
+
+    private Transform FindDirectChildByName(string childName)
+    {
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            Transform child = transform.GetChild(i);
+            if (child != null && child.name == childName)
+            {
+                return child;
+            }
+        }
+
+        return null;
+    }
+
+    private void DestroyCardIfPresent(Transform root, string cardName)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        Transform card = root.Find(cardName);
+        if (card != null)
+        {
+            DestroyTransform(card);
+        }
+    }
+
+    private void DestroyTransformIfEmpty(Transform target)
+    {
+        if (target != null && target.childCount == 0)
+        {
+            DestroyTransform(target);
+        }
+    }
+
+    private void DestroyTransform(Transform target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(target.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(target.gameObject);
+        }
     }
 
     private Texture2D ResolveBackdropTexture(Texture2D assignedTexture, string resourcePath)

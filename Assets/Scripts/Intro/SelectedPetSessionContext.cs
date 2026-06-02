@@ -192,7 +192,14 @@ public static class PawPalPetMovementProfiles
         "germanshepherd"
     };
 
-    private static readonly PawPalPetMovementProfile SmallProfile = BuildProfile(PawPalPetSizeClass.Small, 0.50f, 0.78f, 1.05f);
+    private static readonly PawPalPetMovementProfile SmallProfile = BuildProfile(
+        PawPalPetSizeClass.Small,
+        0.24f,
+        0.78f,
+        1.05f,
+        0.42f,
+        ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, 0.78f, MediumTrotSpeed),
+        ScaleAnimatorBaseline(MediumRunAnimatorBaseline, 1.05f, MediumRunSpeed));
     private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(PawPalPetSizeClass.Medium, MediumWalkSpeed, MediumTrotSpeed, MediumRunSpeed);
     private static readonly PawPalPetMovementProfile LargeProfile = BuildProfile(
         PawPalPetSizeClass.Large,
@@ -254,6 +261,20 @@ public static class PawPalPetMovementProfiles
                 continue;
             }
 
+            if (candidate.Contains("puppy") || candidate.Contains("kitten"))
+            {
+                return PawPalPetSizeClass.Small;
+            }
+        }
+
+        for (int i = 0; i < exactCandidates.Length; i++)
+        {
+            string candidate = exactCandidates[i];
+            if (string.IsNullOrEmpty(candidate))
+            {
+                continue;
+            }
+
             if (SmallBreedKeys.Contains(candidate))
             {
                 return PawPalPetSizeClass.Small;
@@ -267,20 +288,6 @@ public static class PawPalPetMovementProfiles
             if (LargeBreedKeys.Contains(candidate))
             {
                 return PawPalPetSizeClass.Large;
-            }
-        }
-
-        for (int i = 0; i < exactCandidates.Length; i++)
-        {
-            string candidate = exactCandidates[i];
-            if (string.IsNullOrEmpty(candidate))
-            {
-                continue;
-            }
-
-            if (candidate.Contains("puppy") || candidate.Contains("kitten"))
-            {
-                return PawPalPetSizeClass.Small;
             }
         }
 

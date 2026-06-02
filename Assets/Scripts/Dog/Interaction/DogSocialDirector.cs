@@ -80,6 +80,7 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private float runtimeNavMeshMinimumObstacleHeight = 0.2f;
     [SerializeField] private float runtimeNavMeshFoliagePadding = 0.18f;
     [SerializeField] private float runtimeNavMeshFoliageMinimumRadius = 0.22f;
+    [SerializeField] private bool showRuntimeNavMeshPreviewInSceneView = true;
 
     [Header("Camera Focus")]
     [SerializeField] private bool focusCameraDuringSocialInteractions = true;
@@ -123,6 +124,10 @@ public class DogSocialDirector : MonoBehaviour
     private readonly Dictionary<string, float> pairCooldownUntilByKey = new Dictionary<string, float>();
     private DogRoomAgent lastInteractingDogA;
     private DogRoomAgent lastInteractingDogB;
+#if UNITY_EDITOR
+    private Mesh editorPreviewNavMeshMesh;
+    private double nextEditorPreviewRefreshTime;
+#endif
 
     private struct SocialPairCandidate
     {
@@ -194,6 +199,27 @@ public class DogSocialDirector : MonoBehaviour
 
         GameObject directorObject = new GameObject("DogSocialDirector");
         runtimeDirector = directorObject.AddComponent<DogSocialDirector>();
+    }
+
+    private void OnDrawGizmos()
+    {
+#if UNITY_EDITOR
+        if (Application.isPlaying ||
+            !showRuntimeNavMeshPreviewInSceneView ||
+            gameObject.scene.name != DavidTestSceneName)
+        {
+            return;
+        }
+
+        Mesh previewMesh = GetEditorPreviewNavMeshMesh();
+        if (previewMesh == null)
+        {
+            return;
+        }
+
+        Gizmos.color = new Color(0.19f, 0.72f, 0.95f, 0.5f);
+        Gizmos.DrawMesh(previewMesh);
+#endif
     }
 
     private void Awake()
@@ -1381,56 +1407,13 @@ public class DogSocialDirector : MonoBehaviour
 
     private void BuildProceduralRuntimeNavMesh()
     {
-        NavMeshBuildSettings buildSettings = NavMesh.GetSettingsByID(0);
-        buildSettings.agentRadius = 0.26f;
-        buildSettings.agentHeight = 0.6f;
-        buildSettings.agentClimb = 0.2f;
-        buildSettings.agentSlope = 45f;
-        buildSettings.minRegionArea = 0.1f;
-
-        List<NavMeshBuildSource> sources = new List<NavMeshBuildSource>();
-        Vector3 navMeshCenter = runtimeNavMeshCenter;
-        Vector3 navMeshSize = runtimeNavMeshSize;
-        Bounds dogRoomBounds;
-        if (dogA != null && dogA.TryGetRoomBounds(out dogRoomBounds))
-        {
-            navMeshCenter = dogRoomBounds.center;
-            navMeshSize = new Vector3(dogRoomBounds.size.x, runtimeNavMeshSize.y, dogRoomBounds.size.z);
-        }
-
-        NavMeshBuildSource floorSource = new NavMeshBuildSource();
-        floorSource.shape = NavMeshBuildSourceShape.Box;
-        floorSource.transform = Matrix4x4.TRS(navMeshCenter, Quaternion.identity, Vector3.one);
-        floorSource.size = navMeshSize;
-        floorSource.area = 0;
-        sources.Add(floorSource);
-
-        float runtimeFloorY = dogA != null && dogA.TryGetRoomBounds(out dogRoomBounds)
-            ? dogRoomBounds.min.y
-            : navMeshCenter.y;
-        if (carveGroundedObstacleFootprintsInRuntimeNavMesh)
-        {
-            AddGroundedObstacleFootprintSources(sources, runtimeFloorY, new Bounds(navMeshCenter, navMeshSize));
-        }
-
-        Bounds bounds = new Bounds(
-            navMeshCenter + Vector3.up,
-            new Vector3(navMeshSize.x + 1f, 3f, navMeshSize.z + 1f));
-
-        runtimeNavMeshData = NavMeshBuilder.BuildNavMeshData(
-            buildSettings,
-            sources,
-            bounds,
-            Vector3.zero,
-            Quaternion.identity);
+        runtimeNavMeshData = BuildRuntimeMatchedNavMeshData("Runtime Dog Procedural NavMesh");
 
         if (runtimeNavMeshData == null)
         {
             Debug.LogWarning("DogSocialDirector could not build its procedural runtime NavMesh fallback.");
             return;
         }
-
-        runtimeNavMeshData.name = "Runtime Dog Procedural NavMesh";
 
         if (ShouldPreferRuntimeHomeNavMesh())
         {
@@ -1446,6 +1429,125 @@ public class DogSocialDirector : MonoBehaviour
 
         runtimeNavMeshInstance = NavMesh.AddNavMeshData(runtimeNavMeshData);
     }
+
+    private Bounds GetRuntimeNavMeshPreviewBounds()
+    {
+        Vector3 navMeshCenter = runtimeNavMeshCenter;
+        Vector3 navMeshSize = runtimeNavMeshSize;
+        Bounds dogRoomBounds;
+        if (dogA != null && dogA.TryGetRoomBounds(out dogRoomBounds))
+        {
+            navMeshCenter = dogRoomBounds.center;
+            navMeshSize = new Vector3(dogRoomBounds.size.x, runtimeNavMeshSize.y, dogRoomBounds.size.z);
+        }
+
+        return new Bounds(navMeshCenter, navMeshSize);
+    }
+
+    private NavMeshData BuildRuntimeMatchedNavMeshData(string navMeshName)
+    {
+        NavMeshBuildSettings buildSettings = NavMesh.GetSettingsByID(0);
+        buildSettings.agentRadius = 0.26f;
+        buildSettings.agentHeight = 0.6f;
+        buildSettings.agentClimb = 0.2f;
+        buildSettings.agentSlope = 45f;
+        buildSettings.minRegionArea = 0.1f;
+
+        Bounds previewBounds = GetRuntimeNavMeshPreviewBounds();
+        List<NavMeshBuildSource> sources = new List<NavMeshBuildSource>();
+        NavMeshBuildSource floorSource = new NavMeshBuildSource();
+        floorSource.shape = NavMeshBuildSourceShape.Box;
+        floorSource.transform = Matrix4x4.TRS(previewBounds.center, Quaternion.identity, Vector3.one);
+        floorSource.size = previewBounds.size;
+        floorSource.area = 0;
+        sources.Add(floorSource);
+
+        float floorY = previewBounds.min.y;
+        if (carveGroundedObstacleFootprintsInRuntimeNavMesh)
+        {
+            AddGroundedObstacleFootprintSources(sources, floorY, previewBounds);
+        }
+
+        Bounds buildBounds = new Bounds(
+            previewBounds.center + Vector3.up,
+            new Vector3(previewBounds.size.x + 1f, 3f, previewBounds.size.z + 1f));
+
+        NavMeshData navMeshData = NavMeshBuilder.BuildNavMeshData(
+            buildSettings,
+            sources,
+            buildBounds,
+            Vector3.zero,
+            Quaternion.identity);
+
+        if (navMeshData != null)
+        {
+            navMeshData.name = navMeshName;
+        }
+
+        return navMeshData;
+    }
+
+#if UNITY_EDITOR
+    private Mesh GetEditorPreviewNavMeshMesh()
+    {
+        double now = EditorApplication.timeSinceStartup;
+        if (editorPreviewNavMeshMesh != null && now < nextEditorPreviewRefreshTime)
+        {
+            return editorPreviewNavMeshMesh;
+        }
+
+        nextEditorPreviewRefreshTime = now + 0.75d;
+
+        NavMeshSurface surface = GetComponent<NavMeshSurface>();
+        bool restoreSurfaceData = surface != null && surface.navMeshData != null && surface.isActiveAndEnabled;
+        if (restoreSurfaceData)
+        {
+            surface.RemoveData();
+        }
+
+        NavMeshData previewData = BuildRuntimeMatchedNavMeshData("Editor Runtime NavMesh Preview");
+        if (previewData == null)
+        {
+            if (restoreSurfaceData)
+            {
+                surface.AddData();
+            }
+
+            return editorPreviewNavMeshMesh;
+        }
+
+        NavMeshDataInstance previewInstance = NavMesh.AddNavMeshData(previewData);
+        NavMeshTriangulation triangulation = NavMesh.CalculateTriangulation();
+        previewInstance.Remove();
+
+        if (restoreSurfaceData)
+        {
+            surface.AddData();
+        }
+
+        if (triangulation.vertices == null || triangulation.vertices.Length == 0 ||
+            triangulation.indices == null || triangulation.indices.Length == 0)
+        {
+            return editorPreviewNavMeshMesh;
+        }
+
+        if (editorPreviewNavMeshMesh == null)
+        {
+            editorPreviewNavMeshMesh = new Mesh();
+            editorPreviewNavMeshMesh.name = "DogSocialDirectorEditorPreviewNavMesh";
+        }
+        else
+        {
+            editorPreviewNavMeshMesh.Clear();
+        }
+
+        editorPreviewNavMeshMesh.vertices = triangulation.vertices;
+        editorPreviewNavMeshMesh.triangles = triangulation.indices;
+        editorPreviewNavMeshMesh.RecalculateNormals();
+        editorPreviewNavMeshMesh.RecalculateBounds();
+        return editorPreviewNavMeshMesh;
+    }
+#endif
 
     private bool ShouldPreferRuntimeHomeNavMesh()
     {

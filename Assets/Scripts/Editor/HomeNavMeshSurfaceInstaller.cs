@@ -18,10 +18,10 @@ public static class HomeNavMeshSurfaceInstaller
     private const string ObstacleRootName = "GeneratedNavMeshObstacles";
     private const string RuntimeMatchedNavMeshAssetPath = "Assets/Scenes/David_Test/NavMesh-DogSocialDirectorRuntimeMatched.asset";
 
-    private static readonly Vector3 SurfaceSize = new Vector3(7f, 2.6f, 6f);
+    private static readonly Vector3 SurfaceSize = new Vector3(8.4f, 2.6f, 7.2f);
     private static readonly Vector3 SurfaceCenter = new Vector3(0f, 1.3f, -0.75f);
     private static readonly Vector3 DefaultRuntimeNavMeshCenter = Vector3.zero;
-    private static readonly Vector3 DefaultRuntimeNavMeshSize = new Vector3(6.4f, 0.12f, 5.6f);
+    private static readonly Vector3 DefaultRuntimeNavMeshSize = new Vector3(7.68f, 0.12f, 6.72f);
 
     private const float SurfaceVoxelSize = 0.08f;
     private const float SurfaceMinRegionArea = 0.05f;

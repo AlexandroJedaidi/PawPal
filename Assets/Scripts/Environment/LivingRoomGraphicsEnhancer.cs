@@ -213,6 +213,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void OnEnable()
     {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
         if (applyOnEnable)
         {
             ApplyGraphics();
@@ -221,6 +226,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void Start()
     {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
         if (applyOnEnable)
         {
             ApplyGraphics();
@@ -229,7 +239,10 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void Update()
     {
-        if (!applyOnEnable || !gameObject.scene.IsValid() || !gameObject.scene.isLoaded)
+        if (!Application.isPlaying ||
+            !applyOnEnable ||
+            !gameObject.scene.IsValid() ||
+            !gameObject.scene.isLoaded)
         {
             return;
         }
