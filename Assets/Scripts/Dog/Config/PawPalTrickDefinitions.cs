@@ -274,7 +274,7 @@ public sealed class PawPalTrickDefinition : ScriptableObject
 [CreateAssetMenu(menuName = "PawFriends/Training/Training Config", fileName = "PawFriendsTrainingConfig")]
 public sealed class PawPalTrainingConfig : ScriptableObject
 {
-    [SerializeField, Range(0f, 1f)] private float baseSuccessChance = 0.58f;
+    [SerializeField, Range(0f, 1f)] private float baseSuccessChance = 0.52f;
     [SerializeField] private float baseXpPerSuccess = 10f;
     [SerializeField] private float baseXpPerFail = 2f;
     [SerializeField] private float praiseXpBonus = 2f;
@@ -347,6 +347,7 @@ public sealed class PawPalTrickAttemptResult
 {
     public PawPalTrickId TrickId;
     public bool Success;
+    public float SuccessChance01;
     public bool LearnedNow;
     public bool MasteredNow;
     public bool MadeProgress;

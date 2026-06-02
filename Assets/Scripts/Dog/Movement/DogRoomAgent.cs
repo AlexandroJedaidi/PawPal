@@ -1634,6 +1634,11 @@ public class DogRoomAgent : MonoBehaviour
         yield return PlayTrainingTrickRoutine(definition, useFallback, false);
     }
 
+    public float GetInteractionNavigationFootprintRadius()
+    {
+        return GetNavigationFootprintRadius();
+    }
+
     public IEnumerator PlayInteractionTrainingMissIdle()
     {
         if (!isActiveAndEnabled || animator == null || HasHeldToy)

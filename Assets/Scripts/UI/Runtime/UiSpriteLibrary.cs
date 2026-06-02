@@ -315,6 +315,7 @@ public class UiSpriteLibrary : MonoBehaviour
         return resourcePath.StartsWith("UI/Figma/HomeMain/icon_", System.StringComparison.Ordinal)
             || resourcePath.StartsWith("UI/Figma/HomeMain/button_", System.StringComparison.Ordinal)
             || resourcePath.StartsWith("UI/Figma/HomeStats/icon_", System.StringComparison.Ordinal)
-            || resourcePath.StartsWith("UI/Figma/HomeInventory/icon_", System.StringComparison.Ordinal);
+            || resourcePath.StartsWith("UI/Figma/HomeInventory/icon_", System.StringComparison.Ordinal)
+            || resourcePath.StartsWith("UI/Interaction/", System.StringComparison.Ordinal);
     }
 }

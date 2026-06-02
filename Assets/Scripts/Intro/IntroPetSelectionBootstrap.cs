@@ -10,7 +10,10 @@ using UnityEditor.SceneManagement;
 public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 {
     private const float FieldHalfSize = 6f;
-    private const string EditorPreviewRootName = "IntroBackdropPreview";
+    private const string RuntimeRootName = "IntroSceneRuntime";
+    private const string EditorPreviewRootName = RuntimeRootName;
+    private const string EditorPreviewCameraName = "Main Camera";
+    private const string EditorPreviewLightName = "Warm Sun";
     private static IntroPetSelectionBootstrap instance;
 #if UNITY_EDITOR
     private static IntroBackdropRingController editorPreviewController;
@@ -150,13 +153,28 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     private static EnvironmentBuildResult BuildFieldEnvironment()
     {
         IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
-        GameObject root = new GameObject("IntroSceneRuntime");
+        GameObject root = GameObject.Find(RuntimeRootName);
+        if (root == null)
+        {
+            root = new GameObject(RuntimeRootName);
+        }
+
         Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
 
-        IntroBackdropRingController backdropRingController = root.AddComponent<IntroBackdropRingController>();
+        IntroBackdropRingController backdropRingController = root.GetComponent<IntroBackdropRingController>();
+        if (backdropRingController == null)
+        {
+            backdropRingController = root.AddComponent<IntroBackdropRingController>();
+        }
+
         backdropRingController.Configure(catalog, fieldBounds);
 
-        IntroTimeOfDayAudioController audioController = root.AddComponent<IntroTimeOfDayAudioController>();
+        IntroTimeOfDayAudioController audioController = root.GetComponent<IntroTimeOfDayAudioController>();
+        if (audioController == null)
+        {
+            audioController = root.AddComponent<IntroTimeOfDayAudioController>();
+        }
+
         audioController.Configure(catalog, backdropRingController);
 
         return new EnvironmentBuildResult
@@ -176,7 +194,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     {
         if (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.EnteredPlayMode)
         {
-            DestroyEditorPreview();
+            editorPreviewController = null;
             return;
         }
 
@@ -190,14 +208,13 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     {
         if (Application.isPlaying)
         {
-            DestroyEditorPreview();
             return;
         }
 
         Scene activeScene = EditorSceneManager.GetActiveScene();
         if (!PawPalIntroSceneFlow.IsIntroScene(activeScene))
         {
-            DestroyEditorPreview();
+            editorPreviewController = null;
             return;
         }
 
@@ -223,14 +240,113 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         if (editorPreviewController == null)
         {
             GameObject previewRoot = new GameObject(EditorPreviewRootName);
-            previewRoot.hideFlags = HideFlags.DontSaveInEditor;
             SceneManager.MoveGameObjectToScene(previewRoot, scene);
             editorPreviewController = previewRoot.AddComponent<IntroBackdropRingController>();
         }
 
+        editorPreviewController.gameObject.hideFlags = HideFlags.None;
+
         IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
         Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
         editorPreviewController.Configure(catalog, fieldBounds);
+        EnsureEditorPreviewCamera(scene);
+        EnsureEditorPreviewLighting(scene);
+    }
+
+    private static void EnsureEditorPreviewCamera(Scene scene)
+    {
+        Camera camera = Camera.main;
+        if (camera == null || camera.gameObject.scene != scene)
+        {
+            GameObject previewRoot = editorPreviewController != null ? editorPreviewController.gameObject : null;
+            Transform parent = previewRoot != null ? previewRoot.transform : null;
+            Transform existingChild = parent != null ? parent.Find(EditorPreviewCameraName) : null;
+            GameObject cameraObject = existingChild != null ? existingChild.gameObject : new GameObject(EditorPreviewCameraName);
+            if (parent != null && cameraObject.transform.parent != parent)
+            {
+                cameraObject.transform.SetParent(parent, false);
+            }
+
+            cameraObject.tag = "MainCamera";
+
+            camera = cameraObject.GetComponent<Camera>();
+            if (camera == null)
+            {
+                camera = cameraObject.AddComponent<Camera>();
+            }
+        }
+
+        camera.gameObject.hideFlags = HideFlags.None;
+
+        camera.clearFlags = CameraClearFlags.Skybox;
+        camera.fieldOfView = 35f;
+        camera.nearClipPlane = 0.05f;
+        camera.farClipPlane = 80f;
+
+        Vector3 previewPosition = new Vector3(0f, PetSelectionCameraController.HomeSceneCameraHeight, -3.2f);
+        Vector3 focusPoint = new Vector3(0f, 0.55f, 0f);
+        camera.transform.SetPositionAndRotation(previewPosition, Quaternion.LookRotation(focusPoint - previewPosition, Vector3.up));
+
+        AudioListener listener = camera.GetComponent<AudioListener>();
+        if (listener == null)
+        {
+            listener = camera.gameObject.AddComponent<AudioListener>();
+        }
+
+        listener.enabled = true;
+        DisableOtherAudioListeners(camera);
+    }
+
+    private static void EnsureEditorPreviewLighting(Scene scene)
+    {
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color32(172, 210, 255, 255);
+        RenderSettings.ambientEquatorColor = new Color32(197, 214, 178, 255);
+        RenderSettings.ambientGroundColor = new Color32(111, 132, 91, 255);
+
+        GameObject previewRoot = editorPreviewController != null ? editorPreviewController.gameObject : null;
+        Transform parent = previewRoot != null ? previewRoot.transform : null;
+
+        Light light = null;
+        if (parent != null)
+        {
+            Transform existingChild = parent.Find(EditorPreviewLightName);
+            if (existingChild != null)
+            {
+                light = existingChild.GetComponent<Light>();
+            }
+        }
+
+        if (light == null)
+        {
+            Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+            for (int i = 0; i < lights.Length; i++)
+            {
+                if (lights[i] != null && lights[i].type == LightType.Directional && lights[i].gameObject.scene == scene)
+                {
+                    light = lights[i];
+                    break;
+                }
+            }
+        }
+
+        if (light == null)
+        {
+            GameObject lightObject = new GameObject(EditorPreviewLightName);
+            if (parent != null)
+            {
+                lightObject.transform.SetParent(parent, false);
+            }
+
+            light = lightObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+        }
+
+        light.gameObject.hideFlags = HideFlags.None;
+
+        light.transform.rotation = Quaternion.Euler(47f, -28f, 0f);
+        light.color = new Color32(255, 232, 190, 255);
+        light.intensity = 1.35f;
     }
 
     private static void DestroyEditorPreview()

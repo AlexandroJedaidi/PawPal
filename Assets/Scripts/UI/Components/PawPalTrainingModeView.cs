@@ -199,7 +199,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         progressCueShownAt = Time.unscaledTime;
         progressCueVisibleUntil = progressCueShownAt + ProgressCueDuration;
         progressCueSeed = UnityEngine.Random.value * 0.5f;
-        progressCueFill.fillAmount = progressCueFrom01;
+        UpdatePillProgressFill(progressCueFill, progressCueFrom01);
         progressCuePercent.text = Mathf.RoundToInt(progressCueTo01 * 100f) + "%";
         progressCueGroup.alpha = 1f;
         progressCueRoot.localScale = Vector3.one;
@@ -524,7 +524,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         progressCueRoot.anchorMin = new Vector2(0.5f, 0.5f);
         progressCueRoot.anchorMax = new Vector2(0.5f, 0.5f);
         progressCueRoot.pivot = new Vector2(0.5f, 0.5f);
-        progressCueRoot.sizeDelta = new Vector2(196f, 62f);
+        progressCueRoot.sizeDelta = new Vector2(214f, 68f);
 
         progressCueGroup = progressCueRoot.gameObject.AddComponent<CanvasGroup>();
         progressCueGroup.alpha = 0f;
@@ -542,21 +542,21 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         outline.effectDistance = new Vector2(1f, -1f);
         outline.useGraphicAlpha = true;
 
-        progressCueTitle = UiFactory.CreateLabel("Title", bubble.rectTransform, "Training", 12, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        progressCueTitle = UiFactory.CreateLabel("Title", bubble.rectTransform, "Training", 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
         progressCueTitle.font = UiTheme.NavExtraBoldFont;
         progressCueTitle.rectTransform.anchorMin = new Vector2(0f, 1f);
         progressCueTitle.rectTransform.anchorMax = new Vector2(1f, 1f);
         progressCueTitle.rectTransform.pivot = new Vector2(0f, 1f);
-        progressCueTitle.rectTransform.offsetMin = new Vector2(12f, -24f);
-        progressCueTitle.rectTransform.offsetMax = new Vector2(-56f, -6f);
+        progressCueTitle.rectTransform.offsetMin = new Vector2(14f, -28f);
+        progressCueTitle.rectTransform.offsetMax = new Vector2(-62f, -8f);
 
-        progressCuePercent = UiFactory.CreateLabel("Percent", bubble.rectTransform, "0%", 11, ProgressCueAccent, FontStyles.Normal, TextAlignmentOptions.Right);
+        progressCuePercent = UiFactory.CreateLabel("Percent", bubble.rectTransform, "0%", 14, ProgressCueAccent, FontStyles.Normal, TextAlignmentOptions.Right);
         progressCuePercent.font = UiTheme.NavExtraBoldFont;
         progressCuePercent.rectTransform.anchorMin = new Vector2(1f, 1f);
         progressCuePercent.rectTransform.anchorMax = new Vector2(1f, 1f);
         progressCuePercent.rectTransform.pivot = new Vector2(1f, 1f);
-        progressCuePercent.rectTransform.sizeDelta = new Vector2(46f, 18f);
-        progressCuePercent.rectTransform.anchoredPosition = new Vector2(-12f, -8f);
+        progressCuePercent.rectTransform.sizeDelta = new Vector2(54f, 22f);
+        progressCuePercent.rectTransform.anchoredPosition = new Vector2(-14f, -10f);
 
         Image progressBack = UiFactory.CreateImage("ProgressBack", bubble.rectTransform, UiTheme.RoundedTenSprite, ProgressTrack);
         progressBack.type = Image.Type.Sliced;
@@ -565,16 +565,22 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         progressBack.rectTransform.anchorMin = new Vector2(0f, 0f);
         progressBack.rectTransform.anchorMax = new Vector2(1f, 0f);
         progressBack.rectTransform.pivot = new Vector2(0.5f, 0f);
-        progressBack.rectTransform.offsetMin = new Vector2(12f, 10f);
-        progressBack.rectTransform.offsetMax = new Vector2(-12f, 24f);
+        progressBack.rectTransform.offsetMin = new Vector2(14f, 12f);
+        progressBack.rectTransform.offsetMax = new Vector2(-14f, 26f);
 
-        progressCueFill = UiFactory.CreateImage("ProgressFill", progressBack.rectTransform, UiTheme.RoundedTenSprite, ProgressCueAccent);
-        progressCueFill.type = Image.Type.Filled;
-        progressCueFill.fillMethod = Image.FillMethod.Horizontal;
-        progressCueFill.fillOrigin = (int)Image.OriginHorizontal.Left;
+        RectTransform progressInset = UiFactory.CreateRect("ProgressInset", progressBack.rectTransform);
+        UiFactory.Stretch(progressInset, 3f, 2f, 3f, 2f);
+
+        progressCueFill = UiFactory.CreateImage("ProgressFill", progressInset, UiTheme.ProgressPillSprite, ProgressCueAccent);
+        progressCueFill.type = Image.Type.Sliced;
         progressCueFill.preserveAspect = false;
         progressCueFill.raycastTarget = false;
-        UiFactory.Stretch(progressCueFill.rectTransform, 0f, 0f, 0f, 0f);
+        RectTransform progressCueFillRect = progressCueFill.rectTransform;
+        progressCueFillRect.anchorMin = new Vector2(0f, 0f);
+        progressCueFillRect.anchorMax = new Vector2(0f, 1f);
+        progressCueFillRect.pivot = new Vector2(0f, 0.5f);
+        progressCueFillRect.anchoredPosition = Vector2.zero;
+        progressCueFillRect.sizeDelta = new Vector2(0f, 0f);
 
         progressCueRoot.gameObject.SetActive(false);
     }
@@ -1033,7 +1039,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         progressCueRoot.anchoredPosition = localPoint;
 
         float fillT = Mathf.Clamp01((Time.unscaledTime - progressCueShownAt) / Mathf.Max(0.05f, ProgressFillAnimDuration));
-        progressCueFill.fillAmount = Mathf.Lerp(progressCueFrom01, progressCueTo01, fillT);
+        UpdatePillProgressFill(progressCueFill, Mathf.Lerp(progressCueFrom01, progressCueTo01, fillT));
 
         float normalizedTimeLeft = Mathf.Clamp01((progressCueVisibleUntil - Time.unscaledTime) / ProgressCueDuration);
         progressCueGroup.alpha = Mathf.Clamp01(Mathf.Min(1f, normalizedTimeLeft * 1.8f));

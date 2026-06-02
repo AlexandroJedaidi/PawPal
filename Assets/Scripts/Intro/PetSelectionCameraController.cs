@@ -3,6 +3,8 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class PetSelectionCameraController : MonoBehaviour
 {
+    internal const float HomeSceneCameraHeight = 0.834f;
+
     [SerializeField] private float positionSmooth = 4.2f;
     [SerializeField] private float rotationSmooth = 6.5f;
     [SerializeField] private Vector3 fallbackOffset = new Vector3(0f, 1.35f, -3.2f);
@@ -50,6 +52,7 @@ public sealed class PetSelectionCameraController : MonoBehaviour
         Transform target = targetAgent.FocusTransform;
         Vector3 focusPoint = target.position + Vector3.up * 0.55f;
         Vector3 desiredPosition = target.position + offset;
+        desiredPosition.y = HomeSceneCameraHeight;
         Quaternion desiredRotation = Quaternion.LookRotation(focusPoint - desiredPosition, Vector3.up);
 
         if (snapNextFrame)

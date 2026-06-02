@@ -37,6 +37,9 @@ public sealed class IntroBackdropRingController : MonoBehaviour
     private int lastAppliedMinuteStamp = int.MinValue;
     private static Mesh quadMesh;
     private bool applyingLayout;
+#if UNITY_EDITOR
+    private bool rebuildQueued;
+#endif
 
     public bool IsApplyingLayout
     {
@@ -129,17 +132,27 @@ public sealed class IntroBackdropRingController : MonoBehaviour
             Mathf.Max(1f, fieldBounds.size.z));
 
         EnsureCatalogLayoutDefaults();
-        if (isActiveAndEnabled)
+        if (!Application.isPlaying && isActiveAndEnabled)
         {
-            Rebuild();
+            QueueEditorRebuild();
         }
     }
 #endif
 
     private void OnDisable()
     {
+#if UNITY_EDITOR
+        CancelQueuedEditorRebuild();
+#endif
         ClearGenerated();
         ReleaseMaterials();
+    }
+
+    private void OnDestroy()
+    {
+#if UNITY_EDITOR
+        CancelQueuedEditorRebuild();
+#endif
     }
 
     [ContextMenu("Rebuild Intro Backdrop Ring")]
@@ -228,6 +241,43 @@ public sealed class IntroBackdropRingController : MonoBehaviour
             }
         }
     }
+
+#if UNITY_EDITOR
+    private void QueueEditorRebuild()
+    {
+        if (rebuildQueued)
+        {
+            return;
+        }
+
+        rebuildQueued = true;
+        EditorApplication.delayCall += ExecuteQueuedEditorRebuild;
+    }
+
+    private void CancelQueuedEditorRebuild()
+    {
+        if (!rebuildQueued)
+        {
+            return;
+        }
+
+        rebuildQueued = false;
+        EditorApplication.delayCall -= ExecuteQueuedEditorRebuild;
+    }
+
+    private void ExecuteQueuedEditorRebuild()
+    {
+        EditorApplication.delayCall -= ExecuteQueuedEditorRebuild;
+        rebuildQueued = false;
+
+        if (this == null || !isActiveAndEnabled || Application.isPlaying)
+        {
+            return;
+        }
+
+        Rebuild();
+    }
+#endif
 
     private void EnsureCatalogLayoutDefaults()
     {

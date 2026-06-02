@@ -185,6 +185,15 @@ public sealed class PawPalTrainingController : MonoBehaviour
         }
 
         gestureDebug = snapshot.DebugText + " (" + snapshot.StartZone + " -> " + snapshot.EndZone + ")";
+        if (snapshot.Type == PawPalGestureType.PetStroke)
+        {
+            state = PawPalTrainingState.TrickFailed;
+            feedbackText = "Use a training cue instead of petting.";
+            canPraise = false;
+            Refresh();
+            return;
+        }
+
         if (snapshot.RejectionReason != PawPalTrickFailureReason.None)
         {
             state = PawPalTrainingState.TrickFailed;

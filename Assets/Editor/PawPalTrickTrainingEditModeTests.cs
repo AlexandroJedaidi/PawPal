@@ -40,6 +40,7 @@ public sealed class PawPalTrickTrainingEditModeTests
     [Test]
     public void SitRequiresAtLeastTenSuccessfulRepsToLearn()
     {
+        UnityEngine.Random.InitState(17);
         PawPalDogState dog = BuildDog();
         dog.Personality = PawPalDogPersonality.Loyal;
         PawPalTrickDefinition sit = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit);
@@ -47,27 +48,41 @@ public sealed class PawPalTrickTrainingEditModeTests
         SetPrivateField(config, "baseSuccessChance", 1f);
         SetPrivateField(config, "baseXpPerSuccess", 10f);
         SetPrivateField(config, "praiseXpBonus", 0f);
+        SetPrivateField(config, "boredomGainPerRepeatedAttempt", 0f);
+        SetPrivateField(config, "maxEffectivePracticePerTrickPerDay", 99);
 
         try
         {
-            for (int i = 0; i < 9; i++)
+            int successfulReps = 0;
+            int attempts = 0;
+            while (successfulReps < 9 && attempts < 20)
             {
                 PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dog, sit, config, false, false, true);
-                Assert.IsTrue(result.Success);
+                attempts++;
+                if (result.Success)
+                {
+                    successfulReps++;
+                }
             }
 
             PawPalDogTrickProgress progress = PawPalTrickCatalog.GetProgress(dog, PawPalTrickId.Sit);
             Assert.NotNull(progress);
+            Assert.AreEqual(9, successfulReps);
             Assert.Greater(progress.MasteryXp, 0f);
             Assert.IsFalse(progress.IsLearned);
 
-            for (int i = 0; i < 3; i++)
+            while (!progress.IsLearned && attempts < 28)
             {
                 PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dog, sit, config, false, false, true);
-                Assert.IsTrue(result.Success);
+                attempts++;
+                if (result.Success)
+                {
+                    successfulReps++;
+                }
             }
 
             Assert.IsTrue(progress.IsLearned);
+            Assert.GreaterOrEqual(successfulReps, 10);
             Assert.GreaterOrEqual(progress.MasteryXp, sit.LearnedRequiredXp);
         }
         finally
@@ -579,6 +594,121 @@ public sealed class PawPalTrickTrainingEditModeTests
     }
 
     [Test]
+    public void SitSuccessChanceIsHigherDuringDaytimeThanLateNightAndCapsAtNinetyPercent()
+    {
+        PawPalDogState dog = BuildDog();
+        PawPalTrickDefinition sit = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit);
+        PawPalTrainingConfig config = PawPalTrainingConfig.CreateRuntimeDefault();
+        PawPalTrainingConfig boostedConfig = ScriptableObject.CreateInstance<PawPalTrainingConfig>();
+        SetPrivateField(boostedConfig, "baseSuccessChance", 1f);
+
+        try
+        {
+            PawPalTrickCatalog.EnsureDogTrickData(dog);
+            PawPalDogTrickProgress progress = PawPalTrickCatalog.GetOrCreateProgress(dog, PawPalTrickId.Sit);
+
+            float dayChance = InvokePrivateStatic<float>(
+                typeof(PawPalTrickProgressionService),
+                "CalculateSuccessChanceAtLocalHour",
+                dog,
+                sit,
+                progress,
+                config,
+                false,
+                11f);
+            float lateNightChance = InvokePrivateStatic<float>(
+                typeof(PawPalTrickProgressionService),
+                "CalculateSuccessChanceAtLocalHour",
+                dog,
+                sit,
+                progress,
+                config,
+                false,
+                23.5f);
+            float boostedDayChance = InvokePrivateStatic<float>(
+                typeof(PawPalTrickProgressionService),
+                "CalculateSuccessChanceAtLocalHour",
+                dog,
+                sit,
+                progress,
+                boostedConfig,
+                false,
+                11f);
+
+            Assert.Greater(dayChance, lateNightChance);
+            Assert.LessOrEqual(boostedDayChance, 0.9001f);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(config);
+            UnityEngine.Object.DestroyImmediate(boostedConfig);
+        }
+    }
+
+    [Test]
+    public void BarelyEligibleStaminaMakesSitLessReliableThanFullStamina()
+    {
+        PawPalDogState lowStaminaDog = BuildDog();
+        lowStaminaDog.WalkData = new PawPalDogWalkData
+        {
+            CurrentWalkStamina = 8f,
+            MaxWalkStamina = 100f,
+            LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks
+        };
+
+        PawPalDogState restedDog = BuildDog();
+        restedDog.WalkData = new PawPalDogWalkData
+        {
+            CurrentWalkStamina = 100f,
+            MaxWalkStamina = 100f,
+            LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks
+        };
+
+        PawPalTrickDefinition sit = PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit);
+        PawPalTrainingConfig config = PawPalTrainingConfig.CreateRuntimeDefault();
+        PawPalTrickCatalog.EnsureDogTrickData(lowStaminaDog);
+        PawPalTrickCatalog.EnsureDogTrickData(restedDog);
+
+        float lowStaminaChance = InvokePrivateStatic<float>(
+            typeof(PawPalTrickProgressionService),
+            "CalculateSuccessChanceAtLocalHour",
+            lowStaminaDog,
+            sit,
+            PawPalTrickCatalog.GetOrCreateProgress(lowStaminaDog, PawPalTrickId.Sit),
+            config,
+            false,
+            11f);
+        float restedChance = InvokePrivateStatic<float>(
+            typeof(PawPalTrickProgressionService),
+            "CalculateSuccessChanceAtLocalHour",
+            restedDog,
+            sit,
+            PawPalTrickCatalog.GetOrCreateProgress(restedDog, PawPalTrickId.Sit),
+            config,
+            false,
+            11f);
+
+        Assert.Less(lowStaminaChance, restedChance);
+    }
+
+    [Test]
+    public void AttemptTrickReportsResolvedSuccessChance()
+    {
+        UnityEngine.Random.InitState(72);
+        PawPalDogState dog = BuildDog();
+        PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(
+            dog,
+            PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit),
+            PawPalTrainingConfig.CreateRuntimeDefault(),
+            false,
+            false,
+            true);
+
+        Assert.Greater(result.SuccessChance01, 0f);
+        Assert.LessOrEqual(result.SuccessChance01, 0.9001f);
+    }
+
+    [Test]
     public void LaterCoreTricksRequireStrictlyMoreLearnedXpThanEarlierOnes()
     {
         Assert.Less(PawPalTrickCatalog.GetDefinition(PawPalTrickId.Sit).LearnedRequiredXp, PawPalTrickCatalog.GetDefinition(PawPalTrickId.Lie).LearnedRequiredXp);
@@ -799,6 +929,112 @@ public sealed class PawPalTrickTrainingEditModeTests
 
         Assert.NotNull(clone);
         Assert.AreEqual(1.75f, clone.NewDogWhinyHoursRemaining, 0.0001f);
+    }
+
+    [Test]
+    public void InteractionApproachDistancePlacesSmallerDogsCloserThanLargerDogs()
+    {
+        float smallDogDistance = InvokePrivateStatic<float>(
+            typeof(PawPalDogInteractionDirector),
+            "GetCameraApproachDistanceForFootprintRadius",
+            0.14f);
+        float largeDogDistance = InvokePrivateStatic<float>(
+            typeof(PawPalDogInteractionDirector),
+            "GetCameraApproachDistanceForFootprintRadius",
+            0.30f);
+
+        Assert.Less(smallDogDistance, largeDogDistance);
+    }
+
+    [Test]
+    public void PetStrokeHelperRecognizesShortBodyStrokesButRejectsOffTargetAndLongSwipes()
+    {
+        List<Vector2> shortStroke = new List<Vector2>
+        {
+            new Vector2(100f, 100f),
+            new Vector2(110f, 104f),
+            new Vector2(121f, 108f)
+        };
+        List<Vector2> longSwipe = new List<Vector2>
+        {
+            new Vector2(100f, 100f),
+            new Vector2(100f, 138f),
+            new Vector2(100f, 176f)
+        };
+
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalGestureRecognizer),
+            "IsPetStrokeGesture",
+            PawPalDogBodyZone.Head,
+            PawPalDogBodyZone.Back,
+            0.24f,
+            58f,
+            shortStroke));
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalGestureRecognizer),
+            "IsPetStrokeGesture",
+            PawPalDogBodyZone.Any,
+            PawPalDogBodyZone.Back,
+            0.24f,
+            58f,
+            shortStroke));
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalGestureRecognizer),
+            "IsPetStrokeGesture",
+            PawPalDogBodyZone.Head,
+            PawPalDogBodyZone.Back,
+            0.24f,
+            58f,
+            longSwipe));
+    }
+
+    [Test]
+    public void InteractionProgressCueReplacesUnderstoodCueWhenProgressWasMade()
+    {
+        PawPalTrickAttemptResult progressedResult = new PawPalTrickAttemptResult
+        {
+            Success = true,
+            MadeProgress = true
+        };
+        PawPalTrickAttemptResult plainSuccessResult = new PawPalTrickAttemptResult
+        {
+            Success = true,
+            MadeProgress = false
+        };
+
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowProgressCue",
+            progressedResult));
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowUnderstoodCue",
+            progressedResult));
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowProgressCue",
+            plainSuccessResult));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowUnderstoodCue",
+            plainSuccessResult));
+    }
+
+    [Test]
+    public void InteractionStatusSuppressionHidesOnlyTheBusyHint()
+    {
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowInteractionStatus",
+            "Training is busy."));
+        Assert.IsFalse(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowInteractionStatus",
+            string.Empty));
+        Assert.IsTrue(InvokePrivateStatic<bool>(
+            typeof(PawPalDogInteractionModeController),
+            "ShouldShowInteractionStatus",
+            "Try a clearer cue near your dog."));
     }
 
     [Test]

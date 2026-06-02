@@ -7,6 +7,9 @@ using UnityEngine.UI;
 public sealed class PawPalDogInteractionModeView : MonoBehaviour
 {
     private const string MicIconResourcePath = "UI/Figma/HomeMain/icon_mic";
+    private const string HeartBurstResourcePath = "UI/Interaction/heart";
+    private const string StarBurstResourcePath = "UI/Interaction/star";
+    private const string QuestionBurstResourcePath = "UI/Interaction/questionmark";
     private const string NeutralIconName = "icon_feedback";
     private const string UnderstoodIconName = "icon_star_brand";
     private const string BondIconName = "icon_paw_brand";
@@ -22,7 +25,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private const float SymbolBurstScreenLift = 68f;
     private const float SymbolBurstRise = 44f;
     private const float SymbolBurstSpacing = 24f;
-    private const float SymbolBurstFontSize = 24f;
+    private const float SymbolBurstIconSize = 34f;
 
     private static readonly Color32 DockFill = new Color32(255, 252, 243, 248);
     private static readonly Color32 DockBorder = new Color32(236, 223, 201, 255);
@@ -33,9 +36,6 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private static readonly Color32 BondAccent = new Color32(103, 178, 151, 255);
     private static readonly Color32 ProgressAccent = new Color32(239, 188, 82, 255);
     private static readonly Color32 ProgressTrack = new Color32(235, 224, 203, 255);
-    private static readonly Color32 HeartBurstColor = new Color32(236, 96, 126, 255);
-    private static readonly Color32 QuestionBurstColor = new Color32(228, 132, 107, 255);
-
     private UiSpriteLibrary spriteLibrary;
     private RectTransform root;
     private CanvasGroup rootGroup;
@@ -53,7 +53,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private TextMeshProUGUI progressPercent;
     private Image progressFill;
     private RectTransform[] symbolRoots;
-    private TextMeshProUGUI[] symbolLabels;
+    private Image[] symbolImages;
     private Vector2[] symbolBaseOffsets;
     private float symbolVisibleUntil;
     private float symbolShownAt;
@@ -191,7 +191,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         progressShownAt = Time.unscaledTime;
         progressVisibleUntil = progressShownAt + ProgressCueDuration;
         cueAnimationSeed = UnityEngine.Random.value * 0.5f;
-        progressFill.fillAmount = progressFrom01;
+        UpdatePillProgressFill(progressFill, progressFrom01);
         progressPercent.text = Mathf.RoundToInt(progressTo01 * 100f) + "%";
         progressGroup.alpha = 1f;
         progressRoot.localScale = Vector3.one;
@@ -202,13 +202,18 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public void ShowPettingBurst()
     {
-        ShowSymbolBurst("\u2665", HeartBurstColor);
+        ShowSymbolBurst(HeartBurstResourcePath);
         PawPalUiAudio.PlayHearts();
+    }
+
+    public void ShowProgressBurst()
+    {
+        ShowSymbolBurst(StarBurstResourcePath);
     }
 
     public void ShowFailedTeachBurst()
     {
-        ShowSymbolBurst("?", QuestionBurstColor);
+        ShowSymbolBurst(QuestionBurstResourcePath);
     }
 
     private void LateUpdate()
@@ -308,7 +313,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         progressRoot.anchorMin = new Vector2(0.5f, 0.5f);
         progressRoot.anchorMax = new Vector2(0.5f, 0.5f);
         progressRoot.pivot = new Vector2(0.5f, 0.5f);
-        progressRoot.sizeDelta = new Vector2(196f, 62f);
+        progressRoot.sizeDelta = new Vector2(214f, 68f);
 
         progressGroup = progressRoot.gameObject.AddComponent<CanvasGroup>();
         progressGroup.alpha = 0f;
@@ -326,21 +331,21 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         outline.effectDistance = new Vector2(1f, -1f);
         outline.useGraphicAlpha = true;
 
-        progressTitle = UiFactory.CreateLabel("Title", bubble.rectTransform, "Training", 12, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        progressTitle = UiFactory.CreateLabel("Title", bubble.rectTransform, "Training", 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
         progressTitle.font = UiTheme.NavExtraBoldFont;
         progressTitle.rectTransform.anchorMin = new Vector2(0f, 1f);
         progressTitle.rectTransform.anchorMax = new Vector2(1f, 1f);
         progressTitle.rectTransform.pivot = new Vector2(0f, 1f);
-        progressTitle.rectTransform.offsetMin = new Vector2(12f, -24f);
-        progressTitle.rectTransform.offsetMax = new Vector2(-56f, -6f);
+        progressTitle.rectTransform.offsetMin = new Vector2(14f, -28f);
+        progressTitle.rectTransform.offsetMax = new Vector2(-62f, -8f);
 
-        progressPercent = UiFactory.CreateLabel("Percent", bubble.rectTransform, "0%", 11, ProgressAccent, FontStyles.Normal, TextAlignmentOptions.Right);
+        progressPercent = UiFactory.CreateLabel("Percent", bubble.rectTransform, "0%", 14, ProgressAccent, FontStyles.Normal, TextAlignmentOptions.Right);
         progressPercent.font = UiTheme.NavExtraBoldFont;
         progressPercent.rectTransform.anchorMin = new Vector2(1f, 1f);
         progressPercent.rectTransform.anchorMax = new Vector2(1f, 1f);
         progressPercent.rectTransform.pivot = new Vector2(1f, 1f);
-        progressPercent.rectTransform.sizeDelta = new Vector2(46f, 18f);
-        progressPercent.rectTransform.anchoredPosition = new Vector2(-12f, -8f);
+        progressPercent.rectTransform.sizeDelta = new Vector2(54f, 22f);
+        progressPercent.rectTransform.anchoredPosition = new Vector2(-14f, -10f);
 
         Image progressBack = UiFactory.CreateImage("ProgressBack", bubble.rectTransform, UiTheme.RoundedTenSprite, ProgressTrack);
         progressBack.type = Image.Type.Sliced;
@@ -349,16 +354,22 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         progressBack.rectTransform.anchorMin = new Vector2(0f, 0f);
         progressBack.rectTransform.anchorMax = new Vector2(1f, 0f);
         progressBack.rectTransform.pivot = new Vector2(0.5f, 0f);
-        progressBack.rectTransform.offsetMin = new Vector2(12f, 10f);
-        progressBack.rectTransform.offsetMax = new Vector2(-12f, 24f);
+        progressBack.rectTransform.offsetMin = new Vector2(14f, 12f);
+        progressBack.rectTransform.offsetMax = new Vector2(-14f, 26f);
 
-        progressFill = UiFactory.CreateImage("ProgressFill", progressBack.rectTransform, UiTheme.RoundedTenSprite, ProgressAccent);
-        progressFill.type = Image.Type.Filled;
-        progressFill.fillMethod = Image.FillMethod.Horizontal;
-        progressFill.fillOrigin = (int)Image.OriginHorizontal.Left;
+        RectTransform progressInset = UiFactory.CreateRect("ProgressInset", progressBack.rectTransform);
+        UiFactory.Stretch(progressInset, 3f, 2f, 3f, 2f);
+
+        progressFill = UiFactory.CreateImage("ProgressFill", progressInset, UiTheme.ProgressPillSprite, ProgressAccent);
+        progressFill.type = Image.Type.Sliced;
         progressFill.preserveAspect = false;
         progressFill.raycastTarget = false;
-        UiFactory.Stretch(progressFill.rectTransform, 0f, 0f, 0f, 0f);
+        RectTransform progressFillRect = progressFill.rectTransform;
+        progressFillRect.anchorMin = new Vector2(0f, 0f);
+        progressFillRect.anchorMax = new Vector2(0f, 1f);
+        progressFillRect.pivot = new Vector2(0f, 0.5f);
+        progressFillRect.anchoredPosition = Vector2.zero;
+        progressFillRect.sizeDelta = new Vector2(0f, 0f);
 
         progressRoot.gameObject.SetActive(false);
     }
@@ -366,7 +377,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private void BuildFloatingSymbolBurst(RectTransform parent)
     {
         symbolRoots = new RectTransform[3];
-        symbolLabels = new TextMeshProUGUI[3];
+        symbolImages = new Image[3];
         symbolBaseOffsets = new[]
         {
             new Vector2(-SymbolBurstSpacing, 2f),
@@ -380,21 +391,22 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             symbolRoot.anchorMin = new Vector2(0.5f, 0.5f);
             symbolRoot.anchorMax = new Vector2(0.5f, 0.5f);
             symbolRoot.pivot = new Vector2(0.5f, 0.5f);
-            symbolRoot.sizeDelta = new Vector2(28f, 28f);
+            symbolRoot.sizeDelta = new Vector2(SymbolBurstIconSize, SymbolBurstIconSize);
 
-            TextMeshProUGUI label = UiFactory.CreateLabel("Label", symbolRoot, string.Empty, Mathf.RoundToInt(SymbolBurstFontSize), UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
-            label.font = UiTheme.NavExtraBoldFont;
-            label.raycastTarget = false;
-            UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
+            Image image = UiFactory.CreateImage("Icon", symbolRoot, UiTheme.WhiteSprite, Color.white);
+            image.type = Image.Type.Simple;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            UiFactory.Stretch(image.rectTransform, 0f, 0f, 0f, 0f);
 
-            Shadow shadow = label.gameObject.AddComponent<Shadow>();
+            Shadow shadow = image.gameObject.AddComponent<Shadow>();
             shadow.effectColor = new Color(0f, 0f, 0f, 0.16f);
             shadow.effectDistance = new Vector2(0f, -1f);
             shadow.useGraphicAlpha = true;
 
             symbolRoot.gameObject.SetActive(false);
             symbolRoots[i] = symbolRoot;
-            symbolLabels[i] = label;
+            symbolImages[i] = image;
         }
     }
 
@@ -516,9 +528,15 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         UpdateCuePosition();
     }
 
-    private void ShowSymbolBurst(string symbol, Color color)
+    private void ShowSymbolBurst(string resourcePath)
     {
-        if (symbolRoots == null || symbolLabels == null)
+        if (symbolRoots == null || symbolImages == null)
+        {
+            return;
+        }
+
+        Sprite burstSprite = GetResourceSprite(resourcePath);
+        if (burstSprite == null)
         {
             return;
         }
@@ -527,13 +545,13 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         symbolVisibleUntil = symbolShownAt + SymbolBurstDuration;
         for (int i = 0; i < symbolRoots.Length; i++)
         {
-            if (symbolRoots[i] == null || symbolLabels[i] == null)
+            if (symbolRoots[i] == null || symbolImages[i] == null)
             {
                 continue;
             }
 
-            symbolLabels[i].text = symbol;
-            symbolLabels[i].color = color;
+            symbolImages[i].sprite = burstSprite;
+            symbolImages[i].color = Color.white;
             symbolRoots[i].localScale = Vector3.one;
             symbolRoots[i].gameObject.SetActive(true);
         }
@@ -633,7 +651,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     private void UpdateSymbolBurstPosition()
     {
-        if (symbolRoots == null || symbolLabels == null)
+        if (symbolRoots == null || symbolImages == null)
         {
             return;
         }
@@ -684,8 +702,8 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         for (int i = 0; i < symbolRoots.Length; i++)
         {
             RectTransform symbolRoot = symbolRoots[i];
-            TextMeshProUGUI symbolLabel = symbolLabels[i];
-            if (symbolRoot == null || symbolLabel == null)
+            Image symbolImage = symbolImages[i];
+            if (symbolRoot == null || symbolImage == null)
             {
                 continue;
             }
@@ -697,7 +715,9 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             anchored.x = Mathf.Clamp(anchored.x, bounds.xMin + halfWidth + CueEdgeMargin, bounds.xMax - halfWidth - CueEdgeMargin);
             anchored.y = Mathf.Clamp(anchored.y, bounds.yMin + halfHeight + CueEdgeMargin, bounds.yMax - halfHeight - CueEdgeMargin);
             symbolRoot.anchoredPosition = anchored;
-            symbolLabel.alpha = alpha;
+            Color imageColor = symbolImage.color;
+            imageColor.a = alpha;
+            symbolImage.color = imageColor;
             float scale = Mathf.Lerp(0.9f, 1.08f, Mathf.Sin(normalized * Mathf.PI));
             symbolRoot.localScale = new Vector3(scale, scale, 1f);
             if (!symbolRoot.gameObject.activeSelf)
@@ -754,7 +774,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         progressRoot.anchoredPosition = localPoint;
 
         float animT = Mathf.Clamp01((Time.unscaledTime - progressShownAt) / Mathf.Max(0.05f, ProgressFillAnimDuration));
-        progressFill.fillAmount = Mathf.Lerp(progressFrom01, progressTo01, animT);
+        UpdatePillProgressFill(progressFill, Mathf.Lerp(progressFrom01, progressTo01, animT));
 
         float normalizedTimeLeft = Mathf.Clamp01((progressVisibleUntil - Time.unscaledTime) / ProgressCueDuration);
         progressGroup.alpha = Mathf.Clamp01(Mathf.Min(1f, normalizedTimeLeft * 1.8f));
@@ -830,6 +850,32 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         }
 
         return root;
+    }
+
+    private static void UpdatePillProgressFill(Image fillImage, float fillAmount)
+    {
+        if (fillImage == null)
+        {
+            return;
+        }
+
+        RectTransform fillRect = fillImage.rectTransform;
+        RectTransform parentRect = fillRect.parent as RectTransform;
+        if (parentRect == null)
+        {
+            return;
+        }
+
+        float clamped = Mathf.Clamp01(fillAmount);
+        if (clamped <= 0.001f)
+        {
+            fillImage.gameObject.SetActive(false);
+            return;
+        }
+
+        float width = Mathf.Max(0f, parentRect.rect.width * clamped);
+        fillImage.gameObject.SetActive(true);
+        fillRect.sizeDelta = new Vector2(width, 0f);
     }
 
     private Sprite GetResourceSprite(string resourcePath)

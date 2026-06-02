@@ -9,8 +9,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float PettingBondGain = 0.008f;
     private const float PettingMoodGain = 0.012f;
     private const float PettingActivityGain = 0.006f;
-    private const float PettingRewardCooldown = 1.1f;
-    private const float PettingGestureIgnoreSeconds = 0.35f;
+    private const float PettingRewardCooldown = 0.5f;
+    private const float PettingGestureIgnoreSeconds = 0.15f;
     private const float TugBondGain = 0.006f;
     private const float TugMoodGain = 0.008f;
     private const float TugActivityGain = 0.01f;
@@ -368,14 +368,19 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         string message;
         if (StartTrickAttempt(trickId, false, out message) == InteractionTrickStartResult.Rejected)
         {
-            SetStatus(message);
+            TrySetStatus(message);
         }
     }
 
     private InteractionTrickStartResult StartTrickAttempt(PawPalTrickId trickId, bool fromVoice, out string message)
     {
-        message = "Training is busy.";
-        if (!active || attemptRoutine != null)
+        message = string.Empty;
+        if (!active)
+        {
+            return InteractionTrickStartResult.Rejected;
+        }
+
+        if (attemptRoutine != null)
         {
             return InteractionTrickStartResult.Rejected;
         }
@@ -430,10 +435,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
             if (view != null)
             {
-                view.ShowUnderstoodCue(definition.DisplayName);
-                if (result.MadeProgress)
+                if (ShouldShowProgressCue(result))
                 {
                     view.ShowTrainingProgressCue(definition.DisplayName, result.PreviousProgress01, result.CurrentProgress01);
+                    view.ShowProgressBurst();
+                }
+                else if (ShouldShowUnderstoodCue(result))
+                {
+                    view.ShowUnderstoodCue(definition.DisplayName);
                 }
             }
         }
@@ -467,6 +476,20 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             && dog != null
             && !result.Success
             && result.Reason == PawPalTrickFailureReason.RandomMiss;
+    }
+
+    private static bool ShouldShowProgressCue(PawPalTrickAttemptResult result)
+    {
+        return result != null
+            && result.Success
+            && result.MadeProgress;
+    }
+
+    private static bool ShouldShowUnderstoodCue(PawPalTrickAttemptResult result)
+    {
+        return result != null
+            && result.Success
+            && !result.MadeProgress;
     }
 
     private static void ApplyInteractionVocalContext(DogRoomAgent dog, DogVocalContext context)
@@ -841,14 +864,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return false;
         }
 
-        if (!IsDogBodyZone(snapshot.StartZone))
-        {
-            return false;
-        }
-
-        return snapshot.Type == PawPalGestureType.Hold
-            || snapshot.Type == PawPalGestureType.Tap
-            || snapshot.RejectionReason == PawPalTrickFailureReason.InvalidGesture;
+        return snapshot.Type == PawPalGestureType.PetStroke
+            && IsDogBodyZone(snapshot.StartZone)
+            && IsDogBodyZone(snapshot.EndZone);
     }
 
     private static bool IsDogBodyZone(PawPalDogBodyZone zone)
@@ -886,6 +904,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         {
             view.SetStatus(message);
         }
+    }
+
+    private void TrySetStatus(string message)
+    {
+        if (!ShouldShowInteractionStatus(message))
+        {
+            return;
+        }
+
+        SetStatus(message);
     }
 
     private void ShowToast(string message)
@@ -1022,5 +1050,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return pointerId >= 0
             ? EventSystem.current.IsPointerOverGameObject(pointerId)
             : EventSystem.current.IsPointerOverGameObject();
+    }
+
+    private static bool ShouldShowInteractionStatus(string message)
+    {
+        return !string.IsNullOrWhiteSpace(message)
+            && !string.Equals(message, "Training is busy.", StringComparison.Ordinal);
     }
 }

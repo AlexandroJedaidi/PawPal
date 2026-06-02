@@ -4,8 +4,14 @@ using UnityEngine;
 public static class PawPalTrickProgressionService
 {
     private const float MinimumSuccessChance = 0.12f;
-    private const float MaximumSuccessChance = 0.96f;
+    private const float MaximumSuccessChance = 0.90f;
     private const float FatigueRecoveryPerHour = 0.26f;
+    private const float PetMorningStartHour = 7f;
+    private const float PetDaySteadyStartHour = 10f;
+    private const float PetEveningStartHour = 18.5f;
+    private const float PetNightStartHour = 22f;
+    private const float PetWakeTransitionHours = 0.75f;
+    private const float PetEveningTransitionHours = 1.25f;
 
     public static PawPalTrickAttemptResult AttemptTrick(
         PawPalDogState dog,
@@ -57,6 +63,7 @@ public static class PawPalTrickProgressionService
         progress.IsDiscovered = true;
 
         float successChance = CalculateSuccessChance(dog, definition, progress, resolvedConfig, treatUsed);
+        result.SuccessChance01 = successChance;
 
         bool success = UnityEngine.Random.value <= successChance;
         float baseXp = success ? resolvedConfig.BaseXpPerSuccess : resolvedConfig.BaseXpPerFail;
@@ -174,19 +181,40 @@ public static class PawPalTrickProgressionService
         PawPalTrainingConfig config,
         bool treatUsed)
     {
-        float fatiguePenalty = Mathf.Lerp(0f, 0.22f, dog.TrainingFatigue01);
+        return CalculateSuccessChanceAtLocalHour(
+            dog,
+            definition,
+            progress,
+            config,
+            treatUsed,
+            GetResolvedTrainingLocalHour());
+    }
+
+    private static float CalculateSuccessChanceAtLocalHour(
+        PawPalDogState dog,
+        PawPalTrickDefinition definition,
+        PawPalDogTrickProgress progress,
+        PawPalTrainingConfig config,
+        bool treatUsed,
+        float localHour)
+    {
+        float fatiguePenalty = Mathf.Lerp(0f, 0.28f, dog.TrainingFatigue01);
         float repeatedPracticePenalty = GetRepeatedPracticePenalty(progress, definition, config);
         float needPenalty = GetNeedPenalty(dog, config);
         float moodPenalty = dog.Mood01 < definition.RequiredMood01 + 0.12f ? config.LowMoodPenalty : 0f;
         float focusBonus = Mathf.Clamp01(dog.Focus / 10f) * 0.12f;
         float bondBonus = PawPalGameRuntime.GetBondProgress01(dog) * 0.08f;
         float personalityOffset = definition.GetSuccessChanceOffset(dog.Personality) * config.PersonalityModifierStrength;
+        float staminaModifier = GetStaminaSuccessModifier(dog, definition);
+        float circadianModifier = GetCircadianSuccessModifier(localHour);
 
         float successChance = config.BaseSuccessChance
             + focusBonus
             + bondBonus
             + personalityOffset
             + (treatUsed ? config.TreatMotivationBonus : 0f)
+            + staminaModifier
+            + circadianModifier
             - fatiguePenalty
             - repeatedPracticePenalty
             - needPenalty
@@ -391,6 +419,53 @@ public static class PawPalTrickProgressionService
         return lowestNeed < 0.2f ? config.LowNeedPenalty : 0f;
     }
 
+    private static float GetStaminaSuccessModifier(PawPalDogState dog, PawPalTrickDefinition definition)
+    {
+        if (dog == null || definition == null)
+        {
+            return 0f;
+        }
+
+        float currentStamina01 = PawPalGameRuntime.GetDogStamina01(dog);
+        float minimumStamina01 = Mathf.Clamp01(definition.RequiredEnergy01);
+        float comfortableStamina01 = Mathf.Clamp01(Mathf.Max(minimumStamina01 + 0.45f, 0.65f));
+        float rested01 = Mathf.Approximately(comfortableStamina01, minimumStamina01)
+            ? 1f
+            : Mathf.InverseLerp(minimumStamina01, comfortableStamina01, currentStamina01);
+        return Mathf.Lerp(-0.08f, 0.03f, rested01);
+    }
+
+    private static PawPalPetCircadianState EvaluateTrainingCircadian(float localHour)
+    {
+        return PawPalTimeOfDayEvaluator.EvaluatePetCircadian(
+            localHour,
+            PetMorningStartHour,
+            PetDaySteadyStartHour,
+            PetEveningStartHour,
+            PetNightStartHour,
+            PetWakeTransitionHours,
+            PetEveningTransitionHours);
+    }
+
+    private static float GetCircadianSuccessModifier(float localHour)
+    {
+        PawPalPetCircadianState circadian = EvaluateTrainingCircadian(localHour);
+        if (circadian.ForceSleep)
+        {
+            return -0.16f;
+        }
+
+        return Mathf.Lerp(-0.06f, 0.04f, circadian.Activity01)
+            - Mathf.Lerp(0f, 0.05f, circadian.Sleepiness01);
+    }
+
+    private static float GetResolvedTrainingLocalHour()
+    {
+        return Application.isPlaying
+            ? (float)DateTime.Now.TimeOfDay.TotalHours
+            : 11f;
+    }
+
     private static float GetRepeatedPracticePenalty(PawPalDogTrickProgress progress, PawPalTrickDefinition definition, PawPalTrainingConfig config)
     {
         if (progress == null)
@@ -464,6 +539,17 @@ public static class PawPalTrickProgressionService
         if (dog.TrainingFatigue01 > 0.72f)
         {
             return dog.DisplayName + " needs a training break.";
+        }
+
+        PawPalPetCircadianState circadian = EvaluateTrainingCircadian(GetResolvedTrainingLocalHour());
+        if (circadian.ForceSleep || circadian.Sleepiness01 >= 0.88f)
+        {
+            return dog.DisplayName + " looks too sleepy to train right now.";
+        }
+
+        if (GetStaminaSuccessModifier(dog, definition) <= -0.04f || dog.TrainingFatigue01 > 0.58f)
+        {
+            return dog.DisplayName + " looks tired and needs a breather.";
         }
 
         return dog.DisplayName + " almost had " + definition.DisplayName + ".";

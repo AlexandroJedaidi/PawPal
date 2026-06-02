@@ -19,6 +19,15 @@ public sealed class PawPalGestureSnapshot
 [DisallowMultipleComponent]
 public sealed class PawPalGestureRecognizer : MonoBehaviour
 {
+    private const float PetStrokeMinPixels = 12f;
+    private const float PetStrokeMaxSeconds = 0.9f;
+    private const float DogRectHorizontalPadding01 = 0.18f;
+    private const float DogRectBottomPadding01 = 0.14f;
+    private const float DogRectTopPadding01 = 0.28f;
+    private const float MinimumDogRectHorizontalPaddingPixels = 20f;
+    private const float MinimumDogRectBottomPaddingPixels = 18f;
+    private const float MinimumDogRectTopPaddingPixels = 28f;
+
     [SerializeField] private float minSwipePixels = 58f;
     [SerializeField] private float maxTapPixels = 28f;
     [SerializeField] private float maxTapSeconds = 0.32f;
@@ -175,6 +184,15 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
             return snapshot;
         }
 
+        if (IsPetStrokeGesture(startZone, endZone, duration, swipeThreshold, gesturePoints))
+        {
+            snapshot.Type = PawPalGestureType.PetStroke;
+            snapshot.CandidateTrick = PawPalTrickId.Sit;
+            snapshot.RejectionReason = PawPalTrickFailureReason.None;
+            snapshot.DebugText = "Pet stroke";
+            return snapshot;
+        }
+
         if (distance <= tapThreshold && duration >= minHoldSeconds)
         {
             snapshot.Type = PawPalGestureType.Hold;
@@ -213,6 +231,65 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
 
         snapshot.DebugText = "Gesture too small or off target";
         return snapshot;
+    }
+
+    private static bool IsPetStrokeGesture(
+        PawPalDogBodyZone gestureStartZone,
+        PawPalDogBodyZone gestureEndZone,
+        float durationSeconds,
+        float swipeThreshold,
+        IList<Vector2> points)
+    {
+        if (!IsPettableDogBodyZone(gestureStartZone)
+            || !IsPettableDogBodyZone(gestureEndZone)
+            || points == null
+            || points.Count < 2)
+        {
+            return false;
+        }
+
+        if (durationSeconds > PetStrokeMaxSeconds)
+        {
+            return false;
+        }
+
+        float pathLength = GetGesturePathLength(points);
+        float directDistance = Vector2.Distance(points[0], points[points.Count - 1]);
+        if (pathLength < PetStrokeMinPixels
+            || directDistance < PetStrokeMinPixels * 0.55f
+            || directDistance >= swipeThreshold * 0.92f)
+        {
+            return false;
+        }
+
+        return pathLength <= swipeThreshold * 1.35f;
+    }
+
+    private static float GetGesturePathLength(IList<Vector2> points)
+    {
+        if (points == null || points.Count < 2)
+        {
+            return 0f;
+        }
+
+        float pathLength = 0f;
+        for (int i = 1; i < points.Count; i++)
+        {
+            pathLength += Vector2.Distance(points[i - 1], points[i]);
+        }
+
+        return pathLength;
+    }
+
+    private static bool IsPettableDogBodyZone(PawPalDogBodyZone zone)
+    {
+        return zone == PawPalDogBodyZone.Head
+            || zone == PawPalDogBodyZone.Chest
+            || zone == PawPalDogBodyZone.Back
+            || zone == PawPalDogBodyZone.Belly
+            || zone == PawPalDogBodyZone.PawLeft
+            || zone == PawPalDogBodyZone.PawRight
+            || zone == PawPalDogBodyZone.Tail;
     }
 
     private bool IsCircularGesture()
@@ -396,10 +473,13 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
         }
 
         rect = Rect.MinMaxRect(screenMin.x, screenMin.y, screenMax.x, screenMax.y);
-        rect.xMin -= rect.width * 0.12f;
-        rect.xMax += rect.width * 0.12f;
-        rect.yMin -= rect.height * 0.08f;
-        rect.yMax += rect.height * 0.2f;
+        float horizontalPadding = Mathf.Max(MinimumDogRectHorizontalPaddingPixels, rect.width * DogRectHorizontalPadding01);
+        float bottomPadding = Mathf.Max(MinimumDogRectBottomPaddingPixels, rect.height * DogRectBottomPadding01);
+        float topPadding = Mathf.Max(MinimumDogRectTopPaddingPixels, rect.height * DogRectTopPadding01);
+        rect.xMin -= horizontalPadding;
+        rect.xMax += horizontalPadding;
+        rect.yMin -= bottomPadding;
+        rect.yMax += topPadding;
         return rect.width > 1f && rect.height > 1f;
     }
 

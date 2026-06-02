@@ -5,24 +5,32 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class PawPalDogInteractionDirector : MonoBehaviour
 {
-    private const float CameraApproachDistance = 0.8f;
-    private const float CameraApproachSampleRadius = 1.6f;
+    private const float MinimumDogNavigationRadius = 0.14f;
+    private const float MaximumDogNavigationRadius = 0.3f;
+    private const float MinimumCameraApproachDistance = 0.64f;
+    private const float MaximumCameraApproachDistance = 0.96f;
+    private const float MinimumCameraApproachSampleRadius = 1.3f;
+    private const float MaximumCameraApproachSampleRadius = 1.8f;
     private const float CameraApproachTimeout = 5.5f;
     private const float CameraApproachTimeoutPerMeter = 2.35f;
     private const float CameraApproachTimeoutPadding = 2.8f;
     private const float CameraApproachTimeoutMax = 12f;
     private const float CameraFaceDuration = 0.45f;
     private const float ArrivalBarkDuration = 0.35f;
-    private const float CameraApproachSideOffset = 0.6f;
-    private const float CameraApproachWideSideOffset = 1.05f;
+    private const float MinimumCameraApproachSideOffset = 0.48f;
+    private const float MaximumCameraApproachSideOffset = 0.68f;
+    private const float MinimumCameraApproachWideSideOffset = 0.88f;
+    private const float MaximumCameraApproachWideSideOffset = 1.12f;
     private const float CameraApproachToyPadding = 0.14f;
     private const float CameraApproachReachedDistance = 0.16f;
     private const float CameraApproachAlternativePointDistance = 0.35f;
-    private const float CameraApproachDogClearanceRadius = 0.38f;
+    private const float MinimumCameraApproachDogClearanceRadius = 0.3f;
+    private const float MaximumCameraApproachDogClearanceRadius = 0.46f;
     private const float CameraApproachBlockedCandidatePenalty = 6f;
     private const float CameraApproachBusyBlockerPenalty = 3.5f;
     private const float CameraApproachRestingBlockerPenalty = 12f;
-    private const float CameraApproachExtraWideSideOffset = 1.22f;
+    private const float MinimumCameraApproachExtraWideSideOffset = 1.04f;
+    private const float MaximumCameraApproachExtraWideSideOffset = 1.3f;
     private const float BlockerYieldCorridorRadius = 0.78f;
     private const float BlockerYieldPointClearance = 0.42f;
     private const float BlockerYieldTimeout = 2.8f;
@@ -571,7 +579,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         }
 
         Vector3 safePoint;
-        if (!dog.TryGetRoomSafePoint(dog.transform.position, CameraApproachSampleRadius, out safePoint))
+        if (!dog.TryGetRoomSafePoint(dog.transform.position, GetCameraApproachSampleRadius(dog), out safePoint))
         {
             failureReason = "Your dog needs a NavMesh spot.";
             return false;
@@ -593,6 +601,12 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         {
             return false;
         }
+
+        float approachDistance = GetCameraApproachDistance(dog);
+        float sampleRadius = GetCameraApproachSampleRadius(dog);
+        float sideOffset = GetCameraApproachSideOffset(dog);
+        float wideSideOffset = GetCameraApproachWideSideOffset(dog);
+        float extraWideSideOffset = GetCameraApproachExtraWideSideOffset(dog);
 
         Vector3 forward = camera.transform.forward;
         forward.y = 0f;
@@ -624,14 +638,19 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         float[] sideOffsets =
         {
             0f,
-            -CameraApproachSideOffset,
-            CameraApproachSideOffset,
-            -CameraApproachWideSideOffset,
-            CameraApproachWideSideOffset,
-            -CameraApproachExtraWideSideOffset,
-            CameraApproachExtraWideSideOffset
+            -sideOffset,
+            sideOffset,
+            -wideSideOffset,
+            wideSideOffset,
+            -extraWideSideOffset,
+            extraWideSideOffset
         };
-        float[] forwardDistances = { CameraApproachDistance, Mathf.Max(0.55f, CameraApproachDistance - 0.16f), CameraApproachDistance + 0.18f };
+        float[] forwardDistances =
+        {
+            approachDistance,
+            Mathf.Max(MinimumCameraApproachDistance - 0.02f, approachDistance - 0.14f),
+            approachDistance + 0.18f
+        };
 
         for (int distanceIndex = 0; distanceIndex < forwardDistances.Length; distanceIndex++)
         {
@@ -642,7 +661,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
                     + right * sideOffsets[sideIndex];
                 candidate.y = dog.transform.position.y;
                 Vector3 safePoint;
-                if (!dog.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out safePoint))
+                if (!dog.TryGetRoomSafePoint(candidate, sampleRadius, out safePoint))
                 {
                     continue;
                 }
@@ -676,7 +695,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
                 float score = pathScore
                     + dogPenalty
                     + Mathf.Abs(sideOffsets[sideIndex]) * 0.08f
-                    + Mathf.Abs(forwardDistances[distanceIndex] - CameraApproachDistance) * 0.2f;
+                    + Mathf.Abs(forwardDistances[distanceIndex] - approachDistance) * 0.2f;
                 if (score >= bestScore)
                 {
                     continue;
@@ -695,7 +714,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
 
         Vector3 fallbackCandidate = Vector3.Lerp(dog.transform.position, camera.transform.position, 0.35f);
         fallbackCandidate.y = dog.transform.position.y;
-        if (dog.TryGetRoomSafePoint(fallbackCandidate, CameraApproachSampleRadius, out approachPoint)
+        if (dog.TryGetRoomSafePoint(fallbackCandidate, sampleRadius, out approachPoint)
             && (!excludedPoint.HasValue || Vector3.Distance(excludedPoint.Value, approachPoint) >= CameraApproachAlternativePointDistance)
             && !dog.IsToyBlockingPathTo(approachPoint, CameraApproachToyPadding)
             && !IsCameraApproachBlockedByImmovableDog(dog, approachPoint)
@@ -723,8 +742,9 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
             return 0f;
         }
 
+        float clearanceRadius = GetCameraApproachDogClearanceRadius(dog);
         float penalty = 0f;
-        if (!IsPointClearOfOtherDogs(approachPoint, null, dog, CameraApproachDogClearanceRadius))
+        if (!IsPointClearOfOtherDogs(approachPoint, null, dog, clearanceRadius))
         {
             penalty += CameraApproachBlockedCandidatePenalty;
         }
@@ -817,5 +837,45 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
         }
 
         return closestDistance < float.MaxValue;
+    }
+
+    private static float GetCameraApproachDistance(DogRoomAgent dog)
+    {
+        return GetCameraApproachDistanceForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f);
+    }
+
+    private static float GetCameraApproachDistanceForFootprintRadius(float dogFootprintRadius)
+    {
+        return Mathf.Lerp(MinimumCameraApproachDistance, MaximumCameraApproachDistance, GetInteractionSize01ForFootprintRadius(dogFootprintRadius));
+    }
+
+    private static float GetCameraApproachSampleRadius(DogRoomAgent dog)
+    {
+        return Mathf.Lerp(MinimumCameraApproachSampleRadius, MaximumCameraApproachSampleRadius, GetInteractionSize01ForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f));
+    }
+
+    private static float GetCameraApproachSideOffset(DogRoomAgent dog)
+    {
+        return Mathf.Lerp(MinimumCameraApproachSideOffset, MaximumCameraApproachSideOffset, GetInteractionSize01ForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f));
+    }
+
+    private static float GetCameraApproachWideSideOffset(DogRoomAgent dog)
+    {
+        return Mathf.Lerp(MinimumCameraApproachWideSideOffset, MaximumCameraApproachWideSideOffset, GetInteractionSize01ForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f));
+    }
+
+    private static float GetCameraApproachExtraWideSideOffset(DogRoomAgent dog)
+    {
+        return Mathf.Lerp(MinimumCameraApproachExtraWideSideOffset, MaximumCameraApproachExtraWideSideOffset, GetInteractionSize01ForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f));
+    }
+
+    private static float GetCameraApproachDogClearanceRadius(DogRoomAgent dog)
+    {
+        return Mathf.Lerp(MinimumCameraApproachDogClearanceRadius, MaximumCameraApproachDogClearanceRadius, GetInteractionSize01ForFootprintRadius(dog != null ? dog.GetInteractionNavigationFootprintRadius() : 0.2f));
+    }
+
+    private static float GetInteractionSize01ForFootprintRadius(float dogFootprintRadius)
+    {
+        return Mathf.Clamp01(Mathf.InverseLerp(MinimumDogNavigationRadius, MaximumDogNavigationRadius, dogFootprintRadius));
     }
 }

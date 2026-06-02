@@ -86,7 +86,12 @@ public sealed class IntroPetSpawner : MonoBehaviour
             return null;
         }
 
-        GameObject instance = Instantiate(prefab, position, rotation, transform);
+        GameObject instance = InstantiatePrefabObject(prefab, definition, variant, position, rotation);
+        if (instance == null)
+        {
+            return null;
+        }
+
         instance.name = "IntroPet_" + (definition != null ? definition.DisplayName : "Pet");
         IntroPetAgent agent = instance.GetComponent<IntroPetAgent>();
         if (agent == null)
@@ -98,6 +103,52 @@ public sealed class IntroPetSpawner : MonoBehaviour
         agents.Insert(Mathf.Clamp(index, 0, agents.Count), agent);
         RefreshAgentIndexes();
         return agent;
+    }
+
+    private GameObject InstantiatePrefabObject(
+        GameObject prefab,
+        IntroPetDefinition definition,
+        FurVariantDefinition variant,
+        Vector3 position,
+        Quaternion rotation)
+    {
+        try
+        {
+            UnityEngine.Object clone = UnityEngine.Object.Instantiate((UnityEngine.Object)prefab, position, rotation, transform);
+            if (clone is GameObject gameObject)
+            {
+                return gameObject;
+            }
+
+            if (clone is Component component)
+            {
+                return component.gameObject;
+            }
+
+            Debug.LogWarning(
+                "IntroPetSelection could not spawn "
+                + GetPetLabel(definition)
+                + " because the prefab reference resolved to "
+                + (clone != null ? clone.GetType().Name : "null")
+                + " instead of a GameObject.");
+
+            if (clone != null)
+            {
+                Destroy(clone);
+            }
+        }
+        catch (InvalidCastException exception)
+        {
+            Debug.LogWarning(
+                "IntroPetSelection could not spawn "
+                + GetPetLabel(definition)
+                + " from variant '"
+                + GetVariantLabel(variant)
+                + "' because its prefab reference is not a valid GameObject. "
+                + exception.Message);
+        }
+
+        return null;
     }
 
     private void Clear()
@@ -127,6 +178,18 @@ public sealed class IntroPetSpawner : MonoBehaviour
     private static int CompareDefinitions(IntroPetDefinition first, IntroPetDefinition second)
     {
         return GetSortOrder(first).CompareTo(GetSortOrder(second));
+    }
+
+    private static string GetPetLabel(IntroPetDefinition definition)
+    {
+        return definition != null && !string.IsNullOrWhiteSpace(definition.DisplayName)
+            ? definition.DisplayName
+            : "an intro pet";
+    }
+
+    private static string GetVariantLabel(FurVariantDefinition variant)
+    {
+        return variant != null ? variant.SafeDisplayName : "default";
     }
 
     private static int GetSortOrder(IntroPetDefinition definition)
