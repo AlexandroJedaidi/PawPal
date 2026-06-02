@@ -40,6 +40,10 @@ public class DogDetailsWidgetView : MonoBehaviour
     private Button pagerNextButton;
     private Image pagerPreviousIcon;
     private Image pagerNextIcon;
+    private Button breedPreviousButton;
+    private Button breedNextButton;
+    private Image breedPreviousIcon;
+    private Image breedNextIcon;
     private TextMeshProUGUI dogNameLabel;
     private Image walkStaminaFill;
     private TextMeshProUGUI enduranceValueLabel;
@@ -149,12 +153,12 @@ public class DogDetailsWidgetView : MonoBehaviour
         row.sizeDelta = new Vector2(222f, 24f);
         row.anchoredPosition = new Vector2(0f, -15f);
 
-        CreateArrow(row, sprites, "BackArrow", "UI/Figma/HomeMain/button_back", new Vector2(-105f, -12f), true);
+        CreateArrow(row, sprites, "BackArrow", "UI/Figma/HomeMain/button_back", new Vector2(-105f, -12f), true, out breedPreviousButton, out breedPreviousIcon);
         CreateNameField(row);
-        CreateArrow(row, sprites, "ForwardArrow", "UI/Figma/HomeMain/button_forward", new Vector2(105f, -12f), false);
+        CreateArrow(row, sprites, "ForwardArrow", "UI/Figma/HomeMain/button_forward", new Vector2(105f, -12f), false, out breedNextButton, out breedNextIcon);
     }
 
-    private void CreateArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, bool previousDog)
+    private void CreateArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, bool previousDog, out Button button, out Image icon)
     {
         Image hitArea = UiFactory.CreateImage(name + "HitArea", parent, UiTheme.WhiteSprite, new Color(1f, 1f, 1f, 0.002f));
         hitArea.type = Image.Type.Simple;
@@ -165,16 +169,16 @@ public class DogDetailsWidgetView : MonoBehaviour
         hitArea.rectTransform.sizeDelta = new Vector2(28f, 28f);
         hitArea.rectTransform.anchoredPosition = anchoredPosition;
 
-        Image arrow = UiFactory.CreateImage(name, hitArea.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
-        arrow.type = Image.Type.Simple;
-        arrow.preserveAspect = true;
-        arrow.raycastTarget = false;
-        arrow.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.sizeDelta = SelectorArrowSize;
-        arrow.rectTransform.anchoredPosition = Vector2.zero;
-        UiFactory.AddButton(hitArea.gameObject, delegate
+        icon = UiFactory.CreateImage(name, hitArea.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = SelectorArrowSize;
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+        button = UiFactory.AddButton(hitArea.gameObject, delegate
         {
             if (previousDog)
             {
@@ -364,6 +368,21 @@ public class DogDetailsWidgetView : MonoBehaviour
     }
 
     private static void RefreshPagerArrow(Button button, Image icon, bool enabled)
+    {
+        if (button != null)
+        {
+            button.interactable = enabled;
+        }
+
+        if (icon != null)
+        {
+            Color color = Color.white;
+            color.a = enabled ? 1f : 0.28f;
+            icon.color = color;
+        }
+    }
+
+    private static void RefreshSimpleArrow(Button button, Image icon, bool enabled)
     {
         if (button != null)
         {
@@ -751,7 +770,14 @@ public class DogDetailsWidgetView : MonoBehaviour
 
     private static float GetStatLevelFillAmount(int value, float maxValue)
     {
-        return Mathf.Clamp01(value / Mathf.Max(1f, maxValue));
+        float clampedMax = Mathf.Max(1f, maxValue);
+        float clampedValue = Mathf.Clamp(value, 1f, clampedMax);
+        if (clampedMax <= 1f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01((clampedValue - 1f) / (clampedMax - 1f));
     }
 
     private void CreateNeed(RectTransform parent, UiSpriteLibrary sprites, PawPalDogNeed need, string labelText, string iconName, Color32 circleColor, Vector2 anchoredPosition, Vector2 iconSize, float iconTop)
@@ -865,6 +891,12 @@ public class DogDetailsWidgetView : MonoBehaviour
         RefreshNeedVisual(PawPalDogNeed.Activity, dog.Activity01);
         RefreshTrickTiles(dog);
         RefreshProfile(dog);
+    }
+
+    public void SetDogSwitchingEnabled(bool enabled)
+    {
+        RefreshSimpleArrow(breedPreviousButton, breedPreviousIcon, enabled);
+        RefreshSimpleArrow(breedNextButton, breedNextIcon, enabled);
     }
 
     private static void RefreshLevelStat(TextMeshProUGUI valueLabel, Image ringFill, int value)

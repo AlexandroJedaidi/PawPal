@@ -408,7 +408,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (EventSystem.current != null)
+        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
         {
             return;
         }

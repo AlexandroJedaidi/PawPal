@@ -1759,6 +1759,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         PawPalDogPersonalityProfiles.EnsureProfile(dogState);
         EnsureWalkData(dogState);
         EnsureTrickData(dogState);
+        RemoveOtherTemporaryIntroPets(dogState.Id);
 
         int dogIndex = -1;
         for (int i = 0; i < dogs.Count; i++)
@@ -1793,6 +1794,42 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         CommitState(false, false, false);
         return true;
+    }
+
+    private void RemoveOtherTemporaryIntroPets(string keepDogId)
+    {
+        for (int i = dogs.Count - 1; i >= 0; i--)
+        {
+            PawPalDogState existingDog = dogs[i];
+            if (existingDog == null || !IsTemporaryIntroDogId(existingDog.Id))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(keepDogId)
+                && string.Equals(existingDog.Id, keepDogId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            dogs.RemoveAt(i);
+            temporaryIntroDogIds.Remove(existingDog.Id);
+            petSpeciesById.Remove(existingDog.Id);
+            dogEquipmentByDogId.Remove(existingDog.Id);
+
+            if (activeDogIndex > i)
+            {
+                activeDogIndex--;
+            }
+
+            if (lastPersistentActiveDogIndex > i)
+            {
+                lastPersistentActiveDogIndex--;
+            }
+        }
+
+        activeDogIndex = Mathf.Clamp(activeDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
+        lastPersistentActiveDogIndex = Mathf.Clamp(lastPersistentActiveDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
     }
 
     public IntroPetSpecies GetPetSpecies(string petId)
@@ -1905,6 +1942,27 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         dog.ModifyNeed(PawPalDogNeed.Hygiene, 0.45f);
         ApplyActionRewards(PawPalPlayerActionType.CleanDog);
         CommitState(true, false, true);
+    }
+
+    public bool TryStartHygieneNeedInteraction()
+    {
+        if (ActiveDog == null)
+        {
+            return false;
+        }
+
+        PawPalPetGroomingDirector director = ResolvePetGroomingDirector();
+        if (director == null)
+        {
+            Debug.LogWarning("PawPalGameRuntime could not find a PawPalPetGroomingDirector for hygiene interaction.");
+            return false;
+        }
+
+        string dogId = ActiveDog.Id;
+        return director.TryStartInteraction(delegate
+        {
+            CompleteHygieneNeedInteraction(dogId);
+        });
     }
 
     public void PlayWithActiveDog()
@@ -3646,6 +3704,36 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         GameObject directorObject = new GameObject("DogNeedInteractionDirector");
         return directorObject.AddComponent<DogNeedInteractionDirector>();
+    }
+
+    private PawPalPetGroomingDirector ResolvePetGroomingDirector()
+    {
+        if (PawPalPetGroomingDirector.Instance != null)
+        {
+            return PawPalPetGroomingDirector.Instance;
+        }
+
+        PawPalPetGroomingDirector director = FindFirstObjectByType<PawPalPetGroomingDirector>();
+        if (director != null)
+        {
+            return director;
+        }
+
+        GameObject directorObject = new GameObject("PawPalPetGroomingDirector");
+        return directorObject.AddComponent<PawPalPetGroomingDirector>();
+    }
+
+    private void CompleteHygieneNeedInteraction(string dogId)
+    {
+        PawPalDogState dog = FindDogState(dogId);
+        if (dog == null)
+        {
+            return;
+        }
+
+        dog.SetNeed(PawPalDogNeed.Hygiene, 1f);
+        ApplyActionRewards(PawPalPlayerActionType.CleanDog);
+        CommitState(true, false, true);
     }
 
     private void ApplyActionRewards(PawPalPlayerActionType actionType)

@@ -446,14 +446,23 @@ public class HomeScreenView : AppScreenViewBase
         }
 
         PawPalDogState activeDog = runtime.ActiveDog;
+        bool allowDogSwitching = activeDog != null
+            && runtime.Dogs.Count > 1
+            && !runtime.IsTemporaryIntroDog(activeDog.Id);
         if (dogDetails != null)
         {
             dogDetails.SetDogState(activeDog);
+            dogDetails.SetDogSwitchingEnabled(allowDogSwitching);
         }
 
         if (inventoryNameBar != null && activeDog != null)
         {
             inventoryNameBar.SetDogName(activeDog.DisplayName);
+            inventoryNameBar.SetDogSwitchingEnabled(allowDogSwitching);
+        }
+        else if (inventoryNameBar != null)
+        {
+            inventoryNameBar.SetDogSwitchingEnabled(false);
         }
 
         if (inventoryPanel != null)
@@ -594,7 +603,7 @@ public class HomeScreenView : AppScreenViewBase
                 runtime.TryStartWaterNeedInteraction();
                 break;
             case PawPalDogNeed.Hygiene:
-                runtime.CleanActiveDog();
+                runtime.TryStartHygieneNeedInteraction();
                 break;
             case PawPalDogNeed.Activity:
                 runtime.PlayWithActiveDog();

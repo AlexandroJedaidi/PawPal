@@ -621,7 +621,8 @@ public sealed class IntroPetUIController : MonoBehaviour
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = new Vector2(centerPosition.x, -centerPosition.y);
         rect.sizeDelta = new Vector2(56f, 56f);
-        UiFactory.AddButton(hitArea.gameObject, onClick);
+        Button button = UiFactory.AddButton(hitArea.gameObject, onClick);
+        PawPalUiAudio.AttachTo(button, PawPalUiClickSoundKind.Menu);
 
         Sprite arrowSprite = Resources.Load<Sprite>(resourcePath);
         if (arrowSprite == null)

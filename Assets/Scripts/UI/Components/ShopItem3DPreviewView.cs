@@ -630,8 +630,8 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
     private bool BuildWearablePreview(PawPalCatalogItemDefinition item, GameObject wearablePrefab)
     {
-        GameObject dogPrefab = Resources.Load<GameObject>(PreviewDogResourcePath);
-        if (dogPrefab == null)
+        GameObject dogSource = ResolveWearablePreviewDogSource();
+        if (dogSource == null)
         {
             GameObject standalone = Instantiate(wearablePrefab, modelRoot, false);
             standalone.name = wearablePrefab.name;
@@ -641,8 +641,8 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             return true;
         }
 
-        GameObject dog = Instantiate(dogPrefab, modelRoot, false);
-        dog.name = dogPrefab.name;
+        GameObject dog = Instantiate(dogSource, modelRoot, false);
+        dog.name = dogSource.name;
         StripPreviewOnlyComponents(dog, true);
         previewDogAnimator = ConfigurePreviewDogAnimator(dog);
 
@@ -678,6 +678,20 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         ApplyPreviewTint(wearable, item.CollarTint);
         StartPreviewDogAnimation();
         return true;
+    }
+
+    private static GameObject ResolveWearablePreviewDogSource()
+    {
+        PawPalRoomPetHandle activePet = PawPalRoomPetRuntime.ResolveActivePet();
+        if (activePet != null
+            && activePet.IsValid
+            && activePet.IsDog
+            && activePet.RootTransform != null)
+        {
+            return activePet.RootTransform.gameObject;
+        }
+
+        return Resources.Load<GameObject>(PreviewDogResourcePath);
     }
 
     private string ResolvePreviewPrefabPath(PawPalCatalogItemDefinition item)

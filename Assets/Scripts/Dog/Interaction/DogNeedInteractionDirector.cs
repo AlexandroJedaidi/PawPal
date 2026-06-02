@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -15,6 +16,13 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
     private const string EditorDrinkingAudioAssetPath = "Assets/Audio/dog_drinking.mp3";
     private const float MinRuntimeBowlApproachDistance = 0.14f;
     private const float MaxRuntimeBowlApproachDistance = 0.5f;
+    private const string StarBurstResourcePath = "UI/Interaction/star";
+    private const float SymbolBurstDuration = 1.2f;
+    private const float SymbolBurstScreenLift = 68f;
+    private const float SymbolBurstRise = 44f;
+    private const float SymbolBurstSpacing = 24f;
+    private const float SymbolBurstIconSize = 34f;
+    private const float SymbolBurstHeadOffset = 0.08f;
 
     [Header("Bowl Prefabs")]
     [SerializeField] private GameObject foodBowlPrefab;
@@ -48,7 +56,17 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float bowlUseVolume = 0.75f;
 
     private Coroutine activeRoutine;
+    private Coroutine rewardBurstRoutine;
     private GameObject activeBowl;
+    private RectTransform rewardBurstRoot;
+    private RectTransform[] rewardBurstSymbols;
+    private Image[] rewardBurstImages;
+    private readonly Vector2[] rewardBurstBaseOffsets =
+    {
+        new Vector2(-SymbolBurstSpacing, 2f),
+        new Vector2(0f, -8f),
+        new Vector2(SymbolBurstSpacing, 6f)
+    };
 
     public static DogNeedInteractionDirector Instance { get; private set; }
 
@@ -191,6 +209,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             yield return pet.FaceTarget(activeBowl.transform, faceDuration);
             StartCoroutine(PlayBowlUseAudio(pet.RootTransform, activeBowl.transform, need, useLoopDuration));
             yield return pet.PlayBowlUse(need == PawPalDogNeed.Water, useLoopDuration);
+            ShowNeedCompletionBurst(pet);
 
             completed = true;
             if (onCompleted != null)
@@ -515,6 +534,211 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
 
         Destroy(audioObject);
+    }
+
+    private void ShowNeedCompletionBurst(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid)
+        {
+            return;
+        }
+
+        EnsureRewardBurstOverlay();
+        if (rewardBurstRoot == null || rewardBurstSymbols == null || rewardBurstImages == null)
+        {
+            return;
+        }
+
+        if (rewardBurstRoutine != null)
+        {
+            StopCoroutine(rewardBurstRoutine);
+            rewardBurstRoutine = null;
+        }
+
+        rewardBurstRoutine = StartCoroutine(PlayNeedCompletionBurstRoutine(pet));
+    }
+
+    private IEnumerator PlayNeedCompletionBurstRoutine(PawPalRoomPetHandle pet)
+    {
+        Sprite burstSprite = Resources.Load<Sprite>(StarBurstResourcePath);
+        if (burstSprite == null)
+        {
+            yield break;
+        }
+
+        for (int i = 0; i < rewardBurstSymbols.Length; i++)
+        {
+            if (rewardBurstSymbols[i] == null || rewardBurstImages[i] == null)
+            {
+                continue;
+            }
+
+            rewardBurstImages[i].sprite = burstSprite;
+            rewardBurstImages[i].color = Color.white;
+            rewardBurstSymbols[i].localScale = Vector3.one;
+            rewardBurstSymbols[i].gameObject.SetActive(true);
+        }
+
+        PawPalUiAudio.PlayHearts();
+
+        float shownAt = Time.unscaledTime;
+        float visibleUntil = shownAt + SymbolBurstDuration;
+        while (Time.unscaledTime < visibleUntil)
+        {
+            UpdateRewardBurstPosition(pet, shownAt);
+            yield return null;
+        }
+
+        HideRewardBurst();
+        rewardBurstRoutine = null;
+    }
+
+    private void EnsureRewardBurstOverlay()
+    {
+        if (rewardBurstRoot != null)
+        {
+            return;
+        }
+
+        Canvas hostCanvas = ResolveRewardBurstCanvas();
+        if (hostCanvas == null)
+        {
+            GameObject canvasObject = new GameObject("NeedRewardBurstCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            hostCanvas = canvasObject.GetComponent<Canvas>();
+            hostCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            hostCanvas.sortingOrder = 550;
+
+            CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            GraphicRaycaster raycaster = canvasObject.GetComponent<GraphicRaycaster>();
+            raycaster.enabled = false;
+        }
+
+        rewardBurstRoot = UiFactory.CreateRect("NeedRewardBurstRoot", hostCanvas.transform);
+        UiFactory.Stretch(rewardBurstRoot, 0f, 0f, 0f, 0f);
+
+        rewardBurstSymbols = new RectTransform[3];
+        rewardBurstImages = new Image[3];
+        for (int i = 0; i < rewardBurstSymbols.Length; i++)
+        {
+            RectTransform symbolRoot = UiFactory.CreateRect("NeedRewardSymbol_" + i, rewardBurstRoot);
+            symbolRoot.anchorMin = new Vector2(0.5f, 0.5f);
+            symbolRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            symbolRoot.pivot = new Vector2(0.5f, 0.5f);
+            symbolRoot.sizeDelta = new Vector2(SymbolBurstIconSize, SymbolBurstIconSize);
+
+            Image image = UiFactory.CreateImage("Icon", symbolRoot, UiTheme.WhiteSprite, Color.white);
+            image.type = Image.Type.Simple;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            UiFactory.Stretch(image.rectTransform, 0f, 0f, 0f, 0f);
+
+            Shadow shadow = image.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.16f);
+            shadow.effectDistance = new Vector2(0f, -1f);
+            shadow.useGraphicAlpha = true;
+
+            symbolRoot.gameObject.SetActive(false);
+            rewardBurstSymbols[i] = symbolRoot;
+            rewardBurstImages[i] = image;
+        }
+    }
+
+    private void UpdateRewardBurstPosition(PawPalRoomPetHandle pet, float shownAt)
+    {
+        if (rewardBurstRoot == null || rewardBurstSymbols == null)
+        {
+            return;
+        }
+
+        Camera camera = ResolveRoomCamera();
+        if (camera == null)
+        {
+            camera = Camera.main;
+        }
+
+        Transform focus = pet != null ? pet.FocusTransform : null;
+        if (focus == null)
+        {
+            focus = pet != null ? pet.RootTransform : null;
+        }
+
+        if (focus == null)
+        {
+            HideRewardBurst();
+            return;
+        }
+
+        Vector3 worldPosition = focus.position + Vector3.up * SymbolBurstHeadOffset;
+        Vector3 screenPoint = camera != null ? camera.WorldToScreenPoint(worldPosition) : new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 1f);
+        if (screenPoint.z <= 0f)
+        {
+            HideRewardBurst();
+            return;
+        }
+
+        Vector2 anchoredBase;
+        RectTransform canvasRect = rewardBurstRoot;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, screenPoint, null, out anchoredBase))
+        {
+            return;
+        }
+
+        float progress = Mathf.Clamp01((Time.unscaledTime - shownAt) / SymbolBurstDuration);
+        float eased = 1f - Mathf.Pow(1f - progress, 2f);
+        float rise = SymbolBurstScreenLift + (SymbolBurstRise * eased);
+        float alpha = 1f - eased;
+        float scale = Mathf.Lerp(1f, 1.1f, eased);
+
+        for (int i = 0; i < rewardBurstSymbols.Length; i++)
+        {
+            RectTransform symbol = rewardBurstSymbols[i];
+            Image image = rewardBurstImages[i];
+            if (symbol == null || image == null)
+            {
+                continue;
+            }
+
+            symbol.anchoredPosition = anchoredBase + rewardBurstBaseOffsets[i] + new Vector2(0f, rise);
+            symbol.localScale = new Vector3(scale, scale, 1f);
+            Color color = image.color;
+            color.a = alpha;
+            image.color = color;
+        }
+    }
+
+    private void HideRewardBurst()
+    {
+        if (rewardBurstSymbols == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < rewardBurstSymbols.Length; i++)
+        {
+            if (rewardBurstSymbols[i] == null)
+            {
+                continue;
+            }
+
+            rewardBurstSymbols[i].gameObject.SetActive(false);
+            rewardBurstSymbols[i].localScale = Vector3.one;
+        }
+    }
+
+    private static Canvas ResolveRewardBurstCanvas()
+    {
+        AppShellController shell = FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include);
+        if (shell != null)
+        {
+            return shell.GetComponent<Canvas>();
+        }
+
+        return FindFirstObjectByType<Canvas>(FindObjectsInactive.Include);
     }
 
     private Camera ResolveRoomCamera()

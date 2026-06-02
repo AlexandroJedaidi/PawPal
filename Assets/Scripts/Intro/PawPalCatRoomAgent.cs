@@ -35,6 +35,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     [SerializeField] private float toyPlayDurationMax = 3.2f;
     [SerializeField] private float socialCooldown = 3.2f;
 
+    [Header("Audio")]
+    [SerializeField] private AudioClip vocalClip;
+    [SerializeField, Range(0f, 1f)] private float vocalVolume = 0.78f;
+
     private Animator animator;
     private NavMeshAgent agent;
     private PetAnimationSet animationSet;
@@ -245,6 +249,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     public IEnumerator PlayBark(float duration)
     {
+        PlayVocalAudio();
         yield return RunOneShotRoutine(duration, "Vocal");
     }
 
@@ -378,6 +383,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void Awake()
     {
+        PawPalAudioResources.AssignIfMissing(ref vocalClip, PawPalAudioResources.CatMeow);
         InitializeSharedPresentation();
     }
 
@@ -768,6 +774,33 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         }
 
         return null;
+    }
+
+    private void PlayVocalAudio()
+    {
+        if (vocalClip == null)
+        {
+            return;
+        }
+
+        float volume = PawPalAudioSettings.ApplySoundEffectsVolume(vocalVolume);
+        if (volume <= 0f)
+        {
+            return;
+        }
+
+        GameObject audioObject = new GameObject(name + "_CatVocalAudio");
+        audioObject.transform.SetParent(transform, false);
+        audioObject.transform.localPosition = Vector3.zero;
+
+        AudioSource source = audioObject.AddComponent<AudioSource>();
+        source.playOnAwake = false;
+        source.loop = false;
+        source.spatialBlend = 0f;
+        source.volume = volume;
+        source.PlayOneShot(vocalClip, vocalVolume);
+
+        Destroy(audioObject, vocalClip.length + 0.1f);
     }
 
     private void FaceVelocity()

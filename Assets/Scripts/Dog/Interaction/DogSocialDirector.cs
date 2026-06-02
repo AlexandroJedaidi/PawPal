@@ -78,6 +78,8 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private float runtimeNavMeshObstaclePadding = 0.04f;
     [SerializeField] private float runtimeNavMeshGroundedObstacleClearance = 0.18f;
     [SerializeField] private float runtimeNavMeshMinimumObstacleHeight = 0.2f;
+    [SerializeField] private float runtimeNavMeshFoliagePadding = 0.18f;
+    [SerializeField] private float runtimeNavMeshFoliageMinimumRadius = 0.22f;
 
     [Header("Camera Focus")]
     [SerializeField] private bool focusCameraDuringSocialInteractions = true;
@@ -1465,6 +1467,7 @@ public class DogSocialDirector : MonoBehaviour
 
     private void AddGroundedObstacleFootprintSources(List<NavMeshBuildSource> sources, float floorY, Bounds navMeshBounds)
     {
+        HashSet<Transform> carvedTransforms = new HashSet<Transform>();
         Collider[] colliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
         for (int i = 0; i < colliders.Length; i++)
         {
@@ -1491,7 +1494,108 @@ public class DogSocialDirector : MonoBehaviour
                 Mathf.Max(0.05f, obstacleBounds.size.z + runtimeNavMeshObstaclePadding * 2f));
             obstacleSource.area = 1;
             sources.Add(obstacleSource);
+            carvedTransforms.Add(collider.transform.root);
         }
+
+        AddNamedFoliageFootprintSources(sources, floorY, navMeshBounds, carvedTransforms);
+    }
+
+    private void AddNamedFoliageFootprintSources(
+        List<NavMeshBuildSource> sources,
+        float floorY,
+        Bounds navMeshBounds,
+        HashSet<Transform> carvedTransforms)
+    {
+        Renderer[] renderers = FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+        HashSet<Transform> visitedRoots = new HashSet<Transform>();
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            Transform root = renderer.transform.root;
+            if (root == null || !visitedRoots.Add(root) || carvedTransforms.Contains(root))
+            {
+                continue;
+            }
+
+            if (!ShouldUseNamedFoliageObstacleRoot(root))
+            {
+                continue;
+            }
+
+            Bounds obstacleBounds;
+            if (!TryGetHierarchyRendererBounds(root, out obstacleBounds) || !obstacleBounds.Intersects(navMeshBounds))
+            {
+                continue;
+            }
+
+            float obstacleHeight = Mathf.Max(
+                Mathf.Max(0f, obstacleBounds.max.y - floorY),
+                Mathf.Max(0.05f, runtimeNavMeshMinimumObstacleHeight));
+            float obstacleRadius = Mathf.Max(
+                runtimeNavMeshFoliageMinimumRadius,
+                Mathf.Max(obstacleBounds.extents.x, obstacleBounds.extents.z) + runtimeNavMeshFoliagePadding);
+
+            NavMeshBuildSource obstacleSource = new NavMeshBuildSource();
+            obstacleSource.shape = NavMeshBuildSourceShape.Box;
+            obstacleSource.transform = Matrix4x4.TRS(
+                new Vector3(obstacleBounds.center.x, floorY + obstacleHeight * 0.5f, obstacleBounds.center.z),
+                Quaternion.identity,
+                Vector3.one);
+            obstacleSource.size = new Vector3(
+                Mathf.Max(0.05f, obstacleRadius * 2f),
+                obstacleHeight,
+                Mathf.Max(0.05f, obstacleRadius * 2f));
+            obstacleSource.area = 1;
+            sources.Add(obstacleSource);
+        }
+    }
+
+    private static bool ShouldUseNamedFoliageObstacleRoot(Transform root)
+    {
+        if (root == null)
+        {
+            return false;
+        }
+
+        string normalizedName = root.name.Replace(" ", string.Empty).ToLowerInvariant();
+        return normalizedName.Contains("furniture_foliageplant_");
+    }
+
+    private static bool TryGetHierarchyRendererBounds(Transform root, out Bounds bounds)
+    {
+        bounds = new Bounds();
+        if (root == null)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        return hasBounds;
     }
 
     private bool ShouldUseRuntimeNavMeshObstacle(Collider collider, float floorY, Bounds navMeshBounds)

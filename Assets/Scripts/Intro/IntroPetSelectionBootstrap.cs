@@ -590,7 +590,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (EventSystem.current != null)
+        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
         {
             return;
         }

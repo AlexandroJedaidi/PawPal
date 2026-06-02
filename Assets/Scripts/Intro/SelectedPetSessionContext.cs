@@ -44,18 +44,18 @@ public sealed class SelectedPetSessionData
             Water01 = 0.86f,
             Hygiene01 = 0.84f,
             Activity01 = 0.9f,
-            Energy01 = 0.92f,
+            Energy01 = 1f,
             TrickProfileVersion = PawPalTrickSaveDefaults.CurrentTrickProfileVersion,
-            Bond01 = PawPalTrickSaveDefaults.DefaultBond01,
-            BondXp = Mathf.RoundToInt(PawPalTrickSaveDefaults.DefaultBond01 * PawPalGameRuntime.MaxBondXp),
-            BondLevel = PawPalGameRuntime.GetBondLevelForXp(Mathf.RoundToInt(PawPalTrickSaveDefaults.DefaultBond01 * PawPalGameRuntime.MaxBondXp)),
+            Bond01 = 0f,
+            BondXp = 0,
+            BondLevel = 1,
             Mood01 = PawPalTrickSaveDefaults.DefaultMood01,
             TrainingFatigue01 = 0f,
             LastTrainingFatigueUpdateUtcTicks = DateTime.UtcNow.Ticks,
-            Endurance = 3,
-            Mobility = 3,
-            Speed = 3,
-            Focus = 3
+            Endurance = 1,
+            Mobility = 1,
+            Speed = 1,
+            Focus = 1
         };
 
         PawPalGameRuntime.EnsureDogBondProgression(state);

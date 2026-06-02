@@ -739,17 +739,18 @@ public class ShopScreenView : AppScreenViewBase
         string badgeText;
         float badgeWidth;
         Action onClick = null;
+        bool ownedForDisplay = IsOwnedForDisplay(item, runtime);
 
-        if (item.DisabledInShop)
-        {
-            badgeKind = CardBadgeKind.Owned;
-            badgeText = category == PawPalItemCategory.Dogs ? "Later" : "Soon";
-            badgeWidth = 51f;
-        }
-        else if (!item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id))
+        if (ownedForDisplay)
         {
             badgeKind = CardBadgeKind.Owned;
             badgeText = "Owned";
+            badgeWidth = 51f;
+        }
+        else if (item.DisabledInShop)
+        {
+            badgeKind = CardBadgeKind.Owned;
+            badgeText = category == PawPalItemCategory.Dogs ? "Later" : "Soon";
             badgeWidth = 51f;
         }
         else
@@ -1578,7 +1579,7 @@ public class ShopScreenView : AppScreenViewBase
             return false;
         }
 
-        if (!item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id))
+        if (IsOwnedForDisplay(item, runtime))
         {
             return false;
         }
@@ -1609,7 +1610,7 @@ public class ShopScreenView : AppScreenViewBase
             return item.DisabledReason;
         }
 
-        if (!item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id))
+        if (IsOwnedForDisplay(item, runtime))
         {
             return item.Description + "\nAlready owned.";
         }
@@ -1630,7 +1631,7 @@ public class ShopScreenView : AppScreenViewBase
             return "Not available";
         }
 
-        if (runtime != null && !item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id))
+        if (IsOwnedForDisplay(item, runtime))
         {
             return "Already owned";
         }
@@ -1646,7 +1647,7 @@ public class ShopScreenView : AppScreenViewBase
             return CardBadgeKind.Empty;
         }
 
-        if (item.DisabledInShop || (runtime != null && !item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id)))
+        if (IsOwnedForDisplay(item, runtime) || item.DisabledInShop)
         {
             return CardBadgeKind.Owned;
         }
@@ -1662,14 +1663,14 @@ public class ShopScreenView : AppScreenViewBase
             return string.Empty;
         }
 
-        if (item.DisabledInShop)
-        {
-            return "Soon";
-        }
-
-        if (runtime != null && !item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id))
+        if (IsOwnedForDisplay(item, runtime))
         {
             return "Owned";
+        }
+
+        if (item.DisabledInShop)
+        {
+            return item.Category == PawPalItemCategory.Dogs ? "Later" : "Soon";
         }
 
         return item.Price.ToString();
@@ -1688,6 +1689,77 @@ public class ShopScreenView : AppScreenViewBase
         }
 
         return 54f;
+    }
+
+    private static bool IsOwnedForDisplay(PawPalCatalogItemDefinition item, PawPalGameRuntime runtime)
+    {
+        if (item == null || runtime == null)
+        {
+            return false;
+        }
+
+        if (item.Category == PawPalItemCategory.Dogs)
+        {
+            return IsBreedAlreadyOwned(runtime, item);
+        }
+
+        return !item.CanPurchaseMultiple && runtime.IsItemOwned(item.Id);
+    }
+
+    private static bool IsBreedAlreadyOwned(PawPalGameRuntime runtime, PawPalCatalogItemDefinition item)
+    {
+        if (runtime == null || item == null)
+        {
+            return false;
+        }
+
+        string targetBreed = NormalizeBreedKey(item.DisplayName);
+        if (string.IsNullOrEmpty(targetBreed) && !string.IsNullOrEmpty(item.Id) && item.Id.StartsWith("dog_", StringComparison.OrdinalIgnoreCase))
+        {
+            targetBreed = NormalizeBreedKey(item.Id.Substring(4));
+        }
+
+        if (string.IsNullOrEmpty(targetBreed))
+        {
+            return false;
+        }
+
+        IReadOnlyList<PawPalDogState> dogs = runtime.Dogs;
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog == null)
+            {
+                continue;
+            }
+
+            if (NormalizeBreedKey(dog.Breed) == targetBreed)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeBreedKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char character = value[i];
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     private string GetSuccessSpritePath(PawPalCatalogItemDefinition item)

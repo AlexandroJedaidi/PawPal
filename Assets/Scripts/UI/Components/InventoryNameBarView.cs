@@ -9,6 +9,10 @@ public class InventoryNameBarView : MonoBehaviour
     private static readonly Vector2 SelectorArrowSize = new Vector2(16f, 24f);
 
     private TextMeshProUGUI dogNameLabel;
+    private Button previousDogButton;
+    private Button nextDogButton;
+    private Image previousDogIcon;
+    private Image nextDogIcon;
     private Action previousDogRequested;
     private Action nextDogRequested;
 
@@ -35,12 +39,12 @@ public class InventoryNameBarView : MonoBehaviour
         row.sizeDelta = new Vector2(235f, 24f);
         row.anchoredPosition = new Vector2(10f, -10f);
 
-        CreateArrow(row, sprites, "BackArrow", "UI/Figma/HomeMain/button_back", new Vector2(6f, -12f), true);
+        CreateArrow(row, sprites, "BackArrow", "UI/Figma/HomeMain/button_back", new Vector2(6f, -12f), true, out previousDogButton, out previousDogIcon);
         CreateNameField(row);
-        CreateArrow(row, sprites, "ForwardArrow", "UI/Figma/HomeMain/button_forward", new Vector2(229f, -12f), false);
+        CreateArrow(row, sprites, "ForwardArrow", "UI/Figma/HomeMain/button_forward", new Vector2(229f, -12f), false, out nextDogButton, out nextDogIcon);
     }
 
-    private void CreateArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, bool previousDog)
+    private void CreateArrow(RectTransform parent, UiSpriteLibrary sprites, string name, string resourcePath, Vector2 anchoredPosition, bool previousDog, out Button button, out Image icon)
     {
         Image hitArea = UiFactory.CreateImage(name + "HitArea", parent, UiTheme.WhiteSprite, new Color(1f, 1f, 1f, 0.002f));
         hitArea.type = Image.Type.Simple;
@@ -51,16 +55,16 @@ public class InventoryNameBarView : MonoBehaviour
         hitArea.rectTransform.sizeDelta = new Vector2(28f, 28f);
         hitArea.rectTransform.anchoredPosition = anchoredPosition;
 
-        Image arrow = UiFactory.CreateImage(name, hitArea.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
-        arrow.type = Image.Type.Simple;
-        arrow.preserveAspect = true;
-        arrow.raycastTarget = false;
-        arrow.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        arrow.rectTransform.sizeDelta = SelectorArrowSize;
-        arrow.rectTransform.anchoredPosition = Vector2.zero;
-        UiFactory.AddButton(hitArea.gameObject, delegate
+        icon = UiFactory.CreateImage(name, hitArea.rectTransform, sprites.GetResourceSprite(resourcePath), Color.white);
+        icon.type = Image.Type.Simple;
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        icon.rectTransform.sizeDelta = SelectorArrowSize;
+        icon.rectTransform.anchoredPosition = Vector2.zero;
+        button = UiFactory.AddButton(hitArea.gameObject, delegate
         {
             if (previousDog)
             {
@@ -109,5 +113,26 @@ public class InventoryNameBarView : MonoBehaviour
     {
         previousDogRequested = onPreviousDogRequested;
         nextDogRequested = onNextDogRequested;
+    }
+
+    public void SetDogSwitchingEnabled(bool enabled)
+    {
+        RefreshArrow(previousDogButton, previousDogIcon, enabled);
+        RefreshArrow(nextDogButton, nextDogIcon, enabled);
+    }
+
+    private static void RefreshArrow(Button button, Image icon, bool enabled)
+    {
+        if (button != null)
+        {
+            button.interactable = enabled;
+        }
+
+        if (icon != null)
+        {
+            Color color = Color.white;
+            color.a = enabled ? 1f : 0.28f;
+            icon.color = color;
+        }
     }
 }
