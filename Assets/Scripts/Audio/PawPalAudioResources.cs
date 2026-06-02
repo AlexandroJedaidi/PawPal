@@ -9,6 +9,7 @@ public static class PawPalAudioResources
     public const string BarkLight = "Audio/bark_light";
     public const string BarkDark = "Audio/bark_dark";
     public const string DogWalk = "Audio/dog_walk";
+    public const string DogYawning = "Audio/dog_yawn";
     public const string BallBounce = "Audio/ball_bounce";
     public const string ToyPickup = "Audio/toy_pickup";
     public const string Sniffing = "Audio/sniffing";

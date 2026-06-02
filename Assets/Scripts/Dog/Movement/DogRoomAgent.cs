@@ -77,8 +77,12 @@ public struct DogCircadianProfile
 public class DogRoomAgent : MonoBehaviour
 {
     private const float IntroPreviewVocalCooldownSeconds = 20f;
+    private const float DefaultSunriseHour = 7f;
+    private const float DefaultSunsetHour = 20f;
+    private const float DefaultTransitionHours = 1f;
 #if UNITY_EDITOR
     private const string EditorWalkAudioAssetPath = "Assets/Audio/dog_walk.mp3";
+    private const string EditorYawningAudioAssetPath = "Assets/Audio/dog_yawn.mp3";
     private const string EditorBallBounceAudioAssetPath = "Assets/Audio/ball_bounce.mp3";
     private const string EditorToyPickupAudioAssetPath = "Assets/Audio/toy_pickup.mp3";
     private const string EditorSniffingAudioAssetPath = "Assets/Audio/sniffing.mp3";
@@ -318,6 +322,7 @@ public class DogRoomAgent : MonoBehaviour
     [Header("Audio")]
     [SerializeField] private AudioClip walkingClip;
     [SerializeField, Range(0f, 1f)] private float walkingVolume = 0.18f;
+    [SerializeField] private AudioClip dogYawningClip;
     [SerializeField] private AudioClip ballBounceClip;
     [SerializeField, Range(0f, 1f)] private float ballBounceVolume = 0.65f;
     [SerializeField] private AudioClip toyPickupClip;
@@ -341,6 +346,13 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private AudioClip catScratchClip;
     [SerializeField, Range(0f, 1f)] private float tugGnarlVolume = 0.52f;
     [SerializeField, Range(0f, 1f)] private float idleActionVolume = 0.75f;
+    [SerializeField, Min(0.01f)] private float idle7BaseWeight = 1f;
+    [SerializeField, Min(0f)] private float idle7LowStaminaBonusWeight = 2.2f;
+    [SerializeField, Min(0f)] private float idle7LateDayBonusWeight = 1.8f;
+    [SerializeField, Range(0f, 1f)] private float idle7StaminaBiasStartFill01 = 0.55f;
+    [SerializeField, Range(0f, 1f)] private float idle7StaminaBiasFullFill01 = 0.2f;
+    [SerializeField, Range(0f, 24f)] private float idle7EveningStartHour = 17.5f;
+    [SerializeField, Range(0f, 24f)] private float idle7NightFullBiasHour = 21f;
     [SerializeField] private float minSecondsBetweenBallBounceSounds = 0.18f;
     [SerializeField] private Vector2 ambientPantingIntervalRange = new Vector2(20f, 32f);
     [SerializeField] private Vector2 interactionPantingIntervalRange = new Vector2(7f, 13f);
@@ -463,6 +475,7 @@ public class DogRoomAgent : MonoBehaviour
     private Vector3 selectedPetHomeCameraOffset = DefaultSelectedPetHomeCameraOffset;
     private PawPalPetMovementProfile movementProfile = PawPalPetMovementProfiles.DefaultProfile;
     private bool hasMovementProfile;
+    private LivingRoomGraphicsEnhancer livingRoomGraphicsEnhancer;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
     private Dictionary<string, AnimationClip> editorImportedPettingClips;
@@ -728,6 +741,11 @@ public class DogRoomAgent : MonoBehaviour
             }
 
             return null;
+        }
+
+        if (normalizedStateName.Contains("idle7"))
+        {
+            return dogYawningClip != null ? dogYawningClip : sniffingClip;
         }
 
         if (normalizedStateName.Contains("scratching") || fallbackIdleIndex == scratchIdleIndex)
@@ -6010,6 +6028,11 @@ public class DogRoomAgent : MonoBehaviour
             walkingClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorWalkAudioAssetPath);
         }
 
+        if (dogYawningClip == null)
+        {
+            dogYawningClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorYawningAudioAssetPath);
+        }
+
         if (ballBounceClip == null)
         {
             ballBounceClip = AssetDatabase.LoadAssetAtPath<AudioClip>(EditorBallBounceAudioAssetPath);
@@ -6066,6 +6089,7 @@ public class DogRoomAgent : MonoBehaviour
         }
 #endif
         PawPalAudioResources.AssignIfMissing(ref walkingClip, PawPalAudioResources.DogWalk);
+        PawPalAudioResources.AssignIfMissing(ref dogYawningClip, PawPalAudioResources.DogYawning);
         PawPalAudioResources.AssignIfMissing(ref ballBounceClip, PawPalAudioResources.BallBounce);
         PawPalAudioResources.AssignIfMissing(ref toyPickupClip, PawPalAudioResources.ToyPickup);
         PawPalAudioResources.AssignIfMissing(ref sniffingClip, PawPalAudioResources.Sniffing);
@@ -6491,17 +6515,32 @@ public class DogRoomAgent : MonoBehaviour
         int optionCount = GetStandingIdleOptionCount();
         if (optionCount > 0)
         {
-            int startIndex = Random.Range(0, optionCount);
+            float totalWeight = 0f;
             for (int i = 0; i < optionCount; i++)
             {
-                int candidateIndex = (startIndex + i) % optionCount;
-                if (!CanPlayStandingIdleOption(candidateIndex))
-                {
-                    continue;
-                }
+                totalWeight += GetStandingIdleOptionWeight(i);
+            }
 
-                yield return PlayStandingIdleOption(candidateIndex, duration);
-                yield break;
+            if (totalWeight > 0.001f)
+            {
+                float roll = Random.value * totalWeight;
+                for (int i = 0; i < optionCount; i++)
+                {
+                    float weight = GetStandingIdleOptionWeight(i);
+                    if (weight <= 0f)
+                    {
+                        continue;
+                    }
+
+                    roll -= weight;
+                    if (roll > 0f)
+                    {
+                        continue;
+                    }
+
+                    yield return PlayStandingIdleOption(i, duration);
+                    yield break;
+                }
             }
         }
 
@@ -6532,6 +6571,112 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return false;
+    }
+
+    private float GetStandingIdleOptionWeight(int optionIndex)
+    {
+        if (!CanPlayStandingIdleOption(optionIndex))
+        {
+            return 0f;
+        }
+
+        float weight = 1f;
+        if (IsIdle7StandingIdleOption(optionIndex))
+        {
+            weight = Mathf.Max(0.01f, GetIdle7WeightedChance());
+        }
+
+        return weight;
+    }
+
+    private bool IsIdle7StandingIdleOption(int optionIndex)
+    {
+        int stateCount = standingIdleStateHashes != null ? standingIdleStateHashes.Length : 0;
+        if (optionIndex < stateCount)
+        {
+            return standingIdleStateNames != null
+                && optionIndex < standingIdleStateNames.Length
+                && string.Equals(standingIdleStateNames[optionIndex], "Idle7", System.StringComparison.Ordinal);
+        }
+
+        int importedIndex = optionIndex - stateCount;
+        return useImportedStandingIdleClipsInEditor
+            && importedIndex >= 0
+            && importedIndex < ImportedStandingIdleClipSuffixes.Length
+            && string.Equals(ImportedStandingIdleClipSuffixes[importedIndex], "Idle_7", System.StringComparison.Ordinal);
+    }
+
+    private float GetIdle7WeightedChance()
+    {
+        float staminaBias01 = GetIdle7LowStaminaBias01();
+        float lateDayBias01 = GetIdle7LateDayBias01();
+        return idle7BaseWeight
+            + (idle7LowStaminaBonusWeight * staminaBias01)
+            + (idle7LateDayBonusWeight * lateDayBias01);
+    }
+
+    private float GetIdle7LowStaminaBias01()
+    {
+        PawPalDogState runtimeDog = GetRuntimeDogState();
+        if (runtimeDog == null)
+        {
+            return 0f;
+        }
+
+        PawPalWalkStaminaSnapshot snapshot = PawPalGameRuntime.GetCanonicalStaminaSnapshot(runtimeDog);
+        float fullBiasFill = Mathf.Min(idle7StaminaBiasStartFill01, idle7StaminaBiasFullFill01);
+        float biasStartFill = Mathf.Max(idle7StaminaBiasStartFill01, idle7StaminaBiasFullFill01);
+        if (biasStartFill - fullBiasFill <= 0.0001f)
+        {
+            return snapshot.Fill01 <= fullBiasFill ? 1f : 0f;
+        }
+
+        return 1f - Mathf.InverseLerp(fullBiasFill, biasStartFill, snapshot.Fill01);
+    }
+
+    private float GetIdle7LateDayBias01()
+    {
+        PawPalTimeOfDayState timeState = ResolveAmbientIdleTimeOfDayState();
+        float startHour = PawPalTimeOfDayEvaluator.NormalizeHour(idle7EveningStartHour);
+        float fullBiasHour = PawPalTimeOfDayEvaluator.NormalizeHour(idle7NightFullBiasHour);
+
+        if (Mathf.Approximately(startHour, fullBiasHour))
+        {
+            return 1f;
+        }
+
+        float hour = timeState.LocalHour;
+        if (fullBiasHour <= startHour)
+        {
+            fullBiasHour += 24f;
+            if (hour < startHour)
+            {
+                hour += 24f;
+            }
+        }
+
+        return Mathf.Clamp01(Mathf.InverseLerp(startHour, fullBiasHour, hour));
+    }
+
+    private PawPalTimeOfDayState ResolveAmbientIdleTimeOfDayState()
+    {
+        if (livingRoomGraphicsEnhancer == null)
+        {
+            livingRoomGraphicsEnhancer = FindFirstObjectByType<LivingRoomGraphicsEnhancer>();
+        }
+
+        if (livingRoomGraphicsEnhancer != null && livingRoomGraphicsEnhancer.gameObject.scene == gameObject.scene)
+        {
+            return livingRoomGraphicsEnhancer.EvaluateTimeOfDayState();
+        }
+
+        return PawPalTimeOfDayEvaluator.Evaluate(
+            true,
+            false,
+            12f,
+            DefaultSunriseHour,
+            DefaultSunsetHour,
+            DefaultTransitionHours);
     }
 
     private IEnumerator PlayStandingIdleOption(int optionIndex, float duration)
@@ -6606,8 +6751,12 @@ public class DogRoomAgent : MonoBehaviour
             return shakingX3Clip;
         }
 
-        if (string.Equals(suffix, "Idle_4", System.StringComparison.Ordinal)
-            || string.Equals(suffix, "Idle_7", System.StringComparison.Ordinal))
+        if (string.Equals(suffix, "Idle_7", System.StringComparison.Ordinal))
+        {
+            return dogYawningClip != null ? dogYawningClip : sniffingClip;
+        }
+
+        if (string.Equals(suffix, "Idle_4", System.StringComparison.Ordinal))
         {
             return sniffingClip;
         }

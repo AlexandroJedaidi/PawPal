@@ -139,31 +139,14 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
     private static void BuildLighting()
     {
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = new Color32(172, 210, 255, 255);
-        RenderSettings.ambientEquatorColor = new Color32(197, 214, 178, 255);
-        RenderSettings.ambientGroundColor = new Color32(111, 132, 91, 255);
-
-        Light existingSun = null;
-        Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
-        for (int i = 0; i < lights.Length; i++)
-        {
-            if (lights[i] != null && lights[i].type == LightType.Directional)
-            {
-                existingSun = lights[i];
-                break;
-            }
-        }
-
+        Light existingSun = ResolveDirectionalLight();
         if (existingSun == null)
         {
             existingSun = new GameObject("Warm Sun").AddComponent<Light>();
             existingSun.type = LightType.Directional;
         }
 
-        existingSun.transform.rotation = Quaternion.Euler(47f, -28f, 0f);
-        existingSun.color = new Color32(255, 232, 190, 255);
-        existingSun.intensity = 1.35f;
+        RenderSettings.sun = existingSun;
     }
 
     private static EnvironmentBuildResult BuildFieldEnvironment(Camera sceneCamera)
@@ -192,6 +175,13 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         }
 
         audioController.Configure(catalog, backdropRingController);
+        IntroTimeOfDayLightingController lightingController = root.GetComponent<IntroTimeOfDayLightingController>();
+        if (lightingController == null)
+        {
+            lightingController = root.AddComponent<IntroTimeOfDayLightingController>();
+        }
+
+        lightingController.Configure(backdropRingController, ResolveDirectionalLight());
         EnsureRuntimeNavMesh(root, fieldBounds);
         CleanupIntroSceneToys(root.transform);
 
@@ -400,11 +390,6 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
     private static void EnsureEditorPreviewLighting(Scene scene)
     {
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = new Color32(172, 210, 255, 255);
-        RenderSettings.ambientEquatorColor = new Color32(197, 214, 178, 255);
-        RenderSettings.ambientGroundColor = new Color32(111, 132, 91, 255);
-
         GameObject previewRoot = editorPreviewController != null ? editorPreviewController.gameObject : null;
         Transform parent = previewRoot != null ? previewRoot.transform : null;
 
@@ -444,10 +429,18 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         }
 
         light.gameObject.hideFlags = HideFlags.None;
+        IntroTimeOfDayLightingController lightingController = previewRoot != null
+            ? previewRoot.GetComponent<IntroTimeOfDayLightingController>()
+            : null;
+        if (previewRoot != null && lightingController == null)
+        {
+            lightingController = previewRoot.AddComponent<IntroTimeOfDayLightingController>();
+        }
 
-        light.transform.rotation = Quaternion.Euler(47f, -28f, 0f);
-        light.color = new Color32(255, 232, 190, 255);
-        light.intensity = 1.35f;
+        if (lightingController != null)
+        {
+            lightingController.Configure(editorPreviewController, light);
+        }
     }
 
     private static void DestroyEditorPreview()
@@ -490,6 +483,25 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
             listener.enabled = primaryCamera != null && listener.gameObject == primaryCamera.gameObject;
         }
+    }
+
+    private static Light ResolveDirectionalLight()
+    {
+        if (RenderSettings.sun != null && RenderSettings.sun.type == LightType.Directional)
+        {
+            return RenderSettings.sun;
+        }
+
+        Light[] lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+        for (int i = 0; i < lights.Length; i++)
+        {
+            if (lights[i] != null && lights[i].type == LightType.Directional)
+            {
+                return lights[i];
+            }
+        }
+
+        return null;
     }
 
     private static void CleanupIntroSceneToys(Transform runtimeRoot)

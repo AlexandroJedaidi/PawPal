@@ -25,47 +25,57 @@ public static class PawPalWalkSceneFlow
     {
         ManualWalkSceneLoadRequested = true;
         ClearEditorSelectionBeforeSceneLoad();
-        try
-        {
-            SceneManager.LoadScene(WalkSceneName, LoadSceneMode.Single);
-            return true;
-        }
-        catch
-        {
-            try
+        bool loadStarted = PawPalSceneTransitionController.LoadSceneWithTransition(
+            WalkSceneName,
+            WalkScenePath,
+            new PawPalSceneTransitionRequest
             {
-                SceneManager.LoadScene(WalkScenePath, LoadSceneMode.Single);
-                return true;
-            }
-            catch
-            {
-                ManualWalkSceneLoadRequested = false;
-                return false;
-            }
+                DisplayText = "Heading outside...",
+                MinimumPostLoadFrames = 2,
+                OnObscured = delegate
+                {
+                    SetAppShellVisible(false);
+                },
+                OnLoadStartFailed = delegate
+                {
+                    ManualWalkSceneLoadRequested = false;
+                }
+            });
+        if (!loadStarted)
+        {
+            ManualWalkSceneLoadRequested = false;
         }
+
+        return loadStarted;
     }
 
     public static void ReturnHome(string sceneName)
     {
         pendingShowHome = true;
         ManualWalkSceneLoadRequested = false;
-        SetAppShellVisible(true);
         ClearEditorSelectionBeforeSceneLoad();
         string targetScene = string.IsNullOrEmpty(sceneName) ? HomeSceneName : sceneName;
-        try
-        {
-            SceneManager.LoadScene(targetScene, LoadSceneMode.Single);
-        }
-        catch
-        {
-            try
+        bool loadStarted = PawPalSceneTransitionController.LoadSceneWithTransition(
+            targetScene,
+            null,
+            new PawPalSceneTransitionRequest
             {
-                SceneManager.LoadScene(HomeSceneName, LoadSceneMode.Single);
-            }
-            catch
-            {
-                SceneManager.LoadScene(HomeScenePath, LoadSceneMode.Single);
-            }
+                DisplayText = "Heading home...",
+                MinimumPostLoadFrames = 2,
+                FallbackSceneName = HomeSceneName,
+                FallbackScenePath = HomeScenePath,
+                OnObscured = delegate
+                {
+                    SetAppShellVisible(true);
+                },
+                OnLoadStartFailed = delegate
+                {
+                    pendingShowHome = false;
+                }
+            });
+        if (!loadStarted)
+        {
+            pendingShowHome = false;
         }
     }
 

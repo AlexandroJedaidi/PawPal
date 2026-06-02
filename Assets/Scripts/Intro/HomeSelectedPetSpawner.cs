@@ -54,6 +54,7 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         SelectedPetSessionData selection;
         if (!SelectedPetSessionContext.TryConsumePendingSelection(out selection) || selection == null || selection.Definition == null)
         {
+            PawPalSceneTransitionController.MarkActiveTransitionReady("Home scene finished without a pending intro pet selection.");
             yield break;
         }
 
@@ -66,6 +67,8 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         {
             SpawnDog(selection, defaultDogAnchor, runtime);
         }
+
+        PawPalSceneTransitionController.MarkActiveTransitionReady("Selected intro pet finished spawning in the home scene.");
     }
 
     private static Transform DisableDefaultSceneDogs()

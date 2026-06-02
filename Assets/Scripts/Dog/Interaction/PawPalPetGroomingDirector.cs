@@ -21,7 +21,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     [Header("Brush")]
     [SerializeField] private GameObject brushPrefab;
     [SerializeField] private Vector3 heldViewportPosition = new Vector3(0.66f, 0.42f, 0.68f);
-    [SerializeField] private Vector3 heldLocalEulerAngles = new Vector3(12f, 200f, 82f);
+    [SerializeField] private Vector3 heldLocalEulerAngles = new Vector3(12f, 20f, 82f);
     [SerializeField] private float heldVisualScaleMultiplier = 1.1f;
     [SerializeField] private bool moveHeldBrushWithPointer = true;
     [SerializeField] private float heldPointerMoveSensitivity = 1f;
@@ -36,17 +36,19 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     [SerializeField] private DogCycleCamera dogCamera;
 
     [Header("Interaction Timing")]
-    [SerializeField] private float targetBrushingSeconds = 10f;
+    [SerializeField] private float targetBrushingSeconds = 15f;
     [SerializeField] private float moveTimeout = 7f;
     [SerializeField] private float preciseArrivalDistance = 0.05f;
     [SerializeField] private float sideFacingDuration = 0.3f;
-    [SerializeField] private float starBurstInterval = 0.55f;
+    [SerializeField] private float starBurstInterval = 2f;
     [SerializeField] private float barkIntervalMin = 2.8f;
     [SerializeField] private float barkIntervalMax = 4.8f;
     [SerializeField] private float dogApproachSampleRadius = 1.6f;
     [SerializeField] private float dogApproachDistance = 0.82f;
     [SerializeField] private float dogApproachSideOffset = 0.58f;
     [SerializeField] private float dogApproachWideSideOffset = 0.92f;
+    [SerializeField, Range(0f, 1f)] private float cameraPanLeftViewportThreshold = 0.1f;
+    [SerializeField, Range(0f, 1f)] private float cameraPanRightViewportThreshold = 0.9f;
 
     [Header("Placement")]
     [SerializeField] private float catSpawnDistanceFromCamera = 0.92f;
@@ -74,6 +76,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private GameObject activeBrush;
     private AudioSource scratchAudioSource;
     private Transform holdAnchor;
+    private AppShellController shell;
     private RectTransform rewardBurstRoot;
     private RectTransform[] rewardBurstSymbols;
     private Image[] rewardBurstImages;
@@ -83,6 +86,9 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private bool brushingActive;
     private float brushingElapsed;
     private float nextBurstAt;
+    private bool dogSwitchLockActive;
+    private bool shellChromeHidden;
+    private bool dogInteractionCameraActive;
     private Vector2 pickupPointerPosition;
     private Vector2 lastPointerPosition;
     private Vector3 currentHeldViewportPosition;
@@ -163,9 +169,11 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private IEnumerator GroomingRoutine(PawPalRoomPetHandle pet, Action onCompleted)
     {
         bool completed = false;
+        DogCycleCamera resolvedDogCamera = ResolveDogCamera();
 
         try
         {
+            AcquireDogSwitchLock();
             pet.PauseForSocial(false);
             yield return pet.PutDownHeldToyForInteraction();
 
@@ -182,11 +190,16 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             PrepareHeldBrush();
             EnsureScratchAudioSource();
 
-            if (!pet.IsDog)
+            if (pet.IsDog && pet.DogAgent != null && resolvedDogCamera != null)
+            {
+                dogInteractionCameraActive = resolvedDogCamera.EnterDogInteractionMode(pet.DogAgent);
+            }
+            else if (!pet.IsDog)
             {
                 FocusCatInteractionCamera(pet);
             }
 
+            SetShellChromeHidden(true);
             ShowInputBlocker();
             EnsureRewardBurstOverlay();
 
@@ -212,6 +225,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
                 UpdateHoldAnchor();
                 ApplyHeldBrushTransform();
                 UpdateBrushInteraction(pet);
+                UpdateDogCameraPanBias(pet, resolvedDogCamera);
 
                 if (brushingActive)
                 {
@@ -243,6 +257,15 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
                 vocalRoutine = null;
             }
 
+            if (dogInteractionCameraActive && resolvedDogCamera != null)
+            {
+                resolvedDogCamera.SetDogInteractionSidePanBias(0f);
+                resolvedDogCamera.ExitDogInteractionMode();
+                dogInteractionCameraActive = false;
+            }
+
+            SetShellChromeHidden(false);
+            ReleaseDogSwitchLock();
             CleanupInteractionArtifacts();
 
             if (pet != null && pet.IsValid)
@@ -320,6 +343,48 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
 
         Vector3 localPoint = pet.RootTransform.InverseTransformPoint(GetBrushInteractionPoint());
         brushingActive = pointerSpeed >= Mathf.Max(1f, minimumBrushPixelsPerSecond) && IsWithinGroomingZone(pet, localPoint);
+    }
+
+    private void UpdateDogCameraPanBias(PawPalRoomPetHandle pet, DogCycleCamera resolvedDogCamera)
+    {
+        if (resolvedDogCamera == null || pet == null || !pet.IsDog || activeBrush == null)
+        {
+            return;
+        }
+
+        Camera camera = ResolveRoomCamera();
+        if (camera == null)
+        {
+            resolvedDogCamera.SetDogInteractionSidePanBias(0f);
+            return;
+        }
+
+        Vector3 screenPoint = camera.WorldToScreenPoint(GetBrushInteractionPoint());
+        if (screenPoint.z <= 0f || Screen.width <= 0)
+        {
+            resolvedDogCamera.SetDogInteractionSidePanBias(0f);
+            return;
+        }
+
+        float minViewportX = Mathf.Min(heldViewportMin.x, heldViewportMax.x);
+        float maxViewportX = Mathf.Max(heldViewportMin.x, heldViewportMax.x);
+        float viewportX = Mathf.Clamp(currentHeldViewportPosition.x, minViewportX, maxViewportX);
+        float leftThreshold = Mathf.Lerp(minViewportX, maxViewportX, Mathf.Clamp01(cameraPanLeftViewportThreshold));
+        float rightThreshold = Mathf.Lerp(minViewportX, maxViewportX, Mathf.Clamp01(cameraPanRightViewportThreshold));
+        float bias = 0f;
+
+        if (viewportX < leftThreshold)
+        {
+            float t = Mathf.InverseLerp(leftThreshold, minViewportX, viewportX);
+            bias = -Mathf.SmoothStep(0f, 1f, t * t);
+        }
+        else if (viewportX > rightThreshold)
+        {
+            float t = Mathf.InverseLerp(rightThreshold, maxViewportX, viewportX);
+            bias = Mathf.SmoothStep(0f, 1f, t * t);
+        }
+
+        resolvedDogCamera.SetDogInteractionSidePanBias(bias);
     }
 
     private bool IsWithinGroomingZone(PawPalRoomPetHandle pet, Vector3 localPoint)
@@ -662,6 +727,44 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         }
 
         return dogCamera;
+    }
+
+    private void AcquireDogSwitchLock()
+    {
+        if (dogSwitchLockActive)
+        {
+            return;
+        }
+
+        DogCycleCamera.PushDogSwitchLock();
+        dogSwitchLockActive = true;
+    }
+
+    private void ReleaseDogSwitchLock()
+    {
+        if (!dogSwitchLockActive)
+        {
+            return;
+        }
+
+        DogCycleCamera.PopDogSwitchLock();
+        dogSwitchLockActive = false;
+    }
+
+    private void SetShellChromeHidden(bool hidden)
+    {
+        if (shell == null)
+        {
+            shell = FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include);
+        }
+
+        if (shell == null || shellChromeHidden == hidden)
+        {
+            return;
+        }
+
+        shell.SetTemporaryGameplayChromeHidden(hidden);
+        shellChromeHidden = hidden;
     }
 
     private void EnsureHoldAnchor()

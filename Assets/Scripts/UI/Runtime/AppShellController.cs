@@ -212,6 +212,24 @@ public class AppShellController : MonoBehaviour
         }
     }
 
+    public void SetTemporaryGameplayChromeHidden(bool hidden)
+    {
+        bool showBottomNav = !hidden && !photoModeActive && !dogInteractionModeActive;
+        if (bottomNav != null)
+        {
+            bottomNav.gameObject.SetActive(showBottomNav);
+        }
+
+        if (screenLayer != null)
+        {
+            screenLayer.gameObject.SetActive(!hidden && !photoModeActive);
+        }
+
+        SetHomeScreenChromeVisible(!hidden && !dogInteractionModeActive);
+        pendingLayoutFrames = Mathf.Max(pendingLayoutFrames, 2);
+        ApplyCurrentLayout(CurrentBucket);
+    }
+
     private void BuildShell()
     {
         rootRect = GetComponent<RectTransform>();
@@ -241,6 +259,7 @@ public class AppShellController : MonoBehaviour
         UiFactory.Stretch(safeAreaRoot, 0f, 0f, 0f, 0f);
         safeAreaFitter = safeAreaRoot.gameObject.AddComponent<SafeAreaFitter>();
         safeAreaFitter.IgnoreBottomInset = true;
+        safeAreaFitter.IgnoreTopInset = true;
 
         adaptiveLayout = safeAreaRoot.gameObject.AddComponent<AdaptiveLayoutRoot>();
         adaptiveLayout.LayoutChanged += HandleLayoutChanged;

@@ -1383,6 +1383,14 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private const float WaterDrainPerHour = 0.03f;
     private const float HygieneDrainPerHour = 0.02f;
     private const float ActivityDrainPerHour = 0.035f;
+    private const float PetMorningStartHour = 7f;
+    private const float PetDaySteadyStartHour = 10f;
+    private const float PetEveningStartHour = 18.5f;
+    private const float PetNightStartHour = 22f;
+    private const float PetWakeTransitionHours = 0.75f;
+    private const float PetEveningTransitionHours = 1.25f;
+    private const float OvernightNeedDrainMultiplier = 0.05f;
+    private const float SleepyNeedDrainMultiplier = 0.35f;
     private const float DefaultMaxWalkStamina = 100f;
     private const float MaxWalkStaminaCap = 180f;
     private const float WalkStaminaRefillPerHour = 12.5f;
@@ -1994,10 +2002,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        dog.ModifyNeed(PawPalDogNeed.Activity, 0.3f);
-        dog.ModifyNeed(PawPalDogNeed.Water, -0.1f);
-        dog.ModifyNeed(PawPalDogNeed.Food, -0.08f);
-        dog.ModifyNeed(PawPalDogNeed.Hygiene, -0.04f);
+        ApplyWalkNeedChanges(dog, 0.32f, 0.11f, 0.08f, 0.05f);
         float currentStamina;
         float maxStamina;
         SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.08f), out currentStamina, out maxStamina);
@@ -3359,16 +3364,17 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         float hourScale = Mathf.Max(1f, secondsPerGameHour);
         float deltaHours = deltaTime / hourScale;
+        float passiveNeedDrainMultiplier = GetPassiveNeedDrainMultiplier();
         bool changed = false;
 
         for (int i = 0; i < dogs.Count; i++)
         {
             PawPalDogState dog = dogs[i];
             PawPalDogPersonalityProfiles.EnsureProfile(dog);
-            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Food, FoodDrainPerHour * deltaHours);
-            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Water, WaterDrainPerHour * deltaHours);
-            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Hygiene, HygieneDrainPerHour * deltaHours);
-            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Activity, ActivityDrainPerHour * deltaHours);
+            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Food, FoodDrainPerHour * deltaHours * passiveNeedDrainMultiplier);
+            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Water, WaterDrainPerHour * deltaHours * passiveNeedDrainMultiplier);
+            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Hygiene, HygieneDrainPerHour * deltaHours * passiveNeedDrainMultiplier);
+            changed |= ApplyNeedDrain(dog, PawPalDogNeed.Activity, ActivityDrainPerHour * deltaHours * passiveNeedDrainMultiplier);
             changed |= RefreshWalkStamina(dog, DateTime.UtcNow, false);
 
             changed |= TickNewDogWhinyHours(dog, deltaHours);
@@ -3392,6 +3398,25 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         dog.SetNeed(need, next);
         return true;
+    }
+
+    private static float GetPassiveNeedDrainMultiplier()
+    {
+        PawPalPetCircadianState circadian = PawPalTimeOfDayEvaluator.EvaluatePetCircadian(
+            (float)DateTime.Now.TimeOfDay.TotalHours,
+            PetMorningStartHour,
+            PetDaySteadyStartHour,
+            PetEveningStartHour,
+            PetNightStartHour,
+            PetWakeTransitionHours,
+            PetEveningTransitionHours);
+
+        if (circadian.ForceSleep)
+        {
+            return OvernightNeedDrainMultiplier;
+        }
+
+        return Mathf.Lerp(1f, SleepyNeedDrainMultiplier, circadian.Sleepiness01);
     }
 
     private static bool TickNewDogWhinyHours(PawPalDogState dog, float deltaHours)
@@ -3643,10 +3668,13 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         EnsureWalkData(dog);
         RefreshWalkStamina(dog, DateTime.UtcNow, false);
 
-        dog.ModifyNeed(PawPalDogNeed.Activity, 0.3f);
-        dog.ModifyNeed(PawPalDogNeed.Water, -0.08f);
-        dog.ModifyNeed(PawPalDogNeed.Food, -0.06f);
-        dog.ModifyNeed(PawPalDogNeed.Hygiene, -0.03f);
+        float distance01 = Mathf.Clamp01(Mathf.InverseLerp(8f, 36f, Mathf.Max(0f, session.RouteDistance)));
+        ApplyWalkNeedChanges(
+            dog,
+            Mathf.Lerp(0.32f, 0.42f, distance01),
+            Mathf.Lerp(0.10f, 0.16f, distance01),
+            Mathf.Lerp(0.08f, 0.12f, distance01),
+            Mathf.Lerp(0.05f, 0.09f, distance01));
         SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.04f), out _, out _);
 
         PawPalDogWalkData walkData = dog.WalkData;
@@ -3667,6 +3695,24 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         {
             dog.ModifyStat(PawPalDogStatType.Endurance, 1);
         }
+    }
+
+    private static void ApplyWalkNeedChanges(
+        PawPalDogState dog,
+        float activityGain01,
+        float waterLoss01,
+        float foodLoss01,
+        float hygieneLoss01)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        dog.ModifyNeed(PawPalDogNeed.Activity, Mathf.Max(0f, activityGain01));
+        dog.ModifyNeed(PawPalDogNeed.Water, -Mathf.Max(0f, waterLoss01));
+        dog.ModifyNeed(PawPalDogNeed.Food, -Mathf.Max(0f, foodLoss01));
+        dog.ModifyNeed(PawPalDogNeed.Hygiene, -Mathf.Max(0f, hygieneLoss01));
     }
 
     private PawPalWalkCompletionResult BuildEmptyWalkCompletionResult()

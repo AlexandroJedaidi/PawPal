@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.Serialization;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
@@ -81,6 +85,20 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField] private float nightSofaFillIntensity = 0.05f;
     [SerializeField] private Color daySofaFillColor = new Color(1f, 0.74f, 0.50f);
     [SerializeField] private Color nightSofaFillColor = new Color(0.67f, 0.65f, 0.80f);
+
+    [Header("Practical Lights")]
+    [SerializeField] private bool configurePracticalLights = true;
+    [SerializeField] private float dayPracticalIntensityMultiplier = 1f;
+    [SerializeField] private float nightPracticalIntensityMultiplier = 1.35f;
+    [SerializeField] private Color dayPracticalColor = Color.white;
+    [SerializeField] private Color nightPracticalColor = new Color(1f, 0.82f, 0.62f);
+    [SerializeField]
+    private string[] practicalLightNameKeywords =
+    {
+        "lamp",
+        "area light",
+        "ceiling"
+    };
 
     [Header("Ambient")]
     [FormerlySerializedAs("ambientIntensity")]
@@ -161,6 +179,16 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private PawPalTimeOfDayState currentTimeOfDayState;
     private int lastAppliedMinuteStamp = int.MinValue;
     private static bool sceneBootstrapInstalled;
+    private readonly Dictionary<int, PracticalLightState> practicalLightStates = new Dictionary<int, PracticalLightState>();
+
+    private struct PracticalLightState
+    {
+        public Light Light;
+        public float BaseIntensity;
+        public Color BaseColor;
+        public bool HasColorTemperature;
+        public float BaseColorTemperature;
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void InstallSceneBootstrap()
@@ -213,24 +241,16 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void OnEnable()
     {
-        if (!Application.isPlaying)
+        if (!applyOnEnable)
         {
             return;
         }
 
-        if (applyOnEnable)
-        {
-            ApplyGraphics();
-        }
+        ApplyGraphics();
     }
 
     private void Start()
     {
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
         if (applyOnEnable)
         {
             ApplyGraphics();
@@ -239,8 +259,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
     private void Update()
     {
-        if (!Application.isPlaying ||
-            !applyOnEnable ||
+        if (!applyOnEnable ||
             !gameObject.scene.IsValid() ||
             !gameObject.scene.isLoaded)
         {
@@ -280,6 +299,24 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         petEveningTransitionHours = Mathf.Clamp(petEveningTransitionHours, 0.1f, 6f);
         petInteractionWakeMinutes = Mathf.Max(1f, petInteractionWakeMinutes);
         playModeShadowDistance = Mathf.Max(1f, playModeShadowDistance);
+        dayPracticalIntensityMultiplier = Mathf.Max(0f, dayPracticalIntensityMultiplier);
+        nightPracticalIntensityMultiplier = Mathf.Max(0f, nightPracticalIntensityMultiplier);
+
+        if (!Application.isPlaying && isActiveAndEnabled && gameObject.scene.IsValid() && gameObject.scene.isLoaded)
+        {
+            EditorApplication.delayCall += ApplyGraphicsInEditor;
+        }
+    }
+
+    private void ApplyGraphicsInEditor()
+    {
+        if (this == null || Application.isPlaying || !isActiveAndEnabled || !gameObject.scene.IsValid() || !gameObject.scene.isLoaded)
+        {
+            return;
+        }
+
+        ApplyGraphics();
+        SceneView.RepaintAll();
     }
 #endif
 
@@ -327,6 +364,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         if (createFillLights)
         {
             ConfigureFillLights(roomBounds);
+        }
+
+        if (configurePracticalLights)
+        {
+            ConfigurePracticalLights();
         }
 
         if (configureMainCamera)
@@ -543,6 +585,32 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         sofaLight.color = Color.Lerp(nightSofaFillColor, daySofaFillColor, daylight01);
         sofaLight.shadows = LightShadows.None;
         sofaLight.renderMode = LightRenderMode.Auto;
+    }
+
+    private void ConfigurePracticalLights()
+    {
+        RefreshPracticalLightStates();
+
+        float daylight01 = currentTimeOfDayState.Daylight01;
+        float intensityMultiplier = Mathf.Lerp(nightPracticalIntensityMultiplier, dayPracticalIntensityMultiplier, daylight01);
+        Color colorTint = Color.Lerp(nightPracticalColor, dayPracticalColor, daylight01);
+
+        foreach (PracticalLightState state in practicalLightStates.Values)
+        {
+            if (!IsSceneObject(state.Light))
+            {
+                continue;
+            }
+
+            state.Light.intensity = state.BaseIntensity * intensityMultiplier;
+            state.Light.color = state.BaseColor * colorTint;
+
+            if (state.HasColorTemperature)
+            {
+                state.Light.useColorTemperature = true;
+                state.Light.colorTemperature = Mathf.Lerp(2600f, state.BaseColorTemperature, daylight01);
+            }
+        }
     }
 
     private void ConfigureCameras()
@@ -955,6 +1023,58 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         return foundLight;
     }
 
+    private void RefreshPracticalLightStates()
+    {
+        List<int> staleLightIds = null;
+        foreach (KeyValuePair<int, PracticalLightState> pair in practicalLightStates)
+        {
+            if (IsSceneObject(pair.Value.Light))
+            {
+                continue;
+            }
+
+            if (staleLightIds == null)
+            {
+                staleLightIds = new List<int>();
+            }
+
+            staleLightIds.Add(pair.Key);
+        }
+
+        if (staleLightIds != null)
+        {
+            for (int i = 0; i < staleLightIds.Count; i++)
+            {
+                practicalLightStates.Remove(staleLightIds[i]);
+            }
+        }
+
+        Light[] lights = FindSceneObjects<Light>();
+        for (int i = 0; i < lights.Length; i++)
+        {
+            Light candidate = lights[i];
+            if (!IsPracticalLight(candidate))
+            {
+                continue;
+            }
+
+            int lightId = candidate.GetInstanceID();
+            if (practicalLightStates.ContainsKey(lightId))
+            {
+                continue;
+            }
+
+            practicalLightStates.Add(lightId, new PracticalLightState
+            {
+                Light = candidate,
+                BaseIntensity = candidate.intensity,
+                BaseColor = candidate.color,
+                HasColorTemperature = candidate.useColorTemperature,
+                BaseColorTemperature = candidate.colorTemperature
+            });
+        }
+    }
+
     private T ResolveOrCreateChildComponent<T>(string childName) where T : Component
     {
         T component = ResolveChildComponent<T>(childName);
@@ -1121,6 +1241,36 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private bool IsSceneObject(Component component)
     {
         return component != null && component.gameObject.scene == gameObject.scene;
+    }
+
+    private bool IsPracticalLight(Light light)
+    {
+        if (!IsSceneObject(light) ||
+            light == sun ||
+            light == windowFillLight ||
+            light == sofaFillLight ||
+            light.type == LightType.Directional)
+        {
+            return false;
+        }
+
+        if (practicalLightNameKeywords == null || practicalLightNameKeywords.Length == 0)
+        {
+            return false;
+        }
+
+        string lightName = light.name;
+        for (int i = 0; i < practicalLightNameKeywords.Length; i++)
+        {
+            string keyword = practicalLightNameKeywords[i];
+            if (!string.IsNullOrWhiteSpace(keyword) &&
+                lightName.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private T[] FindSceneObjects<T>() where T : Component

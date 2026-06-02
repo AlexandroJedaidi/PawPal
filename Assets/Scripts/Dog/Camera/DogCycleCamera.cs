@@ -75,6 +75,10 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private Vector3 interactionCameraPositionOffset = new Vector3(0f, -0.12f, 0f);
     [SerializeField] private Vector3 interactionHeadFocusOffset = new Vector3(0f, -0.04f, 0f);
     [SerializeField] private float interactionFieldOfView = 0f;
+    [SerializeField] private float interactionSidePanClampMultiplier = 0.9f;
+    [SerializeField] private float interactionSidePanMaxDistance = 0.75f;
+    [SerializeField] private float interactionSidePanSmooth = 1.35f;
+    [SerializeField] private float interactionFocusSidePanMultiplier = 0.42f;
 
     private Camera attachedCamera;
     private Vector3 fixedPosition;
@@ -113,6 +117,8 @@ public class DogCycleCamera : MonoBehaviour
     private float photoLastPinchDistance;
     private bool dogInteractionModeActive;
     private DogRoomAgent dogInteractionModeDog;
+    private float dogInteractionSidePanBias;
+    private float currentDogInteractionSidePanBias;
     private Vector3 dogInteractionSavedPosition;
     private Quaternion dogInteractionSavedRotation;
     private float dogInteractionSavedFieldOfView;
@@ -485,6 +491,8 @@ public class DogCycleCamera : MonoBehaviour
 
         dogInteractionModeActive = true;
         dogInteractionModeDog = targetDog;
+        dogInteractionSidePanBias = 0f;
+        currentDogInteractionSidePanBias = 0f;
         manualLookHoldUntil = 0f;
         mouseDragActive = false;
         activeTouchFingerId = -1;
@@ -504,6 +512,8 @@ public class DogCycleCamera : MonoBehaviour
 
         dogInteractionModeActive = false;
         dogInteractionModeDog = null;
+        dogInteractionSidePanBias = 0f;
+        currentDogInteractionSidePanBias = 0f;
         mouseDragActive = false;
         activeTouchFingerId = -1;
         transform.position = dogInteractionSavedPosition;
@@ -532,6 +542,11 @@ public class DogCycleCamera : MonoBehaviour
         }
 
         ApplyDogInteractionCamera(false);
+    }
+
+    public void SetDogInteractionSidePanBias(float bias)
+    {
+        dogInteractionSidePanBias = Mathf.Clamp(bias, -1f, 1f);
     }
 
     public void FocusPhotoModeOnActiveDog()
@@ -1226,13 +1241,15 @@ public class DogCycleCamera : MonoBehaviour
             return;
         }
 
+        currentDogInteractionSidePanBias = immediate
+            ? dogInteractionSidePanBias
+            : Mathf.Lerp(currentDogInteractionSidePanBias, dogInteractionSidePanBias, Time.deltaTime * Mathf.Max(0.01f, interactionSidePanSmooth));
+
         Vector3 desiredPosition = dogInteractionSavedPosition + interactionCameraPositionOffset;
-        if (keepInitialPosition)
-        {
-            transform.position = immediate
-                ? desiredPosition
-                : Vector3.Lerp(transform.position, desiredPosition, Time.deltaTime * 12f);
-        }
+        desiredPosition += GetDogInteractionSidePanOffset(dogInteractionModeDog, currentDogInteractionSidePanBias);
+        transform.position = immediate
+            ? desiredPosition
+            : Vector3.Lerp(transform.position, desiredPosition, Time.deltaTime * 12f);
 
         if (attachedCamera != null)
         {
@@ -1258,6 +1275,57 @@ public class DogCycleCamera : MonoBehaviour
             : Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 14f);
     }
 
+    private Vector3 GetDogInteractionSidePanOffset(DogRoomAgent dog, float bias)
+    {
+        if (dog == null || Mathf.Abs(bias) <= 0.001f)
+        {
+            return Vector3.zero;
+        }
+
+        float maxPan = GetDogInteractionMaxSidePanDistance(dog);
+        Vector3 bodyAxis = dog.transform.forward;
+        bodyAxis.y = 0f;
+        if (bodyAxis.sqrMagnitude <= 0.001f)
+        {
+            bodyAxis = dog.transform.right;
+            bodyAxis.y = 0f;
+        }
+
+        if (bodyAxis.sqrMagnitude <= 0.001f)
+        {
+            return Vector3.zero;
+        }
+
+        return bodyAxis.normalized * (Mathf.Clamp(bias, -1f, 1f) * maxPan);
+    }
+
+    private float GetDogInteractionMaxSidePanDistance(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return 0f;
+        }
+
+        Renderer[] renderers = dog.GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0)
+        {
+            return Mathf.Max(0f, interactionSidePanMaxDistance * 0.5f);
+        }
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+        }
+
+        float bodyHalfLength = Mathf.Max(bounds.extents.x, bounds.extents.z);
+        float clampedLength = Mathf.Min(Mathf.Max(0.05f, bodyHalfLength * Mathf.Max(0.1f, interactionSidePanClampMultiplier)), Mathf.Max(0.05f, interactionSidePanMaxDistance));
+        return clampedLength;
+    }
+
     private Vector3 GetPhotoFocusPoint(DogRoomAgent dog)
     {
         if (dog == null)
@@ -1277,7 +1345,11 @@ public class DogCycleCamera : MonoBehaviour
         }
 
         Transform headTarget = ResolveDogHeadTarget(dog);
-        return headTarget != null ? headTarget.position + interactionHeadFocusOffset : dog.transform.position + focusOffset + interactionHeadFocusOffset;
+        Vector3 baseFocus = headTarget != null
+            ? headTarget.position + interactionHeadFocusOffset
+            : dog.transform.position + focusOffset + interactionHeadFocusOffset;
+        Vector3 sideOffset = GetDogInteractionSidePanOffset(dog, currentDogInteractionSidePanBias * Mathf.Max(0f, interactionFocusSidePanMultiplier));
+        return baseFocus + sideOffset;
     }
 
     private Vector3 ConstrainPhotoPosition(DogRoomAgent dog, Vector3 position)

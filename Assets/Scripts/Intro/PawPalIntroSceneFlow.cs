@@ -4,9 +4,6 @@ using UnityEngine.UI;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
-#if UNITY_EDITOR
-using UnityEditor.SceneManagement;
-#endif
 
 public static class PawPalIntroSceneFlow
 {
@@ -27,50 +24,41 @@ public static class PawPalIntroSceneFlow
 
     public static bool LoadHomeScene()
     {
-        SetAppShellVisible(true);
-        return TryLoadScene(HomeSceneName, HomeScenePath);
+        return TryLoadScene(
+            HomeSceneName,
+            HomeScenePath,
+            new PawPalSceneTransitionRequest
+            {
+                DisplayText = "Preparing your pup...",
+                WaitForExplicitReady = true,
+                MinimumPostLoadFrames = 2,
+                OnObscured = delegate
+                {
+                    SetAppShellVisible(true);
+                }
+            });
     }
 
     public static bool LoadIntroScene()
     {
-        SetAppShellVisible(false);
-        return TryLoadScene(IntroSceneName, IntroScenePath);
+        return TryLoadScene(
+            IntroSceneName,
+            IntroScenePath,
+            new PawPalSceneTransitionRequest
+            {
+                DisplayText = "Loading...",
+                MinimumPostLoadFrames = 2,
+                OnObscured = delegate
+                {
+                    SetAppShellVisible(false);
+                }
+            });
     }
 
-    private static bool TryLoadScene(string sceneName, string scenePath)
+    private static bool TryLoadScene(string sceneName, string scenePath, PawPalSceneTransitionRequest request)
     {
         ClearEditorSelectionBeforeSceneLoad();
-
-        try
-        {
-            SceneManager.LoadScene(sceneName, LoadSceneMode.Single);
-            return true;
-        }
-        catch
-        {
-            try
-            {
-                SceneManager.LoadScene(scenePath, LoadSceneMode.Single);
-                return true;
-            }
-            catch
-            {
-#if UNITY_EDITOR
-                if (Application.isPlaying)
-                {
-                    try
-                    {
-                        EditorSceneManager.LoadSceneInPlayMode(scenePath, new LoadSceneParameters(LoadSceneMode.Single));
-                        return true;
-                    }
-                    catch
-                    {
-                    }
-                }
-#endif
-                return false;
-            }
-        }
+        return PawPalSceneTransitionController.LoadSceneWithTransition(sceneName, scenePath, request);
     }
 
     private static void ClearEditorSelectionBeforeSceneLoad()
