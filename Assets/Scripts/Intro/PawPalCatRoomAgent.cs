@@ -54,6 +54,8 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private bool isPlayingOneShotAnimation;
     private bool trainingBusy;
     private bool wasLastTravelSuccessful = true;
+    private Transform interactionLookTarget;
+    private float interactionLookUntil;
 
     public string RuntimePetId
     {
@@ -246,6 +248,19 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         yield return RunOneShotRoutine(duration, "Vocal");
     }
 
+    public void RequestInteractionCameraLook(Transform target, float duration)
+    {
+        if (target == null)
+        {
+            interactionLookTarget = null;
+            interactionLookUntil = 0f;
+            return;
+        }
+
+        interactionLookTarget = target;
+        interactionLookUntil = Mathf.Max(interactionLookUntil, Time.time + Mathf.Max(0.1f, duration));
+    }
+
     public bool TryPlayPettingReaction()
     {
         if (IsBusy)
@@ -401,6 +416,24 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         SetMoving(agent.velocity.sqrMagnitude > 0.002f);
     }
 
+    private void LateUpdate()
+    {
+        if (interactionLookTarget == null || Time.time > interactionLookUntil || headTransform == null)
+        {
+            return;
+        }
+
+        Vector3 lookPoint = interactionLookTarget.position;
+        Vector3 direction = lookPoint - headTransform.position;
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        headTransform.rotation = Quaternion.Slerp(headTransform.rotation, targetRotation, Time.deltaTime * 5.5f);
+    }
+
     private void InitializeSharedPresentation()
     {
         animator = GetComponentInChildren<Animator>(true);
@@ -433,7 +466,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
         if (animationSet != null)
         {
-            animationSet.ApplyTo(animator);
+            animationSet.ApplyTo(animator, sessionData != null ? sessionData.Definition : null);
         }
 
         headTransform = PawPalRoomPetRuntime.ResolveHeadTransform(transform);

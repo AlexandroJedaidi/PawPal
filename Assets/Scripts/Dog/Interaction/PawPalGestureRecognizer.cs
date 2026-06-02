@@ -35,6 +35,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
     [SerializeField] private float circularMinAngleDegrees = 255f;
     [SerializeField] private float circularMinRadiusPixels = 26f;
     [SerializeField, Range(0.1f, 2f)] private float leniency = 1f;
+    [SerializeField, Range(1f, 3f)] private float bodyZonePaddingMultiplier = 1f;
 
     private readonly List<Vector2> gesturePoints = new List<Vector2>();
 
@@ -53,14 +54,20 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
 
     public void Configure(DogRoomAgent dog, Camera camera, float gestureLeniency)
     {
-        Configure(dog != null ? dog.transform : null, camera, gestureLeniency);
+        Configure(dog != null ? dog.transform : null, camera, gestureLeniency, 1f);
     }
 
     public void Configure(Transform petRoot, Camera camera, float gestureLeniency)
     {
+        Configure(petRoot, camera, gestureLeniency, 1f);
+    }
+
+    public void Configure(Transform petRoot, Camera camera, float gestureLeniency, float paddingMultiplier)
+    {
         targetRoot = petRoot;
         targetCamera = camera != null ? camera : Camera.main;
         leniency = Mathf.Clamp(gestureLeniency, 0.1f, 2f);
+        bodyZonePaddingMultiplier = Mathf.Clamp(paddingMultiplier, 1f, 3f);
     }
 
     public void SetActive(bool active)
@@ -478,9 +485,9 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
         }
 
         rect = Rect.MinMaxRect(screenMin.x, screenMin.y, screenMax.x, screenMax.y);
-        float horizontalPadding = Mathf.Max(MinimumDogRectHorizontalPaddingPixels, rect.width * DogRectHorizontalPadding01);
-        float bottomPadding = Mathf.Max(MinimumDogRectBottomPaddingPixels, rect.height * DogRectBottomPadding01);
-        float topPadding = Mathf.Max(MinimumDogRectTopPaddingPixels, rect.height * DogRectTopPadding01);
+        float horizontalPadding = Mathf.Max(MinimumDogRectHorizontalPaddingPixels, rect.width * DogRectHorizontalPadding01) * bodyZonePaddingMultiplier;
+        float bottomPadding = Mathf.Max(MinimumDogRectBottomPaddingPixels, rect.height * DogRectBottomPadding01) * bodyZonePaddingMultiplier;
+        float topPadding = Mathf.Max(MinimumDogRectTopPaddingPixels, rect.height * DogRectTopPadding01) * bodyZonePaddingMultiplier;
         rect.xMin -= horizontalPadding;
         rect.xMax += horizontalPadding;
         rect.yMin -= bottomPadding;

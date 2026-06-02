@@ -27,7 +27,7 @@ public sealed class PetHomeAgent : MonoBehaviour
         animationSet = data != null && data.Definition != null ? data.Definition.AnimationSet : null;
         if (animationSet != null)
         {
-            animationSet.ApplyTo(animator);
+            animationSet.ApplyTo(animator, data.Definition);
         }
 
         if (data != null && data.Definition != null && data.Definition.HomeScale != Vector3.zero)

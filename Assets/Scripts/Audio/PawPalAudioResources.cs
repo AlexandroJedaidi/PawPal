@@ -20,6 +20,10 @@ public static class PawPalAudioResources
     public const string DogGnarl = "Audio/dog_gnarl";
     public const string DogEating = "Audio/dog_eating";
     public const string DogDrinking = "Audio/dog_drinking";
+    public const string CatLick = "Audio/cat_lick";
+    public const string CatMeow = "Audio/cat_meow";
+    public const string CatPurr = "Audio/cat_purr";
+    public const string CatScratch = "Audio/cat_scratch";
 
     public static AudioClip LoadClip(string resourcePath)
     {

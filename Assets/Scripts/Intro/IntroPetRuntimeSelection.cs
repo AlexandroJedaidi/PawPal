@@ -16,7 +16,7 @@ public sealed class IntroPetRuntimeSelection
     public string PetName;
     public string RuntimePetId;
 
-    public static IntroPetRuntimeSelection Create(IntroPetDefinition definition, int index)
+    public static IntroPetRuntimeSelection Create(IntroPetDefinition definition, int index, string petName = null)
     {
         IntroPetRuntimeSelection selection = new IntroPetRuntimeSelection();
         selection.Definition = definition;
@@ -24,7 +24,7 @@ public sealed class IntroPetRuntimeSelection
         selection.FurVariant = definition != null ? definition.GetDefaultFurVariant() : null;
         selection.Gender = index % 2 == 0 ? PawPalDogGender.Male : PawPalDogGender.Female;
         selection.Personality = PickPersonality(definition != null ? definition.PetId : "pet", index);
-        selection.PetName = DefaultName;
+        selection.PetName = SanitizeName(petName);
         selection.RuntimePetId = "intro_" + (definition != null && !string.IsNullOrWhiteSpace(definition.PetId) ? definition.PetId : "pet") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
         return selection;
     }
@@ -145,5 +145,131 @@ public static class IntroPetFormatting
             default:
                 return "Relaxed";
         }
+    }
+
+    public static string FormatIntroLifeStage(IntroPetDefinition definition)
+    {
+        string normalizedIdentity = NormalizeIntroIdentity(definition);
+        if (normalizedIdentity.Contains("puppy"))
+        {
+            return "Puppy";
+        }
+
+        if (normalizedIdentity.Contains("kitten"))
+        {
+            return "Kitten";
+        }
+
+        return "Adult";
+    }
+
+    private static string NormalizeIntroIdentity(IntroPetDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        return NormalizeIntroIdentityPart(definition.PetId)
+            + NormalizeIntroIdentityPart(definition.BreedName)
+            + NormalizeIntroIdentityPart(definition.DisplayName);
+    }
+
+    private static string NormalizeIntroIdentityPart(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        char[] buffer = new char[value.Length];
+        int count = 0;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char character = value[i];
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[count++] = char.ToLowerInvariant(character);
+            }
+        }
+
+        return count > 0 ? new string(buffer, 0, count) : string.Empty;
+    }
+}
+
+internal static class IntroPetRandomNameGenerator
+{
+    private static readonly string[] DogNames =
+    {
+        "Archie",
+        "Bailey",
+        "Biscuit",
+        "Clover",
+        "Copper",
+        "Daisy",
+        "Finn",
+        "Maple",
+        "Milo",
+        "Ollie",
+        "Pepper",
+        "Poppy",
+        "Scout",
+        "Sunny",
+        "Teddy",
+        "Waffles"
+    };
+
+    private static readonly string[] CatNames =
+    {
+        "Bean",
+        "Cleo",
+        "Fig",
+        "Iris",
+        "Junie",
+        "Miso",
+        "Mochi",
+        "Nori",
+        "Olive",
+        "Pippa",
+        "Suki",
+        "Taro",
+        "Willow",
+        "Yuki",
+        "Ziggy",
+        "Zuzu"
+    };
+
+    public static string GenerateName(IntroPetDefinition definition, System.Collections.Generic.ISet<string> usedNames)
+    {
+        IntroPetSpecies species = definition != null ? definition.Species : IntroPetSpecies.Dog;
+        string[] pool = species == IntroPetSpecies.Cat ? CatNames : DogNames;
+        if (pool == null || pool.Length == 0)
+        {
+            return IntroPetRuntimeSelection.DefaultName;
+        }
+
+        int startIndex = UnityEngine.Random.Range(0, pool.Length);
+        if (usedNames != null && usedNames.Count < pool.Length)
+        {
+            for (int offset = 0; offset < pool.Length; offset++)
+            {
+                string candidate = pool[(startIndex + offset) % pool.Length];
+                if (usedNames.Contains(candidate))
+                {
+                    continue;
+                }
+
+                usedNames.Add(candidate);
+                return candidate;
+            }
+        }
+
+        string fallback = pool[startIndex];
+        if (usedNames != null)
+        {
+            usedNames.Add(fallback);
+        }
+
+        return fallback;
     }
 }

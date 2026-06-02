@@ -83,6 +83,11 @@ public sealed class PawPalRoomPetHandle
     {
         get
         {
+            if (DogAgent != null)
+            {
+                return DogAgent.HomeCameraOffset;
+            }
+
             if (CatAgent != null)
             {
                 return CatAgent.HomeCameraOffset;
@@ -282,6 +287,16 @@ public sealed class PawPalRoomPetHandle
         }
 
         return CatAgent != null && CatAgent.TryPlayPettingReaction();
+    }
+
+    public bool TryPlayPreviewVocal()
+    {
+        if (DogAgent != null)
+        {
+            return DogAgent.TryPlayPreviewVocal();
+        }
+
+        return false;
     }
 
     public void StartHeldToyTugAnimation()

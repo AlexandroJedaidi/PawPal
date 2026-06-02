@@ -47,6 +47,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private float[] cumulativePathDistances = new float[0];
     private Vector3 sidewalkDirection = Vector3.back;
     private Vector3 cameraVelocity;
+    private PawPalPetMovementProfile walkMovementProfile = PawPalPetMovementProfiles.DefaultProfile;
     private int currentSegmentIndex;
     private float totalPathDistance = 1f;
     private float progress;
@@ -269,8 +270,9 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private void ConfigureSidewalkPathAndCamera()
     {
         ConfigureSceneCamera();
+        walkMovementProfile = ResolveWalkMovementProfile();
         BuildSidewalkPath();
-        walkSpeed = Mathf.Clamp(totalPathDistance / Mathf.Max(1f, walkDuration), 0.9f, 1.35f);
+        walkSpeed = walkMovementProfile.WalkSpeed;
         PositionCamera(true);
     }
 
@@ -285,7 +287,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         start = ProjectWalkPoint(start, start.y);
-        float travelDistance = Mathf.Clamp(session.RouteDistance * 0.12f, MinimumWorldPathDistance, MaximumWorldPathDistance);
+        float travelDistance = Mathf.Clamp(walkMovementProfile.WalkSpeed * walkDuration, MinimumWorldPathDistance, MaximumWorldPathDistance);
         sidewalkDirection = ChooseSidewalkDirection(start, travelDistance);
 
         AddPathPoint(start);
@@ -1141,9 +1143,33 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         SetAnimatorBoolIfExists(walkerAnimator, MoveHash, walking);
-        SetAnimatorFloatIfExists(walkerAnimator, SpeedHash, walking ? 0.58f : 0f);
+        SetAnimatorFloatIfExists(walkerAnimator, SpeedHash, walking ? walkMovementProfile.WalkAnimatorSpeed : 0f);
         SetAnimatorFloatIfExists(walkerAnimator, DirectionHash, 0f);
         SetAnimatorIntegerIfExists(walkerAnimator, IdleIndexHash, walking ? -1 : 99);
+    }
+
+    private PawPalPetMovementProfile ResolveWalkMovementProfile()
+    {
+        if (walker != null)
+        {
+            DogRoomAgent roomAgent = walker.GetComponent<DogRoomAgent>();
+            if (roomAgent == null)
+            {
+                roomAgent = walker.GetComponentInParent<DogRoomAgent>();
+            }
+
+            if (roomAgent != null)
+            {
+                return roomAgent.MovementProfile;
+            }
+        }
+
+        PawPalDogState runtimeDog = PawPalDogPersonalityProfiles.FindRuntimeDog(session != null ? session.SelectedDogId : string.Empty);
+        return PawPalPetMovementProfiles.Resolve(
+            null,
+            null,
+            runtimeDog != null ? runtimeDog.Breed : null,
+            walker != null ? walker.name : string.Empty);
     }
 
     private static void SetAnimatorBoolIfExists(Animator animator, int parameterHash, bool value)

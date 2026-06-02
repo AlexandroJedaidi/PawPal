@@ -396,11 +396,6 @@ public sealed class PawPalTrainingController : MonoBehaviour
     private static DogRoomAgent ResolveActiveDogAgent()
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime != null && runtime.ActivePetSpecies == IntroPetSpecies.Cat)
-        {
-            return null;
-        }
-
         DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
         if (dogs == null || dogs.Length == 0)
         {

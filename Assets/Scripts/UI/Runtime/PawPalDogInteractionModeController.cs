@@ -3,14 +3,59 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
+public sealed class PawPalDogInteractionModeOptions
+{
+    public static PawPalDogInteractionModeOptions RuntimeDefault
+    {
+        get
+        {
+            return new PawPalDogInteractionModeOptions
+            {
+                AllowMic = true,
+                AllowTrainingGestures = true,
+                AllowRuntimeProgressionRewards = true,
+                ShowMicButton = true,
+                ShowTrainingProgressCues = true,
+                PreviewOnly = false
+            };
+        }
+    }
+
+    public static PawPalDogInteractionModeOptions PreviewOnlyDefault
+    {
+        get
+        {
+            return new PawPalDogInteractionModeOptions
+            {
+                AllowMic = false,
+                AllowTrainingGestures = false,
+                AllowRuntimeProgressionRewards = false,
+                ShowMicButton = false,
+                ShowTrainingProgressCues = false,
+                PreviewOnly = true
+            };
+        }
+    }
+
+    public bool AllowMic { get; set; }
+    public bool AllowTrainingGestures { get; set; }
+    public bool AllowRuntimeProgressionRewards { get; set; }
+    public bool ShowMicButton { get; set; }
+    public bool ShowTrainingProgressCues { get; set; }
+    public bool PreviewOnly { get; set; }
+}
+
 [DisallowMultipleComponent]
 public sealed class PawPalDogInteractionModeController : MonoBehaviour
 {
     private const float PettingBondGain = 0.008f;
     private const float PettingMoodGain = 0.012f;
     private const float PettingActivityGain = 0.006f;
-    private const float PettingRewardCooldown = 0.5f;
+    private const float PettingRewardCooldown = 5f;
     private const float PettingGestureIgnoreSeconds = 0.15f;
+    private const float PettingHoldMinDuration = 0.45f;
+    private const float PettingStrokeMinPathPixels = 24f;
+    private const float PettingScreenPadding = 18f;
     private const float TugBondGain = 0.006f;
     private const float TugMoodGain = 0.008f;
     private const float TugActivityGain = 0.01f;
@@ -22,6 +67,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float FailedTeachReactionDelaySeconds = 0.38f;
     private const float FailedTeachHeadTiltAngle = 14f;
     private const float FailedTeachHeadTiltDuration = 0.6f;
+    private const float PreviewPettingGestureLeniencyMultiplier = 1.35f;
+    private const float PreviewPettingBoundsPaddingMultiplier = 1.75f;
+    private const float InteractionFaceCameraDuration = 0.4f;
+    private const float InteractionFaceCameraMaxWaitSeconds = 6f;
+    private const float InteractionLookRefreshIntervalSeconds = 0.2f;
     private const string InteractionDebugBuildMarker = "dog-interaction-guard-v1";
 
     private enum InteractionTrickStartResult
@@ -39,23 +89,33 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private DogCycleCamera dogCamera;
     private PawPalRoomPetHandle activePet;
     private DogRoomAgent activeDog;
+    private PawPalDogInteractionModeOptions modeOptions;
     private PawPalTrickId selectedTrick = PawPalTrickId.Sit;
     private Coroutine attemptRoutine;
+    private Coroutine faceCameraRoutine;
     private float timeoutSeconds = 15f;
     private float lastActivityTime;
     private float nextPettingRewardTime;
+    private float nextInteractionLookRefreshTime;
     private float nextTugRewardTime;
     private float ignoreGestureUntil;
     private float tugStartedAt;
     private float interactionModeEnteredAt;
+    private float pettingStartedAt;
+    private float pettingPathPixels;
     private bool active;
     private bool micListening;
     private bool dogIsSitting;
+    private bool pettingPointerActive;
     private bool tugActive;
     private bool tugRoundCounted;
+    private int pettingPointerId = -2;
     private int tugPointerId = -1;
     private int completedTugRounds;
     private string pendingExitReason = "unknown";
+    private Vector2 lastPettingScreenPosition;
+
+    public event Action InteractionExited;
 
     public bool IsActive
     {
@@ -67,6 +127,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         shell = ownerShell;
         view = interactionView;
         trainingConfig = PawPalTrainingConfig.CreateRuntimeDefault();
+        modeOptions = PawPalDogInteractionModeOptions.RuntimeDefault;
 
         interactionDirector = GetComponent<PawPalDogInteractionDirector>();
         if (interactionDirector == null)
@@ -102,7 +163,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             ConfigureGestureRecognizer();
         }
 
+        HandleContinuousPettingInput();
         HandleToyTugInput();
+        RefreshInteractionCameraLookIfNeeded();
         float remaining = timeoutSeconds - (Time.unscaledTime - lastActivityTime);
         if (view != null)
         {
@@ -124,13 +187,22 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     public bool TryEnterDogInteractionMode(string dogId, bool keepMicListening)
     {
-        activePet = ResolvePet(dogId);
+        PawPalRoomPetHandle resolvedPet = ResolvePet(dogId, true);
+        return TryEnterDogInteractionMode(resolvedPet, keepMicListening, PawPalDogInteractionModeOptions.RuntimeDefault);
+    }
+
+    public bool TryEnterDogInteractionMode(PawPalRoomPetHandle pet, bool keepMicListening, PawPalDogInteractionModeOptions options)
+    {
+        modeOptions = options ?? PawPalDogInteractionModeOptions.RuntimeDefault;
+        activePet = pet;
         activeDog = activePet != null ? activePet.DogAgent : null;
         if (activePet == null || !activePet.IsValid)
         {
             ShowToast("No active pet for interaction mode.");
             return false;
         }
+
+        activePet.PrepareForPlayerInteraction(true);
 
         dogCamera = ResolveDogCamera();
         if (activeDog != null)
@@ -146,7 +218,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             FocusCatInteractionCamera();
         }
 
-        micListening = keepMicListening;
+        micListening = modeOptions.AllowMic && keepMicListening;
         dogIsSitting = false;
         tugRoundCounted = false;
         completedTugRounds = 0;
@@ -154,7 +226,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         interactionModeEnteredAt = Time.unscaledTime;
         ResetActivity();
 
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        PawPalGameRuntime runtime = modeOptions.PreviewOnly ? null : PawPalGameRuntime.Instance;
         PawPalDogState dogState = runtime != null ? runtime.ActiveDog : null;
         if (dogState != null)
         {
@@ -177,7 +249,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         ApplyInteractionVocalContext(activeDog, DogVocalContext.InteractionBoosted);
         if (view != null)
         {
-            view.Show(dogState, micListening, timeoutSeconds);
+            view.Show(dogState, micListening, timeoutSeconds, modeOptions);
             if (activeDog != null)
             {
                 view.SetTrackedDog(activeDog, ResolveInteractionCamera());
@@ -203,15 +275,22 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return false;
         }
 
+        if (faceCameraRoutine != null)
+        {
+            StopCoroutine(faceCameraRoutine);
+        }
+
+        faceCameraRoutine = StartCoroutine(EnsurePetFacesInteractionCameraRoutine(activePet, activeDog));
+
         return true;
     }
 
     public void SetMicListening(bool listening)
     {
-        micListening = listening;
+        micListening = (modeOptions == null || modeOptions.AllowMic) && listening;
         if (view != null)
         {
-            view.SetMicListening(listening);
+            view.SetMicListening(micListening);
         }
     }
 
@@ -223,15 +302,21 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return false;
         }
 
+        if (modeOptions != null && !modeOptions.AllowTrainingGestures)
+        {
+            message = "Training is disabled in preview mode.";
+            return false;
+        }
+
         if (!string.IsNullOrEmpty(command.DogId))
         {
-            PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+            PawPalGameRuntime runtime = modeOptions != null && modeOptions.PreviewOnly ? null : PawPalGameRuntime.Instance;
             if (runtime != null)
             {
                 runtime.SelectDogById(command.DogId, false);
             }
 
-            PawPalRoomPetHandle resolvedPet = ResolvePet(command.DogId);
+            PawPalRoomPetHandle resolvedPet = ResolvePet(command.DogId, runtime != null);
             if (resolvedPet != null && resolvedPet.IsValid)
             {
                 if (activeDog != resolvedPet.DogAgent)
@@ -320,12 +405,19 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         tugActive = false;
         tugRoundCounted = false;
         tugPointerId = -1;
+        CancelContinuousPettingTracking();
         completedTugRounds = 0;
         tugStartedAt = 0f;
         if (attemptRoutine != null)
         {
             StopCoroutine(attemptRoutine);
             attemptRoutine = null;
+        }
+
+        if (faceCameraRoutine != null)
+        {
+            StopCoroutine(faceCameraRoutine);
+            faceCameraRoutine = null;
         }
 
         if (gestureRecognizer != null)
@@ -364,6 +456,13 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         pendingExitReason = "unknown";
+        modeOptions = PawPalDogInteractionModeOptions.RuntimeDefault;
+
+        Action exited = InteractionExited;
+        if (exited != null)
+        {
+            exited();
+        }
     }
 
     public void RequestShellExit(string reason)
@@ -380,9 +479,18 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         ResetActivity();
-        if (IsPettingGesture(snapshot))
+        if (IsPettingGesture(snapshot)
+            || IsPreviewPettingGesture(snapshot))
         {
-            ApplyPettingReward();
+            if (snapshot.DurationSeconds >= PettingHoldMinDuration)
+            {
+                ApplyPettingReward();
+            }
+            return;
+        }
+
+        if (modeOptions != null && !modeOptions.AllowTrainingGestures)
+        {
             return;
         }
 
@@ -405,6 +513,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         message = string.Empty;
         if (!active)
         {
+            return InteractionTrickStartResult.Rejected;
+        }
+
+        if (modeOptions != null && !modeOptions.AllowTrainingGestures)
+        {
+            message = "Training is disabled in preview mode.";
             return InteractionTrickStartResult.Rejected;
         }
 
@@ -447,7 +561,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private IEnumerator TrickAttemptRoutine(PawPalTrickDefinition definition, bool fromVoice)
     {
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        PawPalGameRuntime runtime = modeOptions != null && modeOptions.PreviewOnly ? null : PawPalGameRuntime.Instance;
         PawPalDogState dogState = runtime != null ? runtime.ActiveDog : null;
         bool posePrerequisite = definition.Id != PawPalTrickId.Lie || dogIsSitting;
         PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dogState, definition, trainingConfig, fromVoice, false, posePrerequisite);
@@ -461,7 +575,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             yield return StartCoroutine(activePet.PlayInteractionTrainingTrick(definition, true, ResolveInteractionCamera()));
             UpdatePosture(definition.Id);
 
-            if (view != null)
+            if (view != null && modeOptions != null && modeOptions.ShowTrainingProgressCues)
             {
                 if (ShouldShowProgressCue(result))
                 {
@@ -531,14 +645,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private void ApplyPettingReward()
     {
         ignoreGestureUntil = Mathf.Max(ignoreGestureUntil, Time.unscaledTime + PettingGestureIgnoreSeconds);
-        if (Time.unscaledTime < nextPettingRewardTime)
+        bool rewardReady = Time.unscaledTime >= nextPettingRewardTime;
+        if (!rewardReady)
         {
             return;
         }
 
         nextPettingRewardTime = Time.unscaledTime + PettingRewardCooldown;
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime != null)
+        if (runtime != null && (modeOptions == null || modeOptions.AllowRuntimeProgressionRewards))
         {
             runtime.ApplyActiveDogInteractionBond(PettingBondGain, PettingMoodGain, PettingActivityGain);
         }
@@ -558,7 +673,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private void ApplyTugReward()
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime != null)
+        if (runtime != null && (modeOptions == null || modeOptions.AllowRuntimeProgressionRewards))
         {
             runtime.ApplyActiveDogInteractionBond(TugBondGain, TugMoodGain, TugActivityGain);
         }
@@ -583,7 +698,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             }
         }
 
-        if (view != null)
+        if (view != null && (modeOptions == null || modeOptions.ShowTrainingProgressCues))
         {
             view.ShowFailedTeachBurst();
         }
@@ -595,6 +710,21 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private void HandleToyTugInput()
     {
+        if (modeOptions != null && !modeOptions.AllowTrainingGestures)
+        {
+            if (activePet != null && activePet.IsValid && (tugActive || tugPointerId != -1 || tugRoundCounted || completedTugRounds > 0))
+            {
+                activePet.StopHeldToyTugAnimation();
+            }
+
+            tugActive = false;
+            tugRoundCounted = false;
+            tugPointerId = -1;
+            tugStartedAt = 0f;
+            completedTugRounds = 0;
+            return;
+        }
+
         if (activePet == null || !activePet.IsValid || !activePet.HasHeldToy)
         {
             // Only stop tug visuals when a tug interaction was actually active.
@@ -809,6 +939,136 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return TryGetScreenRect(toy, ResolveInteractionCamera(), ToyScreenPadding, out toyRect) && toyRect.Contains(screenPosition);
     }
 
+    private void HandleContinuousPettingInput()
+    {
+        if (activePet == null || !activePet.IsValid || Time.unscaledTime < ignoreGestureUntil)
+        {
+            CancelContinuousPettingTracking();
+            return;
+        }
+
+        if (Input.touchSupported && Input.touchCount > 0)
+        {
+            HandleContinuousPettingTouch();
+            return;
+        }
+
+        HandleContinuousPettingMouse();
+    }
+
+    private void HandleContinuousPettingMouse()
+    {
+        Vector2 position = Input.mousePosition;
+        if (!pettingPointerActive)
+        {
+            if (Input.GetMouseButtonDown(0) && !IsPointerOverUi(-1) && IsPointerOverActivePet(position))
+            {
+                BeginContinuousPetting(-1, position);
+            }
+
+            return;
+        }
+
+        if (pettingPointerId != -1)
+        {
+            return;
+        }
+
+        if (Input.GetMouseButton(0))
+        {
+            ContinueContinuousPetting(position);
+        }
+        else
+        {
+            CancelContinuousPettingTracking();
+        }
+    }
+
+    private void HandleContinuousPettingTouch()
+    {
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            Touch touch = Input.GetTouch(i);
+            if (!pettingPointerActive)
+            {
+                if (touch.phase == TouchPhase.Began && !IsPointerOverUi(touch.fingerId) && IsPointerOverActivePet(touch.position))
+                {
+                    BeginContinuousPetting(touch.fingerId, touch.position);
+                    return;
+                }
+
+                continue;
+            }
+
+            if (touch.fingerId != pettingPointerId)
+            {
+                continue;
+            }
+
+            if (touch.phase == TouchPhase.Moved || touch.phase == TouchPhase.Stationary)
+            {
+                ContinueContinuousPetting(touch.position);
+            }
+            else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+            {
+                CancelContinuousPettingTracking();
+            }
+
+            return;
+        }
+
+        if (pettingPointerActive && pettingPointerId >= 0)
+        {
+            CancelContinuousPettingTracking();
+        }
+    }
+
+    private void BeginContinuousPetting(int pointerId, Vector2 screenPosition)
+    {
+        pettingPointerActive = true;
+        pettingPointerId = pointerId;
+        pettingStartedAt = Time.unscaledTime;
+        pettingPathPixels = 0f;
+        lastPettingScreenPosition = screenPosition;
+    }
+
+    private void ContinueContinuousPetting(Vector2 screenPosition)
+    {
+        if (!IsPointerOverActivePet(screenPosition))
+        {
+            CancelContinuousPettingTracking();
+            return;
+        }
+
+        pettingPathPixels += Vector2.Distance(lastPettingScreenPosition, screenPosition);
+        lastPettingScreenPosition = screenPosition;
+
+        float heldDuration = Time.unscaledTime - pettingStartedAt;
+        if (heldDuration >= PettingHoldMinDuration && pettingPathPixels >= PettingStrokeMinPathPixels)
+        {
+            ApplyPettingReward();
+            CancelContinuousPettingTracking();
+        }
+    }
+
+    private void CancelContinuousPettingTracking()
+    {
+        pettingPointerActive = false;
+        pettingPointerId = -2;
+        pettingStartedAt = 0f;
+        pettingPathPixels = 0f;
+        lastPettingScreenPosition = Vector2.zero;
+    }
+
+    private bool IsPointerOverActivePet(Vector2 screenPosition)
+    {
+        Transform petRoot = activePet != null ? activePet.RootTransform : null;
+        Rect petRect;
+        return petRoot != null
+            && TryGetScreenRect(petRoot, ResolveInteractionCamera(), PettingScreenPadding, out petRect)
+            && petRect.Contains(screenPosition);
+    }
+
     private static bool TryGetScreenRect(Transform root, Camera camera, float padding, out Rect rect)
     {
         rect = new Rect();
@@ -898,6 +1158,23 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             && IsDogBodyZone(snapshot.EndZone);
     }
 
+    private static bool IsPreviewPettingGesture(PawPalGestureSnapshot snapshot)
+    {
+        if (snapshot == null)
+        {
+            return false;
+        }
+
+        if (!IsDogBodyZone(snapshot.StartZone) || !IsDogBodyZone(snapshot.EndZone))
+        {
+            return false;
+        }
+
+        return snapshot.Type == PawPalGestureType.HorizontalSwipe
+            || snapshot.Type == PawPalGestureType.DragFromBodyPart
+            || snapshot.Type == PawPalGestureType.PetStroke;
+    }
+
     private static bool IsDogBodyZone(PawPalDogBodyZone zone)
     {
         return zone == PawPalDogBodyZone.Head
@@ -956,6 +1233,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private void HandleMicRequested()
     {
         ResetActivity();
+        if (modeOptions != null && !modeOptions.AllowMic)
+        {
+            return;
+        }
+
         if (shell != null)
         {
             shell.ToggleDogInteractionMic();
@@ -975,13 +1257,88 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return;
         }
 
+        float gestureLeniency = trainingConfig != null ? trainingConfig.GestureLeniency : 1f;
+        float paddingMultiplier = 1f;
+        if (modeOptions != null && modeOptions.PreviewOnly)
+        {
+            gestureLeniency *= PreviewPettingGestureLeniencyMultiplier;
+            paddingMultiplier = PreviewPettingBoundsPaddingMultiplier;
+        }
+
         if (activeDog != null)
         {
-            gestureRecognizer.Configure(activeDog, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+            gestureRecognizer.Configure(activeDog.transform, ResolveInteractionCamera(), gestureLeniency, paddingMultiplier);
             return;
         }
 
-        gestureRecognizer.Configure(activePet != null ? activePet.RootTransform : null, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+        gestureRecognizer.Configure(activePet != null ? activePet.RootTransform : null, ResolveInteractionCamera(), gestureLeniency, paddingMultiplier);
+    }
+
+    private IEnumerator EnsurePetFacesInteractionCameraRoutine(PawPalRoomPetHandle pet, DogRoomAgent dog)
+    {
+        float startedAt = Time.unscaledTime;
+        while (active
+            && pet == activePet
+            && pet != null
+            && pet.IsValid
+            && dog != null
+            && interactionDirector != null
+            && interactionDirector.IsRunning
+            && Time.unscaledTime - startedAt < InteractionFaceCameraMaxWaitSeconds)
+        {
+            yield return null;
+        }
+
+        if (!active || pet == null || pet != activePet || !pet.IsValid)
+        {
+            faceCameraRoutine = null;
+            yield break;
+        }
+
+        Camera interactionCamera = ResolveInteractionCamera();
+        if (interactionCamera != null)
+        {
+            yield return StartCoroutine(pet.FaceTarget(interactionCamera.transform, InteractionFaceCameraDuration));
+        }
+
+        if (dog != null)
+        {
+            DogCameraAttention attention = ResolveDogAttention(dog);
+            if (attention != null)
+            {
+                attention.RequestCameraAttention(Mathf.Max(2f, timeoutSeconds));
+            }
+        }
+
+        faceCameraRoutine = null;
+    }
+
+    private void RefreshInteractionCameraLookIfNeeded()
+    {
+        if (!active || activePet == null || !activePet.IsValid || Time.unscaledTime < nextInteractionLookRefreshTime)
+        {
+            return;
+        }
+
+        nextInteractionLookRefreshTime = Time.unscaledTime + InteractionLookRefreshIntervalSeconds;
+        Camera interactionCamera = ResolveInteractionCamera();
+        if (interactionCamera == null)
+        {
+            return;
+        }
+
+        if (activeDog != null)
+        {
+            DogCameraAttention attention = ResolveDogAttention(activeDog);
+            if (attention != null)
+            {
+                attention.RequestCameraAttention(Mathf.Max(0.4f, InteractionLookRefreshIntervalSeconds * 2f));
+            }
+        }
+        else if (activePet.CatAgent != null)
+        {
+            activePet.CatAgent.RequestInteractionCameraLook(interactionCamera.transform, Mathf.Max(0.4f, InteractionLookRefreshIntervalSeconds * 2f));
+        }
     }
 
     private void FocusCatInteractionCamera()
@@ -1066,10 +1423,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return dog.gameObject.AddComponent<DogCameraAttention>();
     }
 
-    private PawPalRoomPetHandle ResolvePet(string dogId)
+    private PawPalRoomPetHandle ResolvePet(string dogId, bool selectRuntimeDog)
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (!string.IsNullOrWhiteSpace(dogId))
+        if (selectRuntimeDog && !string.IsNullOrWhiteSpace(dogId))
         {
             if (runtime != null)
             {

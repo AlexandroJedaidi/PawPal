@@ -151,12 +151,17 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
                 yield return StartCoroutine(dog.FaceTarget(camera.transform, CameraFaceDuration));
             }
 
-            RequestCameraAttention(dog, PawPalDogInteractionTuning.GetInactivityTimeoutSeconds(GetPersonality(dog)));
-
             if (!dog.HasHeldToy)
             {
                 yield return StartCoroutine(dog.PlayBark(ArrivalBarkDuration));
             }
+
+            if (camera != null)
+            {
+                yield return StartCoroutine(dog.FaceTarget(camera.transform, CameraFaceDuration));
+            }
+
+            RequestCameraAttention(dog, PawPalDogInteractionTuning.GetInactivityTimeoutSeconds(GetPersonality(dog)));
 
             dog.PauseForSocial(false);
         }

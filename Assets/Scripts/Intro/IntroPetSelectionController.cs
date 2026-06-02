@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 public sealed class IntroPetSelectionController : MonoBehaviour
@@ -10,8 +11,11 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private readonly List<IntroPetRuntimeSelection> selections = new List<IntroPetRuntimeSelection>();
     private IntroPetSpawner spawner;
-    private PetSelectionCameraController cameraController;
+    private DogCycleCamera cameraController;
+    private Camera controlledCamera;
     private IntroPetUIController uiController;
+    private IntroPetPreviewVocalDirector previewVocalDirector;
+    private IntroPetInteractionOverlayController interactionOverlayController;
     private int currentIndex;
     private bool initialized;
     private IntroPetUiState uiState = IntroPetUiState.Selection;
@@ -38,26 +42,30 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
         initialized = true;
         EnsureEventSystem();
-
-        cameraController = sceneCamera != null
-            ? sceneCamera.gameObject.GetComponent<PetSelectionCameraController>()
-            : null;
-        if (cameraController == null)
+        controlledCamera = sceneCamera != null ? sceneCamera : Camera.main;
+        GameObject cameraObject = controlledCamera != null ? controlledCamera.gameObject : new GameObject("IntroCamera");
+        if (controlledCamera == null)
         {
-            GameObject cameraObject = sceneCamera != null ? sceneCamera.gameObject : new GameObject("IntroCamera");
-            cameraController = cameraObject.AddComponent<PetSelectionCameraController>();
+            controlledCamera = cameraObject.AddComponent<Camera>();
+            controlledCamera.tag = "MainCamera";
         }
 
-        cameraController.Initialize(sceneCamera);
+        cameraController = cameraObject.GetComponent<DogCycleCamera>();
+        if (cameraController == null)
+        {
+            cameraController = cameraObject.AddComponent<DogCycleCamera>();
+        }
 
         spawner = gameObject.AddComponent<IntroPetSpawner>();
         spawner.Initialize(this, fieldBounds);
         BuildSelections(BuildSpawnRoster(spawner.LoadDefinitions()));
         ApplySpawnResults(spawner.Spawn(selections));
+        RegisterCameraRoster();
 
         uiController = new GameObject("IntroPetSelectionCanvas", typeof(RectTransform)).AddComponent<IntroPetUIController>();
         uiController.Build();
         BindUi();
+        InitializePreviewSystems();
         RefreshUi();
 
         if (spawner.Agents.Count > 0)
@@ -72,7 +80,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     public void SelectAgent(IntroPetAgent agent)
     {
-        if (agent == null || uiState != IntroPetUiState.Selection)
+        if (agent == null || uiState != IntroPetUiState.Selection || IsPreviewInteractionActive())
         {
             return;
         }
@@ -82,7 +90,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private void Update()
     {
-        if (!initialized || uiState != IntroPetUiState.Selection)
+        if (!initialized || uiState != IntroPetUiState.Selection || IsPreviewInteractionActive())
         {
             return;
         }
@@ -105,9 +113,12 @@ public sealed class IntroPetSelectionController : MonoBehaviour
             return;
         }
 
+        HashSet<string> usedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < sourceDefinitions.Length; i++)
         {
-            selections.Add(IntroPetRuntimeSelection.Create(sourceDefinitions[i], i));
+            IntroPetDefinition definition = sourceDefinitions[i];
+            string generatedName = IntroPetRandomNameGenerator.GenerateName(definition, usedNames);
+            selections.Add(IntroPetRuntimeSelection.Create(definition, i, generatedName));
         }
     }
 
@@ -175,7 +186,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
         for (int i = definitionsToShuffle.Count - 1; i > 0; i--)
         {
-            int swapIndex = Random.Range(0, i + 1);
+            int swapIndex = UnityEngine.Random.Range(0, i + 1);
             IntroPetDefinition temp = definitionsToShuffle[i];
             definitionsToShuffle[i] = definitionsToShuffle[swapIndex];
             definitionsToShuffle[swapIndex] = temp;
@@ -193,14 +204,15 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         uiController.FurIndexRequested += SetFurIndex;
         uiController.GenderChanged += SetGender;
         uiController.NameChanged += SetName;
-        uiController.ContinueRequested += ShowConfirmCard;
+        uiController.ContinueRequested += ShowCustomizeCard;
         uiController.BackRequested += ShowSelectionCard;
         uiController.ConfirmAccepted += ConfirmSelection;
+        uiController.WhistleRequested += EnterPreviewInteraction;
     }
 
     private void StepPet(int direction)
     {
-        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Selection || IsPreviewInteractionActive())
         {
             return;
         }
@@ -227,15 +239,16 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         IntroPetAgent previous = CurrentAgent;
         if (previous != null)
         {
-            previous.SetSelected(false, cameraController != null ? cameraController.ControlledCamera : Camera.main);
+            previous.SetSelected(false, controlledCamera);
         }
 
         currentIndex = Mathf.Clamp(index, 0, selections.Count - 1);
         IntroPetAgent current = CurrentAgent;
         if (current != null)
         {
-            current.SetSelected(true, cameraController != null ? cameraController.ControlledCamera : Camera.main);
-            cameraController.Focus(current, snapCamera);
+            current.SetSelected(true, controlledCamera);
+            DogSocialDirector.SetPreferredInteractionDog(current.RuntimeDogAgent);
+            FocusCameraOnAgent(current, snapCamera);
         }
 
         RefreshUi();
@@ -243,7 +256,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private void SetFurIndex(int furIndex)
     {
-        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Customize)
         {
             return;
         }
@@ -270,14 +283,16 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         if (replacement != null)
         {
             currentIndex = replacement.SelectionIndex;
-            replacement.SetSelected(true, cameraController != null ? cameraController.ControlledCamera : Camera.main);
-            cameraController.Focus(replacement, false);
+            RegisterCameraRoster();
+            RefreshPreviewRoster();
+            replacement.SetSelected(true, controlledCamera);
+            FocusCameraOnAgent(replacement, false);
         }
     }
 
     private void SetGender(PawPalDogGender gender)
     {
-        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Customize)
         {
             return;
         }
@@ -297,14 +312,19 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         RefreshUi();
     }
 
-    private void ShowConfirmCard()
+    private void ShowCustomizeCard()
     {
         if (uiController == null || selections.Count == 0)
         {
             return;
         }
 
-        uiState = IntroPetUiState.Confirm;
+        if (IsPreviewInteractionActive() && interactionOverlayController != null)
+        {
+            interactionOverlayController.ExitInteraction();
+        }
+
+        uiState = IntroPetUiState.Customize;
         RefreshUi();
     }
 
@@ -366,6 +386,26 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         currentIndex = Mathf.Clamp(currentIndex, 0, Mathf.Max(0, selections.Count - 1));
     }
 
+    private void RegisterCameraRoster()
+    {
+        if (cameraController == null || spawner == null)
+        {
+            return;
+        }
+
+        cameraController.ConfigureIntroSelectionMode(spawner.GetOrderedDogAgents(), false, true);
+    }
+
+    private void FocusCameraOnAgent(IntroPetAgent agent, bool snapCamera)
+    {
+        if (cameraController == null || agent == null || agent.RuntimeDogAgent == null)
+        {
+            return;
+        }
+
+        cameraController.FocusIntroSelectionDog(agent.RuntimeDogAgent, snapCamera);
+    }
+
     private static void EnsureEventSystem()
     {
         if (EventSystem.current != null)
@@ -374,5 +414,254 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         }
 
         new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+    }
+
+    private void InitializePreviewSystems()
+    {
+        previewVocalDirector = gameObject.GetComponent<IntroPetPreviewVocalDirector>();
+        if (previewVocalDirector == null)
+        {
+            previewVocalDirector = gameObject.AddComponent<IntroPetPreviewVocalDirector>();
+        }
+
+        RefreshPreviewRoster();
+
+        interactionOverlayController = gameObject.GetComponent<IntroPetInteractionOverlayController>();
+        if (interactionOverlayController == null)
+        {
+            interactionOverlayController = gameObject.AddComponent<IntroPetInteractionOverlayController>();
+        }
+
+        interactionOverlayController.Initialize(this, uiController, previewVocalDirector);
+    }
+
+    private void RefreshPreviewRoster()
+    {
+        if (previewVocalDirector != null && spawner != null)
+        {
+            previewVocalDirector.SetAgents(spawner.Agents);
+        }
+    }
+
+    private void EnterPreviewInteraction()
+    {
+        if (uiState != IntroPetUiState.Selection || interactionOverlayController == null)
+        {
+            return;
+        }
+
+        IntroPetAgent agent = CurrentAgent;
+        if (agent == null)
+        {
+            return;
+        }
+
+        interactionOverlayController.TryEnterPreviewInteraction(agent.RoomPet);
+    }
+
+    private bool IsPreviewInteractionActive()
+    {
+        return interactionOverlayController != null && interactionOverlayController.IsInteractionActive;
+    }
+}
+
+[DisallowMultipleComponent]
+public sealed class IntroPetPreviewVocalDirector : MonoBehaviour
+{
+    private const float RetryDelayWhenBlocked = 2.2f;
+    private const float MinimumDelayBetweenPreviewVocals = 7f;
+    private const float MaximumDelayBetweenPreviewVocals = 11.5f;
+
+    private readonly List<PawPalRoomPetHandle> pets = new List<PawPalRoomPetHandle>();
+    private bool interactionSuspended;
+    private float nextAttemptTime;
+
+    public void SetAgents(IReadOnlyList<IntroPetAgent> agents)
+    {
+        pets.Clear();
+        if (agents == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            IntroPetAgent agent = agents[i];
+            if (agent == null || agent.RoomPet == null || !agent.RoomPet.IsValid)
+            {
+                continue;
+            }
+
+            pets.Add(agent.RoomPet);
+        }
+
+        nextAttemptTime = Time.time + Random.Range(1.2f, 2.8f);
+    }
+
+    public void SetInteractionSuspended(bool suspended)
+    {
+        interactionSuspended = suspended;
+        if (!interactionSuspended)
+        {
+            nextAttemptTime = Time.time + Random.Range(2f, 3.5f);
+        }
+    }
+
+    private void Update()
+    {
+        if (interactionSuspended || Time.time < nextAttemptTime || pets.Count == 0)
+        {
+            return;
+        }
+
+        List<PawPalRoomPetHandle> eligiblePets = new List<PawPalRoomPetHandle>();
+        for (int i = 0; i < pets.Count; i++)
+        {
+            PawPalRoomPetHandle pet = pets[i];
+            if (!IsEligible(pet))
+            {
+                continue;
+            }
+
+            eligiblePets.Add(pet);
+        }
+
+        if (eligiblePets.Count == 0)
+        {
+            nextAttemptTime = Time.time + RetryDelayWhenBlocked;
+            return;
+        }
+
+        PawPalRoomPetHandle chosen = eligiblePets[Random.Range(0, eligiblePets.Count)];
+        if (chosen != null && chosen.TryPlayPreviewVocal())
+        {
+            nextAttemptTime = Time.time + Random.Range(MinimumDelayBetweenPreviewVocals, MaximumDelayBetweenPreviewVocals);
+            return;
+        }
+
+        nextAttemptTime = Time.time + RetryDelayWhenBlocked;
+    }
+
+    private static bool IsEligible(PawPalRoomPetHandle pet)
+    {
+        return pet != null
+            && pet.IsValid
+            && !pet.IsBusy
+            && !pet.IsResting
+            && !pet.IsSleeping
+            && !pet.IsPlayingOneShotAnimation;
+    }
+}
+
+[DisallowMultipleComponent]
+public sealed class IntroPetInteractionOverlayController : MonoBehaviour
+{
+    private IntroPetUIController introUi;
+    private IntroPetPreviewVocalDirector previewVocalDirector;
+    private PawPalDogInteractionModeController interactionController;
+    private PawPalDogInteractionModeView interactionView;
+
+    public bool IsInteractionActive
+    {
+        get { return interactionController != null && interactionController.IsActive; }
+    }
+
+    public void Initialize(
+        IntroPetSelectionController owner,
+        IntroPetUIController uiController,
+        IntroPetPreviewVocalDirector vocalDirector)
+    {
+        introUi = uiController;
+        previewVocalDirector = vocalDirector;
+
+        if (interactionController != null && interactionView != null)
+        {
+            return;
+        }
+
+        GameObject canvasObject = new GameObject(
+            "IntroPetInteractionOverlay",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(CanvasScaler),
+            typeof(GraphicRaycaster),
+            typeof(UiSpriteLibrary));
+        canvasObject.transform.SetParent(transform, false);
+
+        RectTransform canvasRect = canvasObject.GetComponent<RectTransform>();
+        UiFactory.Stretch(canvasRect, 0f, 0f, 0f, 0f);
+
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 60;
+
+        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0f;
+
+        UiSpriteLibrary sprites = canvasObject.GetComponent<UiSpriteLibrary>();
+        RectTransform interactionRoot = UiFactory.CreateRect("InteractionRoot", canvasObject.transform);
+        UiFactory.Stretch(interactionRoot, 0f, 0f, 0f, 0f);
+
+        interactionView = interactionRoot.gameObject.AddComponent<PawPalDogInteractionModeView>();
+        interactionView.Initialize(sprites);
+        interactionController = interactionRoot.gameObject.AddComponent<PawPalDogInteractionModeController>();
+        interactionController.Initialize(null, interactionView);
+        interactionController.InteractionExited += HandleInteractionExited;
+        interactionView.Hide();
+    }
+
+    public void TryEnterPreviewInteraction(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid || interactionController == null || interactionController.IsActive)
+        {
+            return;
+        }
+
+        if (previewVocalDirector != null)
+        {
+            previewVocalDirector.SetInteractionSuspended(true);
+        }
+
+        SetIntroPreviewInteractionPresentation(true);
+        if (!interactionController.TryEnterDogInteractionMode(pet, false, PawPalDogInteractionModeOptions.PreviewOnlyDefault))
+        {
+            if (previewVocalDirector != null)
+            {
+                previewVocalDirector.SetInteractionSuspended(false);
+            }
+
+            SetIntroPreviewInteractionPresentation(false);
+        }
+    }
+
+    public void ExitInteraction()
+    {
+        if (interactionController == null || !interactionController.IsActive)
+        {
+            return;
+        }
+
+        interactionController.RequestShellExit("intro_continue");
+    }
+
+    private void HandleInteractionExited()
+    {
+        if (previewVocalDirector != null)
+        {
+            previewVocalDirector.SetInteractionSuspended(false);
+        }
+
+        SetIntroPreviewInteractionPresentation(false);
+    }
+
+    private void SetIntroPreviewInteractionPresentation(bool active)
+    {
+        if (introUi != null)
+        {
+            introUi.SetPreviewInteractionPresentation(active);
+        }
     }
 }

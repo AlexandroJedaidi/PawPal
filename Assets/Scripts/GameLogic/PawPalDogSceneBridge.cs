@@ -7,6 +7,7 @@ using UnityEngine.SceneManagement;
 [DisallowMultipleComponent]
 public sealed class PawPalDogSceneBridge : MonoBehaviour
 {
+    private const string HomeSceneName = "David_Test";
     private const string RuntimeCollarName = "PawPalRuntimeCollar";
     private const float ReferenceCollarHeadDistance = 0.034422904f;
     private const float ReferenceCollarHeadOffsetFactor = 0.4967607f;
@@ -114,6 +115,13 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
     {
         if (runtime == null)
         {
+            return;
+        }
+
+        if (!SupportsRuntimePresentationScene())
+        {
+            currentPresentationAgent = null;
+            ClearAllRuntimeCollars();
             return;
         }
 
@@ -1408,6 +1416,11 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static bool SupportsRuntimePresentationScene()
+    {
+        return SceneManager.GetActiveScene().name == HomeSceneName;
     }
 
     private void WarnOnce(string key, string message)

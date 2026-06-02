@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public enum IntroPetSpawnStatus
 {
@@ -34,6 +37,23 @@ public sealed class IntroPetSpawner : MonoBehaviour
     public IReadOnlyList<IntroPetAgent> Agents
     {
         get { return agents; }
+    }
+
+    public DogRoomAgent[] GetOrderedDogAgents()
+    {
+        List<DogRoomAgent> orderedDogs = new List<DogRoomAgent>(agents.Count);
+        for (int i = 0; i < agents.Count; i++)
+        {
+            IntroPetAgent agent = agents[i];
+            if (agent == null || agent.RuntimeDogAgent == null)
+            {
+                continue;
+            }
+
+            orderedDogs.Add(agent.RuntimeDogAgent);
+        }
+
+        return orderedDogs.ToArray();
     }
 
     public void Initialize(IntroPetSelectionController owner, Bounds roamBounds)
@@ -89,10 +109,23 @@ public sealed class IntroPetSpawner : MonoBehaviour
             return oldAgent;
         }
 
+        if (CanApplyVariantInPlace(oldAgent, selection.FurVariant))
+        {
+            oldAgent.ApplyFurVariant(selection.FurVariant);
+            return oldAgent;
+        }
+
+        if (selection.FurVariant != null && selection.FurVariant.ReplacementMaterial == null)
+        {
+            Debug.LogWarning(
+                "IntroPetSelection fur variant '" + selection.FurVariant.SafeDisplayName
+                + "' for " + selection.Definition.DisplayName
+                + " has no ReplacementMaterial. Falling back to respawned preview swap.");
+        }
+
         int index = oldAgent.SelectionIndex;
         Vector3 position = oldAgent.transform.position;
         Quaternion rotation = oldAgent.transform.rotation;
-        bool wasSelected = controller != null && controller.CurrentAgent == oldAgent;
 
         IntroPetSpawnStatus status;
         IntroPetAgent replacement = CreateAgent(selection, index, position, rotation, out status);
@@ -103,12 +136,27 @@ public sealed class IntroPetSpawner : MonoBehaviour
         }
 
         agents.Remove(oldAgent);
+        RedirectEditorSelectionBeforeDestroy(oldAgent.gameObject, replacement.gameObject);
+        oldAgent.gameObject.SetActive(false);
         Destroy(oldAgent.gameObject);
         agents.Insert(Mathf.Clamp(index, 0, agents.Count), replacement);
         RefreshAgentIndexes();
-        replacement.SetSelected(wasSelected, Camera.main);
-
         return replacement;
+    }
+
+    private static bool CanApplyVariantInPlace(IntroPetAgent agent, FurVariantDefinition variant)
+    {
+        if (agent == null)
+        {
+            return false;
+        }
+
+        if (variant == null)
+        {
+            return true;
+        }
+
+        return variant.ReplacementMaterial != null;
     }
 
     private IntroPetAgent CreateAgent(IntroPetRuntimeSelection selection, int index, Vector3 position, Quaternion rotation, out IntroPetSpawnStatus status)
@@ -187,28 +235,22 @@ public sealed class IntroPetSpawner : MonoBehaviour
             navMeshAgent = instance.AddComponent<UnityEngine.AI.NavMeshAgent>();
         }
 
-        if (definition != null && definition.Species == IntroPetSpecies.Cat)
-        {
-            PawPalCatRoomAgent catAgent = instance.GetComponent<PawPalCatRoomAgent>();
-            if (catAgent == null)
-            {
-                catAgent = instance.AddComponent<PawPalCatRoomAgent>();
-            }
-
-            catAgent.ConfigureRoomBounds(fieldBounds);
-            catAgent.Initialize(session);
-            return new PawPalRoomPetHandle(catAgent);
-        }
-
         DogRoomAgent dogAgent = instance.GetComponent<DogRoomAgent>();
         if (dogAgent == null)
         {
             dogAgent = instance.AddComponent<DogRoomAgent>();
         }
 
+        PawPalCatRoomAgent legacyCatAgent = instance.GetComponent<PawPalCatRoomAgent>();
+        if (legacyCatAgent != null)
+        {
+            Destroy(legacyCatAgent);
+        }
+
         dogAgent.SetRuntimeDogId(session != null ? session.RuntimePetId : string.Empty);
         dogAgent.ConfigureRoomBounds(fieldBounds);
         dogAgent.ApplySelectedPetPresentation(session);
+        dogAgent.ConfigureSelectedPetRuntime(session);
         return new PawPalRoomPetHandle(dogAgent);
     }
 
@@ -433,16 +475,68 @@ public sealed class IntroPetSpawner : MonoBehaviour
 
     private void Clear()
     {
+        RedirectEditorSelectionBeforeBulkDestroy();
+
         for (int i = agents.Count - 1; i >= 0; i--)
         {
             if (agents[i] != null)
             {
+                agents[i].gameObject.SetActive(false);
                 Destroy(agents[i].gameObject);
             }
         }
 
         agents.Clear();
     }
+
+#if UNITY_EDITOR
+    private void RedirectEditorSelectionBeforeBulkDestroy()
+    {
+        Transform activeTransform = Selection.activeTransform;
+        if (activeTransform == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            IntroPetAgent agent = agents[i];
+            if (agent == null || !activeTransform.IsChildOf(agent.transform))
+            {
+                continue;
+            }
+
+            Selection.activeGameObject = controller != null ? controller.gameObject : gameObject;
+            return;
+        }
+    }
+
+    private void RedirectEditorSelectionBeforeDestroy(GameObject destroyedObject, GameObject replacementObject)
+    {
+        if (destroyedObject == null)
+        {
+            return;
+        }
+
+        Transform activeTransform = Selection.activeTransform;
+        if (activeTransform == null || !activeTransform.IsChildOf(destroyedObject.transform))
+        {
+            return;
+        }
+
+        Selection.activeGameObject = replacementObject != null
+            ? replacementObject
+            : controller != null ? controller.gameObject : gameObject;
+    }
+#else
+    private void RedirectEditorSelectionBeforeBulkDestroy()
+    {
+    }
+
+    private void RedirectEditorSelectionBeforeDestroy(GameObject destroyedObject, GameObject replacementObject)
+    {
+    }
+#endif
 
     private void RefreshAgentIndexes()
     {

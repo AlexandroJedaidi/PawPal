@@ -60,6 +60,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private Transform trackedPetRoot;
     private Camera trackedCamera;
     private Transform trackedHead;
+    private PawPalDogInteractionModeOptions modeOptions;
     private float cueVisibleUntil;
     private float cueAnimationSeed;
     private float progressVisibleUntil;
@@ -96,8 +97,9 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         SetRootVisible(false);
     }
 
-    public void Show(PawPalDogState dog, bool micListening, float timeoutSeconds)
+    public void Show(PawPalDogState dog, bool micListening, float timeoutSeconds, PawPalDogInteractionModeOptions options)
     {
+        modeOptions = options ?? PawPalDogInteractionModeOptions.RuntimeDefault;
         SetRootVisible(true);
         SetMicListening(micListening);
         SetTimeout(timeoutSeconds);
@@ -105,6 +107,10 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         HideCue();
         HideProgressCue();
         HideSymbolBurst();
+        if (micBackground != null)
+        {
+            micBackground.gameObject.SetActive(modeOptions.ShowMicButton);
+        }
     }
 
     public void Hide()
@@ -112,6 +118,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
         trackedPetRoot = null;
         trackedCamera = null;
         trackedHead = null;
+        modeOptions = null;
         HideCue();
         HideProgressCue();
         HideSymbolBurst();
@@ -138,7 +145,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public void SetMicListening(bool listening)
     {
-        micListening = listening;
+        micListening = (modeOptions == null || modeOptions.AllowMic) && listening;
         RefreshMicVisual();
     }
 
@@ -486,6 +493,12 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     {
         if (micBackground == null || micIcon == null)
         {
+            return;
+        }
+
+        if (modeOptions != null && !modeOptions.ShowMicButton)
+        {
+            micBackground.gameObject.SetActive(false);
             return;
         }
 

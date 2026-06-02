@@ -9,9 +9,7 @@ public sealed class IntroPetAgent : MonoBehaviour
     private FurVariantDefinition activeVariant;
     private GameObject sourcePrefab;
     private PawPalRoomPetHandle roomPet;
-    private bool selected;
     private bool warnedMissingVariantMaterial;
-    private bool warnedMissingSelectedAnimation;
 
     public int SelectionIndex { get; private set; }
 
@@ -38,6 +36,16 @@ public sealed class IntroPetAgent : MonoBehaviour
                 ? roomPet.FocusTransform
                 : transform;
         }
+    }
+
+    public PawPalRoomPetHandle RoomPet
+    {
+        get { return roomPet; }
+    }
+
+    public DogRoomAgent RuntimeDogAgent
+    {
+        get { return roomPet != null ? roomPet.DogAgent : null; }
     }
 
     public void Initialize(
@@ -70,25 +78,6 @@ public sealed class IntroPetAgent : MonoBehaviour
 
     public void SetSelected(bool isSelected, Camera camera)
     {
-        selected = isSelected;
-        if (!selected)
-        {
-            if (roomPet != null && roomPet.IsValid)
-            {
-                roomPet.StartRoaming();
-            }
-
-            return;
-        }
-
-        if (roomPet != null && roomPet.IsValid)
-        {
-            roomPet.PrepareForPlayerInteraction(true);
-            roomPet.PauseForSocial(false);
-            StartCoroutine(roomPet.FaceTarget(camera != null ? camera.transform : null, 0.24f));
-        }
-
-        PlaySelectedReaction();
     }
 
     public void ApplyFurVariant(FurVariantDefinition variant)
@@ -110,21 +99,6 @@ public sealed class IntroPetAgent : MonoBehaviour
         if (controller != null)
         {
             controller.SelectAgent(this);
-        }
-    }
-
-    private void PlaySelectedReaction()
-    {
-        Animator animator = GetComponentInChildren<Animator>(true);
-        if (definition != null && definition.AnimationSet != null && definition.AnimationSet.TryPlaySelectedReaction(animator))
-        {
-            return;
-        }
-
-        if (!warnedMissingSelectedAnimation)
-        {
-            warnedMissingSelectedAnimation = true;
-            Debug.LogWarning("IntroPetSelection could not find a selected reaction animation for " + (definition != null ? definition.DisplayName : name) + ".");
         }
     }
 

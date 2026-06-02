@@ -115,16 +115,8 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         }
 
         roomAgent.SetRuntimeDogId(selection.RuntimePetId);
-
-        if (selection.Definition.AnimationSet != null)
-        {
-            selection.Definition.AnimationSet.ApplyTo(petObject.GetComponentInChildren<Animator>(true));
-        }
-
-        if (selection.FurVariant != null && selection.FurVariant.ReplacementMaterial != null)
-        {
-            PetVariantApplier.ApplyMaterial(petObject, selection.FurVariant);
-        }
+        roomAgent.ApplySelectedPetPresentation(selection);
+        roomAgent.ConfigureSelectedPetRuntime(selection);
 
         if (runtime != null)
         {
@@ -165,20 +157,28 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
             navMeshAgent = petObject.AddComponent<NavMeshAgent>();
         }
 
-        PawPalCatRoomAgent catAgent = petObject.GetComponent<PawPalCatRoomAgent>();
-        if (catAgent == null)
+        DogRoomAgent roomAgent = petObject.GetComponent<DogRoomAgent>();
+        if (roomAgent == null)
         {
-            catAgent = petObject.AddComponent<PawPalCatRoomAgent>();
+            roomAgent = petObject.AddComponent<DogRoomAgent>();
         }
 
-        catAgent.Initialize(selection);
+        PawPalCatRoomAgent legacyCatAgent = petObject.GetComponent<PawPalCatRoomAgent>();
+        if (legacyCatAgent != null)
+        {
+            UnityEngine.Object.Destroy(legacyCatAgent);
+        }
+
+        roomAgent.SetRuntimeDogId(selection.RuntimePetId);
+        roomAgent.ApplySelectedPetPresentation(selection);
+        roomAgent.ConfigureSelectedPetRuntime(selection);
         if (runtime != null)
         {
             runtime.RegisterTemporaryIntroPet(selection.BuildTemporaryDogState(), selection.Species, true);
         }
 
         PawPalIntroSceneFlow.SetAppShellVisible(true);
-        FocusCameraOnCat(catAgent);
+        FocusCameraOnCat(roomAgent);
     }
 
     private static GameObject InstantiateSelectedPet(SelectedPetSessionData selection, Transform defaultDogAnchor, string namePrefix)
@@ -227,7 +227,7 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         return petObject;
     }
 
-    private static void FocusCameraOnCat(PawPalCatRoomAgent catAgent)
+    private static void FocusCameraOnCat(DogRoomAgent catAgent)
     {
         Camera camera = Camera.main;
         if (camera == null || catAgent == null)
@@ -254,6 +254,6 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         }
 
         followCamera.enabled = true;
-        followCamera.Focus(catAgent.FocusTransform, catAgent.HomeCameraOffset, true);
+        followCamera.Focus(PawPalRoomPetRuntime.ResolveHeadTransform(catAgent.transform), catAgent.HomeCameraOffset, true);
     }
 }

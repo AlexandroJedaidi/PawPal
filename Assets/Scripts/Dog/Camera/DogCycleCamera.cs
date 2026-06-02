@@ -120,6 +120,7 @@ public class DogCycleCamera : MonoBehaviour
     private int nextFocusClaimId = 1;
     private int activeFocusClaimId;
     private float postFocusHoldUntil;
+    private bool introSelectionMode;
     private readonly List<DogCameraFocusClaim> focusClaims = new List<DogCameraFocusClaim>();
     private readonly Dictionary<DogRoomAgent, Transform> headTargetsByDog = new Dictionary<DogRoomAgent, Transform>();
 
@@ -163,6 +164,104 @@ public class DogCycleCamera : MonoBehaviour
     public float PhotoZoom01
     {
         get { return photoZoom01; }
+    }
+
+    public void ConfigureIntroSelectionMode(IList<DogRoomAgent> orderedDogs, bool disableManualLook, bool keepFixedPosition)
+    {
+        introSelectionMode = true;
+        dogs = BuildOrderedDogArray(orderedDogs);
+        keepInitialPosition = keepFixedPosition;
+        allowManualLook = !disableManualLook;
+        fixedPosition = transform.position;
+        runtime = PawPalGameRuntime.Instance;
+        focusClaims.Clear();
+        activeFocusClaimId = 0;
+        legacyInteractionFocusId = 0;
+        runtimeSelectionHoldUntil = 0f;
+        switchTimer = 0f;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        photoModeActive = false;
+        photoModeDog = null;
+        dogInteractionModeActive = false;
+        dogInteractionModeDog = null;
+        StopZoomForFocus();
+
+        DogRoomAgent[] resolvedDogs = GetResolvedDogs();
+        if (resolvedDogs == null || resolvedDogs.Length == 0)
+        {
+            activeIndex = 0;
+            hasFocusPoint = false;
+            return;
+        }
+
+        activeIndex = Mathf.Clamp(activeIndex, 0, resolvedDogs.Length - 1);
+        DogRoomAgent activeDog = resolvedDogs[activeIndex];
+        if (activeDog != null)
+        {
+            currentFocusPoint = GetCameraFocusPoint(activeDog);
+            switchStartFocusPoint = currentFocusPoint;
+            hasFocusPoint = true;
+            switchBlendTimer = switchBlendDuration;
+        }
+    }
+
+    public bool FocusIntroSelectionDog(DogRoomAgent dog, bool snap)
+    {
+        if (dog == null)
+        {
+            return false;
+        }
+
+        DogRoomAgent[] resolvedDogs = GetResolvedDogs();
+        if (resolvedDogs == null || resolvedDogs.Length == 0)
+        {
+            return false;
+        }
+
+        int nextIndex = -1;
+        for (int i = 0; i < resolvedDogs.Length; i++)
+        {
+            if (resolvedDogs[i] == dog)
+            {
+                nextIndex = i;
+                break;
+            }
+        }
+
+        if (nextIndex < 0)
+        {
+            return false;
+        }
+
+        manualLookHoldUntil = 0f;
+        mouseDragActive = false;
+        activeTouchFingerId = -1;
+        switchTimer = 0f;
+        postFocusHoldUntil = Time.time + Mathf.Max(0f, postFocusSwitchCooldown);
+        runtimeSelectionHoldUntil = Time.time + Mathf.Max(runtimeSelectionHoldDuration, switchBlendDuration + 0.25f);
+        StopZoomForFocus();
+
+        if (snap)
+        {
+            activeIndex = nextIndex;
+            ApplyImmediateFocusToDog(dog);
+            return true;
+        }
+
+        if (!hasFocusPoint)
+        {
+            currentFocusPoint = GetCameraFocusPoint(dog);
+            switchStartFocusPoint = currentFocusPoint;
+            hasFocusPoint = true;
+        }
+
+        if (activeIndex != nextIndex)
+        {
+            SwitchToIndex(nextIndex, false);
+        }
+
+        return true;
     }
 
     public static bool TryFocusRuntimeActiveDogFromSelection()
@@ -569,12 +668,14 @@ public class DogCycleCamera : MonoBehaviour
             ClearActiveFocusClaim();
         }
 
-        bool usingRuntimeSelection = !switchingLocked && runtime != null && runtime.ActiveDog != null && Time.time < runtimeSelectionHoldUntil;
+        bool usingSelectionHold = !switchingLocked
+            && Time.time < runtimeSelectionHoldUntil
+            && (introSelectionMode || (runtime != null && runtime.ActiveDog != null));
         if (switchingLocked)
         {
             switchTimer = 0f;
         }
-        else if (!usingRuntimeSelection)
+        else if (!usingSelectionHold)
         {
             if (Time.time >= postFocusHoldUntil)
             {
@@ -582,12 +683,12 @@ public class DogCycleCamera : MonoBehaviour
                 if (switchTimer >= GetEffectiveSwitchInterval())
                 {
                     switchTimer = 0f;
-                    SwitchToIndex(NextValidIndex(activeIndex + 1), true);
+                    SwitchToIndex(NextValidIndex(activeIndex + 1), !introSelectionMode);
                     TryStartZoom();
                 }
             }
         }
-        else
+        else if (!introSelectionMode)
         {
             SyncToRuntimeActiveDog(true);
         }
@@ -1494,7 +1595,7 @@ public class DogCycleCamera : MonoBehaviour
 
     private void SelectRuntimeDogForCameraIndex(int dogIndex)
     {
-        if (IsDogSwitchingLocked || photoModeActive)
+        if (introSelectionMode || IsDogSwitchingLocked || photoModeActive)
         {
             return;
         }
@@ -1531,7 +1632,7 @@ public class DogCycleCamera : MonoBehaviour
 
     private void SelectRuntimeDogForAgent(DogRoomAgent dog)
     {
-        if (IsDogSwitchingLocked || photoModeActive)
+        if (introSelectionMode || IsDogSwitchingLocked || photoModeActive)
         {
             return;
         }
@@ -1570,6 +1671,56 @@ public class DogCycleCamera : MonoBehaviour
                 return;
             }
         }
+    }
+
+    private void ApplyImmediateFocusToDog(DogRoomAgent dog)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        if (keepInitialPosition)
+        {
+            transform.position = fixedPosition;
+        }
+
+        currentFocusPoint = GetCameraFocusPoint(dog);
+        switchStartFocusPoint = currentFocusPoint;
+        hasFocusPoint = true;
+        switchBlendTimer = switchBlendDuration;
+
+        Vector3 toTarget = currentFocusPoint - transform.position;
+        if (toTarget.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        transform.rotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
+    }
+
+    private static DogRoomAgent[] BuildOrderedDogArray(IList<DogRoomAgent> orderedDogs)
+    {
+        if (orderedDogs == null || orderedDogs.Count == 0)
+        {
+            return new DogRoomAgent[0];
+        }
+
+        List<DogRoomAgent> filtered = new List<DogRoomAgent>(orderedDogs.Count);
+        HashSet<DogRoomAgent> seenDogs = new HashSet<DogRoomAgent>();
+        for (int i = 0; i < orderedDogs.Count; i++)
+        {
+            DogRoomAgent dog = orderedDogs[i];
+            if (dog == null || seenDogs.Contains(dog))
+            {
+                continue;
+            }
+
+            filtered.Add(dog);
+            seenDogs.Add(dog);
+        }
+
+        return filtered.ToArray();
     }
 
     private Vector3 GetSmoothedFocusPoint(Vector3 targetFocusPoint)
@@ -1763,6 +1914,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private void RefreshDogsIfNeeded()
     {
+        if (introSelectionMode)
+        {
+            return;
+        }
+
         if (dogs != null && dogs.Length > 0)
         {
             return;
@@ -1773,6 +1929,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private DogRoomAgent[] GetResolvedDogs()
     {
+        if (introSelectionMode)
+        {
+            return dogs;
+        }
+
         RefreshDogsIfNeeded();
 
         DogRoomAgent[] sceneDogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
@@ -1841,6 +2002,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private void HandleRuntimeStateChanged()
     {
+        if (introSelectionMode)
+        {
+            return;
+        }
+
         if (runtime == null)
         {
             runtime = PawPalGameRuntime.Instance;
@@ -1868,6 +2034,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private void SyncToRuntimeActiveDog(bool animateSwitch)
     {
+        if (introSelectionMode)
+        {
+            return;
+        }
+
         if (runtime == null)
         {
             runtime = PawPalGameRuntime.Instance;
@@ -1907,6 +2078,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private int ResolveRuntimeActiveDogIndex()
     {
+        if (introSelectionMode)
+        {
+            return -1;
+        }
+
         DogRoomAgent[] resolvedDogs = GetResolvedDogs();
         if (resolvedDogs == null || resolvedDogs.Length == 0 || runtime == null || runtime.ActiveDog == null)
         {
@@ -1931,6 +2107,11 @@ public class DogCycleCamera : MonoBehaviour
 
     private DogRoomAgent ResolveRuntimeActiveDog()
     {
+        if (introSelectionMode)
+        {
+            return null;
+        }
+
         if (runtime == null)
         {
             runtime = PawPalGameRuntime.Instance;

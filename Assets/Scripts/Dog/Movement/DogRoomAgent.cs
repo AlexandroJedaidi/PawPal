@@ -76,6 +76,7 @@ public struct DogCircadianProfile
 [RequireComponent(typeof(NavMeshAgent))]
 public class DogRoomAgent : MonoBehaviour
 {
+    private const float IntroPreviewVocalCooldownSeconds = 20f;
 #if UNITY_EDITOR
     private const string EditorWalkAudioAssetPath = "Assets/Audio/dog_walk.mp3";
     private const string EditorBallBounceAudioAssetPath = "Assets/Audio/ball_bounce.mp3";
@@ -90,6 +91,7 @@ public class DogRoomAgent : MonoBehaviour
     private const string EditorWhiningAudioAssetPath = "Assets/Audio/dog_whining.mp3";
     private const string EditorGnarlAudioAssetPath = "Assets/Audio/dog_gnarl.mp3";
 #endif
+    private static readonly Vector3 DefaultSelectedPetHomeCameraOffset = new Vector3(0f, 0.85f, -2.6f);
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
@@ -154,6 +156,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float navMeshRecoverySearchRadius = 4.5f;
 
     [Header("Movement")]
+#pragma warning disable CS0414
+    // Retained for scene/prefab compatibility; runtime locomotion now comes from PawPalPetMovementProfiles.
     [SerializeField] private float calmWalkSpeed = 0.38f;
     [SerializeField] private float trotSpeed = 0.65f;
     [SerializeField] private float runSpeed = 1.15f;
@@ -177,6 +181,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private string runStateName = "RunForward";
     [SerializeField] private float locomotionCrossFadeDuration = 0.12f;
     [SerializeField] private float locomotionLeadInDuration = 0.2f;
+#pragma warning restore CS0414
 
     [Header("Personal Space")]
     [SerializeField] private float minimumMovementCommitDuration = 0.75f;
@@ -331,6 +336,10 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private AudioClip whiningClip;
     [SerializeField, Range(0f, 1f)] private float whiningVolume = 0.5f;
     [SerializeField] private AudioClip tugGnarlClip;
+    [SerializeField] private AudioClip catLickClip;
+    [SerializeField] private AudioClip catMeowClip;
+    [SerializeField] private AudioClip catPurrClip;
+    [SerializeField] private AudioClip catScratchClip;
     [SerializeField, Range(0f, 1f)] private float tugGnarlVolume = 0.52f;
     [SerializeField, Range(0f, 1f)] private float idleActionVolume = 0.75f;
     [SerializeField] private float minSecondsBetweenBallBounceSounds = 0.18f;
@@ -427,7 +436,9 @@ public class DogRoomAgent : MonoBehaviour
     private float nextAllowedLowNeedWhiningTime;
     private float nextAllowedAnnoyedTime;
     private float nextAllowedVocalTime;
+    private float nextAllowedIntroPreviewVocalTime;
     private bool wasLowPrimaryNeed;
+    private int introPreviewAudioMixDepth;
     private readonly List<Collider> dogPhysicsColliders = new List<Collider>();
     private readonly List<Rigidbody> dogPhysicsBodies = new List<Rigidbody>();
     private float nextDogPhysicsIsolationRefreshTime;
@@ -448,6 +459,11 @@ public class DogRoomAgent : MonoBehaviour
     private bool hasCircadianBaseTuning;
     private DogCircadianProfile circadianProfile = DogCircadianProfile.Default;
     private float circadianAwakeOverrideUntilTime;
+    private IntroPetSpecies presentationSpecies = IntroPetSpecies.Dog;
+    private IntroPetDefinition selectedPetDefinition;
+    private Vector3 selectedPetHomeCameraOffset = DefaultSelectedPetHomeCameraOffset;
+    private PawPalPetMovementProfile movementProfile = PawPalPetMovementProfiles.DefaultProfile;
+    private bool hasMovementProfile;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
     private Dictionary<string, AnimationClip> editorImportedPettingClips;
@@ -482,6 +498,9 @@ public class DogRoomAgent : MonoBehaviour
         && claimedToy == null
         && Time.time >= movementLockedUntil;
     public Vector3 HomePosition => homePosition;
+    public Vector3 HomeCameraOffset => selectedPetHomeCameraOffset == Vector3.zero ? DefaultSelectedPetHomeCameraOffset : selectedPetHomeCameraOffset;
+    public IntroPetSpecies PresentationSpecies => presentationSpecies;
+    public PawPalPetMovementProfile MovementProfile => ResolveMovementProfile();
     public string DogId => dogId;
     public bool HasExplicitDogId => !string.IsNullOrWhiteSpace(dogId);
     public Transform CollarAnchor => collarAnchor;
@@ -507,6 +526,7 @@ public class DogRoomAgent : MonoBehaviour
     public void SetRuntimeDogId(string runtimeDogId)
     {
         dogId = string.IsNullOrWhiteSpace(runtimeDogId) ? string.Empty : runtimeDogId;
+        InvalidateMovementProfile();
     }
 
     public void ConfigureRoomBounds(Bounds bounds)
@@ -514,6 +534,25 @@ public class DogRoomAgent : MonoBehaviour
         restrictToRoomBounds = true;
         roomBoundsCenter = bounds.center;
         roomBoundsSize = new Vector2(bounds.size.x, bounds.size.z);
+    }
+
+    public void ConfigureSelectedPetRuntime(SelectedPetSessionData selection)
+    {
+        if (selection == null || selection.Definition == null)
+        {
+            return;
+        }
+
+        presentationSpecies = selection.Species;
+        selectedPetDefinition = selection.Definition;
+        selectedPetHomeCameraOffset = selection.Definition.HomeCameraOffset != Vector3.zero
+            ? selection.Definition.HomeCameraOffset
+            : DefaultSelectedPetHomeCameraOffset;
+        roamRadius = Mathf.Max(1.5f, selection.Definition.RoamRadius);
+
+        ApplySelectedPetRuntimeProfile(selection);
+        RefreshMovementProfile(selection);
+        RefreshSelectedPetRuntimeConfiguration();
     }
 
     public void ApplySelectedPetPresentation(SelectedPetSessionData selection)
@@ -531,7 +570,7 @@ public class DogRoomAgent : MonoBehaviour
         Animator targetAnimator = GetComponentInChildren<Animator>(true);
         if (selection.Definition.AnimationSet != null)
         {
-            selection.Definition.AnimationSet.ApplyTo(targetAnimator);
+            selection.Definition.AnimationSet.ApplyTo(targetAnimator, selection.Definition);
         }
 
         if (selection.FurVariant != null && selection.FurVariant.ReplacementMaterial != null)
@@ -540,6 +579,64 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         PetVariantApplier.EnsureTapCollider(gameObject);
+    }
+
+    private void ApplySelectedPetRuntimeProfile(SelectedPetSessionData selection)
+    {
+        if (selection == null || selection.Definition == null)
+        {
+            return;
+        }
+
+        string petId = selection.Definition.PetId != null
+            ? selection.Definition.PetId.Trim().ToLowerInvariant()
+            : string.Empty;
+        if (selection.Species != IntroPetSpecies.Cat)
+        {
+            return;
+        }
+
+        if (petId == "cat_simple" || petId == "cat_chubby")
+        {
+            lieLoopStateName = "CatSimple_Lie_side_loop_1";
+            sitEndStateName = "Sit end";
+            useImportedStandingIdleClipsInEditor = true;
+            useImportedRestClipsInEditor = true;
+            useImportedAttackClipsInEditor = true;
+        }
+    }
+
+    private void RefreshSelectedPetRuntimeConfiguration()
+    {
+        animator = ResolveAnimator();
+        agent = GetComponent<NavMeshAgent>();
+        toyAttach = GetComponent<ToyAttach>();
+        if (animator == null || agent == null)
+        {
+            return;
+        }
+
+        if (disableLegacyDogControllers)
+        {
+            DisableLegacyControllers();
+        }
+
+        RefreshMovementProfile(null);
+        ConfigureAgent();
+        locomotionStateHash = ResolveAnimatorStateHash(locomotionStateName);
+        runStateHash = ResolveAnimatorStateHash(runStateName);
+        ResolveOneShotStateHashes();
+        ResolveNeedInteractionStateHashes();
+        ResolveRestStateHashes();
+        sitEndStateHash = ResolveAnimatorStateHash(sitEndStateName);
+        animator.applyRootMotion = false;
+        CaptureCircadianBaseTuning();
+        homePosition = ClampToRoomBounds(transform.position);
+        RefreshDogPhysicsBodies();
+        RefreshDogPhysicsColliders();
+        AutoAssignEditorAudioClips();
+        EnsureWalkingAudioSource();
+        ResetVocalTimers();
     }
 
     public void ApplyCircadianProfile(DogCircadianProfile profile)
@@ -591,18 +688,109 @@ public class DogRoomAgent : MonoBehaviour
 
     private AudioClip ResolveBarkClip()
     {
-        string barkKey = GetBarkBreedKey();
-        if (barkKey == "corgi")
+        if (ResolveMovementProfile().SizeClass == PawPalPetSizeClass.Large)
         {
             return darkBarkClip != null ? darkBarkClip : lightBarkClip;
         }
 
-        if (barkKey == "labrador" || barkKey == "husky" || barkKey == "retriever")
+        return lightBarkClip != null ? lightBarkClip : darkBarkClip;
+    }
+
+    private bool IsCatPresentation()
+    {
+        return presentationSpecies == IntroPetSpecies.Cat;
+    }
+
+    private AudioClip ResolveScratchAudioClip()
+    {
+        if (IsCatPresentation() && catScratchClip != null)
         {
-            return lightBarkClip != null ? lightBarkClip : darkBarkClip;
+            return catScratchClip;
         }
 
-        return lightBarkClip != null ? lightBarkClip : darkBarkClip;
+        return scratchAndShakingClip;
+    }
+
+    private AudioClip ResolveOneShotStartAudioClip(string stateName, int fallbackIdleIndex)
+    {
+        string normalizedStateName = NormalizeAnimationAudioKey(stateName);
+        if (IsCatPresentation())
+        {
+            if (normalizedStateName.Contains("lick"))
+            {
+                return catLickClip;
+            }
+
+            if (normalizedStateName.Contains("scratching")
+                || normalizedStateName.Contains("sharpenclaws")
+                || fallbackIdleIndex == scratchIdleIndex)
+            {
+                return catScratchClip;
+            }
+
+            return null;
+        }
+
+        if (normalizedStateName.Contains("scratching") || fallbackIdleIndex == scratchIdleIndex)
+        {
+            return scratchAndShakingClip;
+        }
+
+        return null;
+    }
+
+    private AudioClip ResolveLieLoopAudioClip(DogRestFlavor restFlavor)
+    {
+        if (restFlavor == DogRestFlavor.Chill && IsCatPresentation())
+        {
+            return catPurrClip;
+        }
+
+        return null;
+    }
+
+    private void PlayLieLoopAudioIfNeeded(DogRestFlavor restFlavor)
+    {
+        AudioClip clip = ResolveLieLoopAudioClip(restFlavor);
+        if (clip != null)
+        {
+            PlaySpatialOneShot(clip, transform.position, idleActionVolume, true);
+        }
+    }
+
+    private void InvalidateMovementProfile()
+    {
+        hasMovementProfile = false;
+    }
+
+    private void RefreshMovementProfile(SelectedPetSessionData selection)
+    {
+        if (selection != null && selection.Definition != null)
+        {
+            selectedPetDefinition = selection.Definition;
+        }
+
+        movementProfile = ResolveMovementProfile(selection);
+        hasMovementProfile = true;
+    }
+
+    private PawPalPetMovementProfile ResolveMovementProfile()
+    {
+        if (!hasMovementProfile || selectedPetDefinition == null)
+        {
+            RefreshMovementProfile(null);
+        }
+
+        return movementProfile;
+    }
+
+    private PawPalPetMovementProfile ResolveMovementProfile(SelectedPetSessionData selection)
+    {
+        PawPalDogState runtimeDog = GetRuntimeDogState();
+        return PawPalPetMovementProfiles.Resolve(
+            selection != null ? selection.Definition : selectedPetDefinition,
+            runtimeDog != null ? runtimeDog.Breed : null,
+            name);
     }
 
     private string GetBarkBreedKey()
@@ -1562,6 +1750,12 @@ public class DogRoomAgent : MonoBehaviour
             yield break;
         }
 
+        if (IsCatPresentation())
+        {
+            yield return PlayCatVocalRoutine(duration, playAudio);
+            yield break;
+        }
+
         AudioClip barkClip = playAudio ? ResolveBarkClip() : null;
         float barkDuration = duration > 0f ? duration : barkIdleDuration;
         if (barkClip != null)
@@ -1573,10 +1767,46 @@ public class DogRoomAgent : MonoBehaviour
         yield return PlayOneShotAnimation(barkStateHash, barkStateName, barkIdleIndex, barkDuration);
     }
 
+    public bool TryPlayPreviewVocal()
+    {
+        if (!CanPlayPreviewVocal())
+        {
+            return false;
+        }
+
+        ReserveIntroPreviewVocalCooldown();
+        StartCoroutine(PlayIntroPreviewVocal(IsCatPresentation() ? 0.85f : 0.38f));
+        return true;
+    }
+
+    public IEnumerator PlayIntroPreviewVocal(float duration)
+    {
+        if (!CanPlayIntroPreviewVocalNow())
+        {
+            yield break;
+        }
+
+        ReserveIntroPreviewVocalCooldown();
+        introPreviewAudioMixDepth++;
+        try
+        {
+            yield return PlayBark(duration, true);
+        }
+        finally
+        {
+            introPreviewAudioMixDepth = Mathf.Max(0, introPreviewAudioMixDepth - 1);
+        }
+    }
+
     public bool TryPlayPettingReaction()
     {
-        // Temporarily disabled while the petting clip export is being corrected.
-        return false;
+        if (!isActiveAndEnabled || IsBusy || isResting || isSleeping || tugLoopAnimationActive || directClipGraph.IsValid())
+        {
+            return false;
+        }
+
+        StartCoroutine(PlayPettingReactionRoutine());
+        return true;
     }
 
     public IEnumerator PlaySit()
@@ -1592,6 +1822,18 @@ public class DogRoomAgent : MonoBehaviour
     public IEnumerator PlayChillRest(float duration)
     {
         yield return PlayRestIdle(duration, DogRestFlavor.Chill, true);
+    }
+
+    private IEnumerator PlayPettingReactionRoutine()
+    {
+        AnimationClip clip;
+        if (TryGetImportedPettingClip(out clip))
+        {
+            yield return PlayDirectClip(clip, Mathf.Max(0.45f, Mathf.Min(0.9f, clip.length * 0.95f)), false);
+            yield break;
+        }
+
+        yield return PlaySocialIdle(tailWagIdleIndex, Mathf.Max(0.35f, socialIdleDuration * 0.3f));
     }
 
     public bool CanPlayPhotoPose(PawPalPhotoPoseId poseId)
@@ -1652,7 +1894,7 @@ public class DogRoomAgent : MonoBehaviour
                 yield return PlayPhotoLieLoop2(poseDuration);
                 break;
             case PawPalPhotoPoseId.Scratch:
-                yield return PlayOneShotAnimation(scratchStateHash, scratchStateName, scratchIdleIndex, poseDuration, scratchAndShakingClip);
+                yield return PlayOneShotAnimation(scratchStateHash, scratchStateName, scratchIdleIndex, poseDuration, ResolveScratchAudioClip());
                 break;
         }
     }
@@ -1808,7 +2050,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         int stateHash = idleIndex == scratchIdleIndex ? scratchStateHash : tailWagStateHash;
         string stateName = idleIndex == scratchIdleIndex ? scratchStateName : tailWagStateName;
-        AudioClip idleAudioClip = idleIndex == scratchIdleIndex ? scratchAndShakingClip : null;
+        AudioClip idleAudioClip = idleIndex == scratchIdleIndex ? ResolveScratchAudioClip() : null;
         yield return PlayOneShotAnimation(stateHash, stateName, idleIndex, duration, idleAudioClip);
     }
 
@@ -2102,6 +2344,7 @@ public class DogRoomAgent : MonoBehaviour
             }
             else
             {
+                PlayLieLoopAudioIfNeeded(restFlavor);
                 CrossFadeState(lieLoopStateHash, restCrossFadeDuration);
                 playedLieFlow = true;
 
@@ -2259,6 +2502,11 @@ public class DogRoomAgent : MonoBehaviour
 
     private bool HasReachedDestination(float reachedDistance, bool preciseArrival)
     {
+        if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+        {
+            return false;
+        }
+
         if (agent.pathPending)
         {
             return false;
@@ -2386,6 +2634,12 @@ public class DogRoomAgent : MonoBehaviour
         bool pausedForCrowding = false;
         while ((timeout <= 0f || elapsed < timeout) && !HasReachedDestination(reachedDistance, preciseArrival))
         {
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+            {
+                LogMovementDebug("TRAVEL_ABORT_AGENT_INACTIVE");
+                break;
+            }
+
             if (!IsMovementCommandCurrent(commandGeneration))
             {
                 if (pausedForCrowding)
@@ -3093,10 +3347,17 @@ public class DogRoomAgent : MonoBehaviour
         AudioSource source = audioObject.AddComponent<AudioSource>();
         source.playOnAwake = false;
         source.loop = false;
-        source.spatialBlend = 1f;
-        source.rolloffMode = AudioRolloffMode.Linear;
-        source.minDistance = 0.25f;
-        source.maxDistance = 6f;
+        if (introPreviewAudioMixDepth > 0)
+        {
+            source.spatialBlend = 0f;
+        }
+        else
+        {
+            source.spatialBlend = 1f;
+            source.rolloffMode = AudioRolloffMode.Linear;
+            source.minDistance = 0.25f;
+            source.maxDistance = 6f;
+        }
         source.PlayOneShot(clip, effectiveVolume);
         Destroy(audioObject, Mathf.Max(0.1f, clip.length + 0.15f));
     }
@@ -3157,6 +3418,29 @@ public class DogRoomAgent : MonoBehaviour
             && Time.time >= nextAllowedVocalTime;
     }
 
+    private bool CanPlayPreviewVocal()
+    {
+        if (HasHeldToy || IsBusy || !CanPlayVocalNow())
+        {
+            return false;
+        }
+
+        return CanPlayIntroPreviewVocalNow()
+            && (!IsCatPresentation() || catMeowClip != null || CanPlayPhotoStandingIdle("Idle_3"));
+    }
+
+    private bool CanPlayIntroPreviewVocalNow()
+    {
+        return Time.time >= nextAllowedIntroPreviewVocalTime;
+    }
+
+    private void ReserveIntroPreviewVocalCooldown()
+    {
+        float now = Time.time;
+        nextAllowedVocalTime = now + Mathf.Max(minimumSecondsBetweenVocals, 3.6f);
+        nextAllowedIntroPreviewVocalTime = now + IntroPreviewVocalCooldownSeconds;
+    }
+
     private void PlayVocalClip(AudioClip clip, float volume)
     {
         PlaySpatialOneShot(clip, transform.position, volume, true);
@@ -3166,11 +3450,43 @@ public class DogRoomAgent : MonoBehaviour
     private void ResetVocalTimers()
     {
         nextAllowedVocalTime = 0f;
+        nextAllowedIntroPreviewVocalTime = 0f;
         nextAllowedAnnoyedTime = 0f;
         nextAllowedPantingTime = Time.time + GetPantingDelaySeconds();
         nextAllowedWhiningTime = Time.time + GetRandomDelay(whiningIntervalRange);
         nextAllowedLowNeedWhiningTime = Time.time + GetRandomDelay(lowNeedWhiningIntervalRange);
         wasLowPrimaryNeed = false;
+    }
+
+    private IEnumerator PlayCatVocalRoutine(float duration, bool playAudio)
+    {
+        float targetDuration = duration > 0f ? duration : barkIdleDuration;
+        AudioClip meowClip = playAudio ? catMeowClip : null;
+
+        AnimationClip clip;
+        if (TryGetImportedStandingIdleClip("Idle_3", out clip))
+        {
+            yield return PlayImportedStandingIdleClip(clip, Mathf.Max(targetDuration, clip.length * 0.95f), false, meowClip);
+            yield break;
+        }
+
+        int stateHash = ResolvePhotoStandingIdleStateHash("Idle_3");
+        if (stateHash != 0)
+        {
+            if (meowClip != null)
+            {
+                PlaySpatialOneShot(meowClip, transform.position, idleActionVolume, true);
+            }
+
+            yield return PlayStateForDuration(stateHash, "Idle_3", Mathf.Max(0.6f, targetDuration), oneShotCrossFadeDuration, true);
+            yield break;
+        }
+
+        if (meowClip != null && CanPlayVocalNow())
+        {
+            PlayVocalClip(meowClip, idleActionVolume);
+            yield return new WaitForSeconds(Mathf.Max(targetDuration, meowClip.length));
+        }
     }
 
     private bool HasLowPrimaryNeed(PawPalDogState runtimeDog)
@@ -3385,30 +3701,12 @@ public class DogRoomAgent : MonoBehaviour
 
     private float GetAgentSpeed(DogMovementPace pace)
     {
-        float speedMultiplier = PawPalDogPersonalityProfiles.GetRoomSpeedMultiplier(GetRuntimePersonality());
-        switch (pace)
-        {
-            case DogMovementPace.Run:
-                return Mathf.Max(calmWalkSpeed, runSpeed * speedMultiplier);
-            case DogMovementPace.Trot:
-                return Mathf.Max(calmWalkSpeed, trotSpeed * speedMultiplier);
-            default:
-                return calmWalkSpeed * speedMultiplier;
-        }
+        return ResolveMovementProfile().GetSpeed(pace);
     }
 
     private float GetAnimatorSpeed(DogMovementPace pace)
     {
-        float speedMultiplier = PawPalDogPersonalityProfiles.GetRoomSpeedMultiplier(GetRuntimePersonality());
-        switch (pace)
-        {
-            case DogMovementPace.Run:
-                return runAnimatorSpeed * speedMultiplier;
-            case DogMovementPace.Trot:
-                return trotAnimatorSpeed * speedMultiplier;
-            default:
-                return walkAnimatorSpeed * speedMultiplier;
-        }
+        return ResolveMovementProfile().GetAnimatorSpeed(pace);
     }
 
     private DogMovementPace GetAmbientRoamPace()
@@ -5371,6 +5669,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         if (restFlavor != DogRestFlavor.Sleep)
         {
+            PlayLieLoopAudioIfNeeded(restFlavor);
             yield return PlayDirectClip(lieLoopClip, remainingLieTime, true);
             yield break;
         }
@@ -5731,6 +6030,20 @@ public class DogRoomAgent : MonoBehaviour
         PawPalAudioResources.AssignIfMissing(ref annoyedClip, PawPalAudioResources.DogAnnoyed);
         PawPalAudioResources.AssignIfMissing(ref whiningClip, PawPalAudioResources.DogWhining);
         PawPalAudioResources.AssignIfMissing(ref tugGnarlClip, PawPalAudioResources.DogGnarl);
+        PawPalAudioResources.AssignIfMissing(ref catLickClip, PawPalAudioResources.CatLick);
+        PawPalAudioResources.AssignIfMissing(ref catMeowClip, PawPalAudioResources.CatMeow);
+        PawPalAudioResources.AssignIfMissing(ref catPurrClip, PawPalAudioResources.CatPurr);
+        PawPalAudioResources.AssignIfMissing(ref catScratchClip, PawPalAudioResources.CatScratch);
+    }
+
+    private static string NormalizeAnimationAudioKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Replace("_", string.Empty).Replace(" ", string.Empty).ToLowerInvariant();
     }
 
 #if UNITY_EDITOR
@@ -5859,12 +6172,27 @@ public class DogRoomAgent : MonoBehaviour
 
         if (key == "labrador")
         {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx";
+            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx";
         }
 
         if (key == "husky")
         {
             return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Husky/Dog/FBX/Anim/Husky_anim_IP.fbx";
+        }
+
+        if (key == "pug")
+        {
+            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pug/Dog/FBX/Anim/Pug_anim_IP.fbx";
+        }
+
+        if (key == "cat_simple")
+        {
+            return "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_RM.fbx";
+        }
+
+        if (key == "cat_chubby")
+        {
+            return "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Fat/CatFat/FBX/Anim/CatFat_anim_RM.fbx";
         }
 
         if (key == "frenchbulldog")
@@ -5907,6 +6235,16 @@ public class DogRoomAgent : MonoBehaviour
         if (key == "husky")
         {
             return "Arm_Husky";
+        }
+
+        if (key == "pug")
+        {
+            return "Arm_Pug";
+        }
+
+        if (key == "cat_simple" || key == "cat_chubby")
+        {
+            return "Arm_Cat";
         }
 
         if (key == "frenchbulldog")
@@ -5959,6 +6297,21 @@ public class DogRoomAgent : MonoBehaviour
         if (source.Contains("husky"))
         {
             return "husky";
+        }
+
+        if (source.Contains("pug"))
+        {
+            return "pug";
+        }
+
+        if (source.Contains("cat_simple") || source.Contains("catsimple"))
+        {
+            return "cat_simple";
+        }
+
+        if (source.Contains("cat_chubby") || source.Contains("catfat") || source.Contains("chubbycat"))
+        {
+            return "cat_chubby";
         }
 
         if (source.Contains("french") || source.Contains("bulldog"))
@@ -6142,10 +6495,12 @@ public class DogRoomAgent : MonoBehaviour
         AnimationClip loopClip;
         if (TryGetImportedRestClip(loopSuffix, out loopClip))
         {
+            PlayLieLoopAudioIfNeeded(DogRestFlavor.Chill);
             yield return PlayDirectClip(loopClip, Mathf.Max(0.05f, duration), true);
         }
         else if (loopStateHash != 0)
         {
+            PlayLieLoopAudioIfNeeded(DogRestFlavor.Chill);
             CrossFadeState(loopStateHash, restCrossFadeDuration);
             yield return new WaitForSeconds(Mathf.Max(0.05f, duration));
         }
@@ -6292,6 +6647,26 @@ public class DogRoomAgent : MonoBehaviour
 
     private AudioClip GetImportedStandingIdleAudioClip(string suffix)
     {
+        if (IsCatPresentation())
+        {
+            if (string.Equals(suffix, "Idle_3", System.StringComparison.Ordinal))
+            {
+                return catMeowClip;
+            }
+
+            if (string.Equals(suffix, "Idle_6", System.StringComparison.Ordinal))
+            {
+                return catScratchClip;
+            }
+
+            if (string.Equals(suffix, "Idle_7", System.StringComparison.Ordinal))
+            {
+                return sniffingClip;
+            }
+
+            return null;
+        }
+
         if (string.Equals(suffix, "Idle_3", System.StringComparison.Ordinal))
         {
             return shakingX3Clip;
@@ -6356,6 +6731,11 @@ public class DogRoomAgent : MonoBehaviour
 
         animator.SetBool(MoveHash, false);
         SetNeutralIdle();
+        if (startAudioClip == null)
+        {
+            startAudioClip = ResolveOneShotStartAudioClip(stateName, fallbackIdleIndex);
+        }
+
         PlaySpatialOneShot(startAudioClip, transform.position, idleActionVolume, true);
 
         if (stateHash != 0)
@@ -6621,7 +7001,7 @@ public class DogRoomAgent : MonoBehaviour
 
     private int ResolveAnimatorStateHash(params string[] stateNames)
     {
-        if (animator == null || stateNames == null)
+        if (animator == null || stateNames == null || animator.runtimeAnimatorController == null || animator.layerCount <= BaseLayerIndex)
         {
             return 0;
         }

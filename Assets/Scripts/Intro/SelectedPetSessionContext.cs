@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 [Serializable]
@@ -91,5 +93,273 @@ public static class SelectedPetSessionContext
     public static void Clear()
     {
         pendingSelection = null;
+    }
+}
+
+public enum PawPalPetSizeClass
+{
+    Small,
+    Medium,
+    Large
+}
+
+public struct PawPalPetMovementProfile
+{
+    public PawPalPetSizeClass SizeClass;
+    public float WalkSpeed;
+    public float TrotSpeed;
+    public float RunSpeed;
+    public float WalkAnimatorSpeed;
+    public float TrotAnimatorSpeed;
+    public float RunAnimatorSpeed;
+
+    public float GetSpeed(DogMovementPace pace)
+    {
+        switch (pace)
+        {
+            case DogMovementPace.Run:
+                return RunSpeed;
+            case DogMovementPace.Trot:
+                return TrotSpeed;
+            default:
+                return WalkSpeed;
+        }
+    }
+
+    public float GetAnimatorSpeed(DogMovementPace pace)
+    {
+        switch (pace)
+        {
+            case DogMovementPace.Run:
+                return RunAnimatorSpeed;
+            case DogMovementPace.Trot:
+                return TrotAnimatorSpeed;
+            default:
+                return WalkAnimatorSpeed;
+        }
+    }
+}
+
+public static class PawPalPetMovementProfiles
+{
+    private const float MediumWalkSpeed = 0.65f;
+    private const float MediumTrotSpeed = 0.98f;
+    private const float MediumRunSpeed = 1.30f;
+    private const float LargeWalkSpeed = 0.80f;
+    private const float LargeTrotSpeed = 1.18f;
+    private const float LargeRunSpeed = 2.45f;
+    private const float LegacyLargeRunSpeedForAnimator = 1.55f;
+    private const float MediumWalkAnimatorBaseline = 0.5f;
+    private const float MediumTrotAnimatorBaseline = 0.78f;
+    private const float MediumRunAnimatorBaseline = 1f;
+
+    private static readonly HashSet<string> SmallBreedKeys = new HashSet<string>
+    {
+        "puppylabrador",
+        "kittensimple",
+        "chihuahua",
+        "jackrussellterrier",
+        "toyterrier"
+    };
+
+    private static readonly HashSet<string> MediumBreedKeys = new HashSet<string>
+    {
+        "catsimple",
+        "catchubby",
+        "catstray",
+        "pug",
+        "corgi",
+        "beagle",
+        "bullterrier",
+        "frenchbulldog",
+        "shibainu",
+        "spitz",
+        "cur"
+    };
+
+    private static readonly HashSet<string> LargeBreedKeys = new HashSet<string>
+    {
+        "bordercollie",
+        "boxer",
+        "dalmatian",
+        "doberman",
+        "goldenretriever",
+        "husky",
+        "labrador",
+        "pitbull",
+        "rottweiler",
+        "shepherd",
+        "germanshepherd"
+    };
+
+    private static readonly PawPalPetMovementProfile SmallProfile = BuildProfile(PawPalPetSizeClass.Small, 0.50f, 0.78f, 1.05f);
+    private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(PawPalPetSizeClass.Medium, MediumWalkSpeed, MediumTrotSpeed, MediumRunSpeed);
+    private static readonly PawPalPetMovementProfile LargeProfile = BuildProfile(
+        PawPalPetSizeClass.Large,
+        LargeWalkSpeed,
+        LargeTrotSpeed,
+        LargeRunSpeed,
+        ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, LargeWalkSpeed, MediumWalkSpeed),
+        ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, LargeTrotSpeed, MediumTrotSpeed),
+        ScaleAnimatorBaseline(MediumRunAnimatorBaseline, LegacyLargeRunSpeedForAnimator, MediumRunSpeed));
+
+    public static PawPalPetMovementProfile DefaultProfile
+    {
+        get { return MediumProfile; }
+    }
+
+    public static PawPalPetMovementProfile Resolve(SelectedPetSessionData selection, string objectName)
+    {
+        if (selection == null)
+        {
+            return Resolve(null, null, null, objectName);
+        }
+
+        return Resolve(
+            selection.Definition != null ? selection.Definition.PetId : null,
+            selection.BreedName,
+            null,
+            objectName);
+    }
+
+    public static PawPalPetMovementProfile Resolve(IntroPetDefinition definition, string runtimeBreed, string objectName)
+    {
+        return Resolve(
+            definition != null ? definition.PetId : null,
+            definition != null ? definition.BreedLabel : null,
+            runtimeBreed,
+            objectName);
+    }
+
+    public static PawPalPetMovementProfile Resolve(string petId, string breedName, string runtimeBreed, string objectName)
+    {
+        return GetProfile(ResolveSizeClass(petId, breedName, runtimeBreed, objectName));
+    }
+
+    public static PawPalPetSizeClass ResolveSizeClass(string petId, string breedName, string runtimeBreed, string objectName)
+    {
+        string[] exactCandidates =
+        {
+            NormalizeKey(petId),
+            NormalizeKey(breedName),
+            NormalizeKey(runtimeBreed),
+            NormalizeKey(objectName)
+        };
+
+        for (int i = 0; i < exactCandidates.Length; i++)
+        {
+            string candidate = exactCandidates[i];
+            if (string.IsNullOrEmpty(candidate))
+            {
+                continue;
+            }
+
+            if (SmallBreedKeys.Contains(candidate))
+            {
+                return PawPalPetSizeClass.Small;
+            }
+
+            if (MediumBreedKeys.Contains(candidate))
+            {
+                return PawPalPetSizeClass.Medium;
+            }
+
+            if (LargeBreedKeys.Contains(candidate))
+            {
+                return PawPalPetSizeClass.Large;
+            }
+        }
+
+        for (int i = 0; i < exactCandidates.Length; i++)
+        {
+            string candidate = exactCandidates[i];
+            if (string.IsNullOrEmpty(candidate))
+            {
+                continue;
+            }
+
+            if (candidate.Contains("puppy") || candidate.Contains("kitten"))
+            {
+                return PawPalPetSizeClass.Small;
+            }
+        }
+
+        return PawPalPetSizeClass.Medium;
+    }
+
+    private static PawPalPetMovementProfile GetProfile(PawPalPetSizeClass sizeClass)
+    {
+        switch (sizeClass)
+        {
+            case PawPalPetSizeClass.Small:
+                return SmallProfile;
+            case PawPalPetSizeClass.Large:
+                return LargeProfile;
+            default:
+                return MediumProfile;
+        }
+    }
+
+    private static PawPalPetMovementProfile BuildProfile(PawPalPetSizeClass sizeClass, float walkSpeed, float trotSpeed, float runSpeed)
+    {
+        return BuildProfile(
+            sizeClass,
+            walkSpeed,
+            trotSpeed,
+            runSpeed,
+            ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, walkSpeed, MediumWalkSpeed),
+            ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, trotSpeed, MediumTrotSpeed),
+            ScaleAnimatorBaseline(MediumRunAnimatorBaseline, runSpeed, MediumRunSpeed));
+    }
+
+    private static PawPalPetMovementProfile BuildProfile(
+        PawPalPetSizeClass sizeClass,
+        float walkSpeed,
+        float trotSpeed,
+        float runSpeed,
+        float walkAnimatorSpeed,
+        float trotAnimatorSpeed,
+        float runAnimatorSpeed)
+    {
+        return new PawPalPetMovementProfile
+        {
+            SizeClass = sizeClass,
+            WalkSpeed = walkSpeed,
+            TrotSpeed = trotSpeed,
+            RunSpeed = runSpeed,
+            WalkAnimatorSpeed = walkAnimatorSpeed,
+            TrotAnimatorSpeed = trotAnimatorSpeed,
+            RunAnimatorSpeed = runAnimatorSpeed
+        };
+    }
+
+    private static float ScaleAnimatorBaseline(float baseline, float targetSpeed, float mediumSpeed)
+    {
+        if (mediumSpeed <= 0.0001f)
+        {
+            return baseline;
+        }
+
+        return baseline * (targetSpeed / mediumSpeed);
+    }
+
+    private static string NormalizeKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char character = char.ToLowerInvariant(value[i]);
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString();
     }
 }

@@ -81,6 +81,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     {
         if (!PawPalIntroSceneFlow.IsIntroScene(scene))
         {
+            CleanupNonIntroSceneArtifacts();
             return;
         }
 
@@ -516,6 +517,44 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
             {
                 DestroyImmediate(candidateObject);
             }
+        }
+    }
+
+    private static void CleanupNonIntroSceneArtifacts()
+    {
+        IntroBackdropRingController[] backdropControllers = FindObjectsByType<IntroBackdropRingController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < backdropControllers.Length; i++)
+        {
+            IntroBackdropRingController controller = backdropControllers[i];
+            if (controller == null || PawPalIntroSceneFlow.IsIntroScene(controller.gameObject.scene))
+            {
+                continue;
+            }
+
+            DestroySceneObject(controller.gameObject);
+        }
+
+        GameObject runtimeRoot = GameObject.Find(RuntimeRootName);
+        if (runtimeRoot != null && !PawPalIntroSceneFlow.IsIntroScene(runtimeRoot.scene))
+        {
+            DestroySceneObject(runtimeRoot);
+        }
+    }
+
+    private static void DestroySceneObject(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(target);
+        }
+        else
+        {
+            DestroyImmediate(target);
         }
     }
 

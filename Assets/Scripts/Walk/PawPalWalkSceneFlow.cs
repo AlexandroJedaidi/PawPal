@@ -2,6 +2,9 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public static class PawPalWalkSceneFlow
 {
@@ -21,6 +24,7 @@ public static class PawPalWalkSceneFlow
     public static bool LoadWalkScene()
     {
         ManualWalkSceneLoadRequested = true;
+        ClearEditorSelectionBeforeSceneLoad();
         try
         {
             SceneManager.LoadScene(WalkSceneName, LoadSceneMode.Single);
@@ -46,6 +50,7 @@ public static class PawPalWalkSceneFlow
         pendingShowHome = true;
         ManualWalkSceneLoadRequested = false;
         SetAppShellVisible(true);
+        ClearEditorSelectionBeforeSceneLoad();
         string targetScene = string.IsNullOrEmpty(sceneName) ? HomeSceneName : sceneName;
         try
         {
@@ -62,6 +67,16 @@ public static class PawPalWalkSceneFlow
                 SceneManager.LoadScene(HomeScenePath, LoadSceneMode.Single);
             }
         }
+    }
+
+    private static void ClearEditorSelectionBeforeSceneLoad()
+    {
+#if UNITY_EDITOR
+        if (Application.isPlaying)
+        {
+            Selection.activeObject = null;
+        }
+#endif
     }
 
     public static void ConsumePendingShowHome()

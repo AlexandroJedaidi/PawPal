@@ -95,11 +95,25 @@ public sealed class IntroBackdropRingController : MonoBehaviour
 
     private void OnEnable()
     {
+        if (!ShouldRenderInCurrentScene())
+        {
+            ClearGenerated();
+            ReleaseMaterials();
+            return;
+        }
+
         Rebuild();
     }
 
     private void Update()
     {
+        if (!ShouldRenderInCurrentScene())
+        {
+            ClearGenerated();
+            ReleaseMaterials();
+            return;
+        }
+
         bool hasAnyRenderer = false;
         for (int i = 0; i < screenRenderers.Length; i++)
         {
@@ -158,6 +172,13 @@ public sealed class IntroBackdropRingController : MonoBehaviour
     [ContextMenu("Rebuild Intro Backdrop Ring")]
     private void Rebuild()
     {
+        if (!ShouldRenderInCurrentScene())
+        {
+            ClearGenerated();
+            ReleaseMaterials();
+            return;
+        }
+
         EnsureCatalogLayoutDefaults();
         ClearGenerated();
         ReleaseMaterials();
@@ -516,5 +537,10 @@ public sealed class IntroBackdropRingController : MonoBehaviour
         };
         quadMesh.bounds = new Bounds(Vector3.zero, new Vector3(1f, 1f, 0.01f));
         return quadMesh;
+    }
+
+    private bool ShouldRenderInCurrentScene()
+    {
+        return gameObject.scene.IsValid() && PawPalIntroSceneFlow.IsIntroScene(gameObject.scene);
     }
 }

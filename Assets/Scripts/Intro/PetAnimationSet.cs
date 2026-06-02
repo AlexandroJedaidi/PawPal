@@ -18,14 +18,20 @@ public sealed class PetAnimationSet : ScriptableObject
 
     public void ApplyTo(Animator animator)
     {
+        ApplyTo(animator, null);
+    }
+
+    public void ApplyTo(Animator animator, IntroPetDefinition definition)
+    {
         if (animator == null)
         {
             return;
         }
 
-        if (RuntimeController != null && animator.runtimeAnimatorController != RuntimeController)
+        RuntimeAnimatorController resolvedController = PetAnimationControllerResolver.Resolve(RuntimeController, animator, definition);
+        if (resolvedController != null && animator.runtimeAnimatorController != resolvedController)
         {
-            animator.runtimeAnimatorController = RuntimeController;
+            animator.runtimeAnimatorController = resolvedController;
         }
     }
 
@@ -59,8 +65,6 @@ public sealed class PetAnimationSet : ScriptableObject
             return false;
         }
 
-        ApplyTo(animator);
-
         if (!string.IsNullOrEmpty(SelectedTriggerParameter))
         {
             animator.SetTrigger(SelectedTriggerParameter);
@@ -74,10 +78,66 @@ public sealed class PetAnimationSet : ScriptableObject
             return true;
         }
 
-        if (!string.IsNullOrEmpty(IdleIndexParameter))
+        int selectedIdleIndex = SelectedIdleIndex > 0 ? SelectedIdleIndex : 1;
+        if (TrySetIdleIndex(animator, IdleIndexParameter, selectedIdleIndex))
         {
-            animator.SetInteger(IdleIndexParameter, SelectedIdleIndex);
             return true;
+        }
+
+        string[] fallbackStates =
+        {
+            "Idle2",
+            "Idle1",
+            "Idle3",
+            "CatSimple_Idle_2",
+            "CatSimple_Idle_1"
+        };
+
+        for (int i = 0; i < fallbackStates.Length; i++)
+        {
+            stateHash = ResolveStateHash(animator, fallbackStates[i]);
+            if (stateHash != 0)
+            {
+                animator.CrossFadeInFixedTime(stateHash, 0.08f, 0, 0f);
+                return true;
+            }
+        }
+
+        if (TrySetIdleIndex(animator, "IdleIndex", selectedIdleIndex))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TrySetIdleIndex(Animator animator, string parameterName, int idleIndex)
+    {
+        if (animator == null || string.IsNullOrEmpty(parameterName) || !HasIntegerParameter(animator, parameterName))
+        {
+            return false;
+        }
+
+        animator.SetInteger(parameterName, idleIndex);
+        return true;
+    }
+
+    private static bool HasIntegerParameter(Animator animator, string parameterName)
+    {
+        if (animator == null || string.IsNullOrEmpty(parameterName))
+        {
+            return false;
+        }
+
+        AnimatorControllerParameter[] parameters = animator.parameters;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            AnimatorControllerParameter parameter = parameters[i];
+            if (parameter.type == AnimatorControllerParameterType.Int
+                && parameter.name == parameterName)
+            {
+                return true;
+            }
         }
 
         return false;

@@ -66,30 +66,14 @@ public sealed class PawPalPetFollowCamera : MonoBehaviour
             return false;
         }
 
-        PawPalCatRoomAgent[] cats = Object.FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
-        PawPalCatRoomAgent cat = null;
-        string activePetId = runtime.ActiveDog != null ? runtime.ActiveDog.Id : string.Empty;
-        for (int i = 0; i < cats.Length; i++)
-        {
-            if (cats[i] != null && string.Equals(cats[i].RuntimePetId, activePetId, System.StringComparison.OrdinalIgnoreCase))
-            {
-                cat = cats[i];
-                break;
-            }
-        }
-
-        if (cat == null && cats.Length > 0)
-        {
-            cat = cats[0];
-        }
-
-        if (cat == null)
+        PawPalRoomPetHandle pet = PawPalRoomPetRuntime.ResolveActivePet();
+        if (pet == null || !pet.IsValid || pet.RootTransform == null || pet.FocusTransform == null)
         {
             return false;
         }
 
         followCamera.enabled = true;
-        followCamera.Focus(cat.FocusTransform, cat.HomeCameraOffset, false);
+        followCamera.Focus(pet.FocusTransform, pet.HomeCameraOffset, false);
         return true;
     }
 }

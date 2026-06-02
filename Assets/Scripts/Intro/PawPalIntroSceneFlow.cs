@@ -2,6 +2,9 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 #if UNITY_EDITOR
+using UnityEditor;
+#endif
+#if UNITY_EDITOR
 using UnityEditor.SceneManagement;
 #endif
 
@@ -36,6 +39,8 @@ public static class PawPalIntroSceneFlow
 
     private static bool TryLoadScene(string sceneName, string scenePath)
     {
+        ClearEditorSelectionBeforeSceneLoad();
+
         try
         {
             SceneManager.LoadScene(sceneName, LoadSceneMode.Single);
@@ -66,6 +71,16 @@ public static class PawPalIntroSceneFlow
                 return false;
             }
         }
+    }
+
+    private static void ClearEditorSelectionBeforeSceneLoad()
+    {
+#if UNITY_EDITOR
+        if (Application.isPlaying)
+        {
+            Selection.activeObject = null;
+        }
+#endif
     }
 
     public static void SetAppShellVisible(bool visible)
