@@ -47,6 +47,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
 
     public event Action StateChanged;
     public event Action<string> FeedbackRequested;
+    public event Action UnrecognizedCommandRequested;
     public event PawPalVoiceCommandExecutionHandler CommandExecutionRequested;
 
     public PawPalVoiceInputSnapshot Snapshot
@@ -352,6 +353,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
             }
 
             SetSnapshot(PawPalVoiceInputMode.ListeningName, feedback, false, confidence, true);
+            RaiseUnrecognizedCommand();
             RaiseFeedback(feedback);
             return;
         }
@@ -537,6 +539,15 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         if (handler != null)
         {
             handler(message);
+        }
+    }
+
+    private void RaiseUnrecognizedCommand()
+    {
+        Action handler = UnrecognizedCommandRequested;
+        if (handler != null)
+        {
+            handler();
         }
     }
 }

@@ -294,6 +294,26 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
     }
 
+    public void ShowUnrecognizedCommandReaction()
+    {
+        if (!active)
+        {
+            return;
+        }
+
+        if (view != null && (modeOptions == null || modeOptions.ShowTrainingProgressCues))
+        {
+            view.ShowFailedTeachBurst();
+        }
+
+        if (activePet != null && activePet.IsValid)
+        {
+            activePet.TryPlayImmediateInteractionAnnoyedVocal();
+        }
+
+        ResetActivity();
+    }
+
     public bool TryPerformVoiceTrick(PawPalResolvedVoiceCommand command, out string message)
     {
         message = "Interaction mode is not active.";

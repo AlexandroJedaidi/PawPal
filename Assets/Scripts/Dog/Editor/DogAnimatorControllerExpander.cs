@@ -6,6 +6,7 @@ using UnityEngine;
 public static class DogAnimatorControllerExpander
 {
     private const string MenuPath = "PawFriends/Dogs/Expand Dog Animator Controllers";
+    private const string BaseControllerTemplatePath = "Assets/Animations/Dog_BaseController.controller";
 
     private struct ControllerSpec
     {
@@ -40,9 +41,39 @@ public static class DogAnimatorControllerExpander
     private static readonly ControllerSpec[] ControllerSpecs =
     {
         new ControllerSpec(
+            "Assets/Animations/DogAnimations/BeagleAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Beagle/Dog/FBX/Anim/Beagle_anim_IP.fbx",
+            "Arm_Beagle",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/BorderCollieAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Border_Collie/Dog/FBX/Anim/BorderCollie_anim_IP.fbx",
+            "Arm_Collie",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/BoxerAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Boxer/Dog/FBX/Anim/Dog_Boxer_anim_IP.fbx",
+            "Arm_Boxer",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/BullTerrierAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/BullTerrier/Dog/FBX/Anim/BullTerrier_anim_IP.fbx",
+            "Arm_BullTerrier",
+            "Run_F_IP"),
+        new ControllerSpec(
             "Assets/Animations/DogAnimations/CorgiAnimController.controller",
             "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Corgi/Dog/FBX/Anim/Corgi_anim_IP.fbx",
             "Arm_Corgi",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/DalmatianAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Dalmatian/Dog/FBX/Anim/Dalmatian_anim_IP.fbx",
+            "Arm_Dalmatian",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/DobermanAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Doberman/Dog/FBX/Anim/Doberman_anim_IP.fbx",
+            "Arm_Doberman",
             "Run_F_IP"),
         new ControllerSpec(
             "Assets/Animations/DogAnimations/FrenchBulldogAnimController.controller",
@@ -60,14 +91,49 @@ public static class DogAnimatorControllerExpander
             "Arm_Husky",
             "Run_F_IP"),
         new ControllerSpec(
+            "Assets/Animations/DogAnimations/JackRussellTerrierAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/JackRussellTerrier/Dog/FBX/Anim/JRTerrier_anim_IP.fbx",
+            "Arm_JRTerrier",
+            "Run_F_IP"),
+        new ControllerSpec(
             "Assets/Animations/DogAnimations/LabradorPuppyiAnimController.controller",
             "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx",
             "Arm_Labrador",
             "Run_F_RM"),
         new ControllerSpec(
+            "Assets/Animations/DogAnimations/PitbullAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pitbull/Dog/FBX/Anim/Pitbull_anim_IP.fbx",
+            "Arm_Pitbull",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/PugAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pug/Dog/FBX/Anim/Pug_anim_IP.fbx",
+            "Arm_Pug",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/RottweilerAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Rottweiler/Dog/FBX/Anim/Rottweiler_anim_IP.fbx",
+            "Arm_Rottweiler",
+            "Run_F_IP"),
+        new ControllerSpec(
             "Assets/Animations/DogAnimations/ShepherdiAnimController.controller",
             "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Shepherd/Dog/FBX/Anim/Shepherd_anim_IP.fbx",
             "Arm_Shepherd",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/ShibaInuAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ShibaInu/Dog/FBX/Anim/ShibaInu_anim_IP.fbx",
+            "Arm_Shiba",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/SpitzAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Spitz/Dog/FBX/Anim/Spitz_anim_IP.fbx",
+            "Arm_Spitz",
+            "Run_F_IP"),
+        new ControllerSpec(
+            "Assets/Animations/DogAnimations/ToyTerrierAnimController.controller",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ToyTerrier/Dog/FBX/Anim/ToyTerrier_anim_IP.fbx",
+            "Arm_ToyTerrier",
             "Run_F_IP")
     };
 
@@ -117,8 +183,19 @@ public static class DogAnimatorControllerExpander
         AnimatorController controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(spec.ControllerPath);
         if (controller == null)
         {
-            Debug.LogWarning("DogAnimatorControllerExpander could not load controller: " + spec.ControllerPath);
-            return false;
+            if (!AssetDatabase.CopyAsset(BaseControllerTemplatePath, spec.ControllerPath))
+            {
+                Debug.LogWarning("DogAnimatorControllerExpander could not create controller from template: " + spec.ControllerPath);
+                return false;
+            }
+
+            AssetDatabase.ImportAsset(spec.ControllerPath);
+            controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(spec.ControllerPath);
+            if (controller == null)
+            {
+                Debug.LogWarning("DogAnimatorControllerExpander could not load controller after creating it: " + spec.ControllerPath);
+                return false;
+            }
         }
 
         Dictionary<string, AnimationClip> clipsByName = LoadClipsByName(spec.AnimationAssetPath);

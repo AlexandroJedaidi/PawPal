@@ -123,7 +123,8 @@ public class HomeScreenView : AppScreenViewBase
         voiceController = gameObject.AddComponent<PawPalVoiceInputController>();
         voiceController.Initialize(voiceCommandDirector);
         voiceController.StateChanged += HandleVoiceControllerStateChanged;
-        voiceController.FeedbackRequested += ShowNeedPopup;
+        voiceController.FeedbackRequested += HandleVoiceFeedbackRequested;
+        voiceController.UnrecognizedCommandRequested += HandleUnrecognizedVoiceCommand;
         voiceController.CommandExecutionRequested += HandleVoiceCommandExecutionRequested;
 
         BuildTopCameraButton(exactFrame);
@@ -767,6 +768,24 @@ public class HomeScreenView : AppScreenViewBase
         needPopupLabel.text = message;
         needPopup.gameObject.SetActive(true);
         needPopupRoutine = StartCoroutine(HideNeedPopupAfterDelay(2f));
+    }
+
+    private void HandleVoiceFeedbackRequested(string message)
+    {
+        if (shell != null && shell.IsDogInteractionModeActive && !string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        ShowNeedPopup(message);
+    }
+
+    private void HandleUnrecognizedVoiceCommand()
+    {
+        if (shell != null && shell.IsDogInteractionModeActive)
+        {
+            shell.ShowDogInteractionUnrecognizedCommand();
+        }
     }
 
     private void TriggerWhistlePulse()

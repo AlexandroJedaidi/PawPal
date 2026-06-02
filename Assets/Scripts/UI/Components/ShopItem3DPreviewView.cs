@@ -1,9 +1,15 @@
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.Animations;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.EventSystems;
+using UnityEngine.Playables;
 using UnityEngine.UI;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [RequireComponent(typeof(RectTransform))]
 public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler, IScrollHandler
@@ -30,6 +36,11 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
     private const float PreviewSittingStartSeconds = 0.75f;
     private const float PreviewSittingLoopSeconds = 2.15f;
     private const float PreviewSittingEndSeconds = 0.75f;
+    private const float PreviewLieStartSeconds = 0.82f;
+    private const float PreviewLieLoopSettleSeconds = 0.12f;
+    private const float PreviewTriptychSpacing = 0.42f;
+    private const float PreviewTriptychForwardOffset = 0.03f;
+    private const float PreviewTriptychPadding = 0.98f;
     private const int PreviewNeutralIdleIndex = 99;
 
     private static readonly int MoveHash = Animator.StringToHash("Move");
@@ -62,6 +73,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
     };
 
     private static readonly Dictionary<string, bool> ResourceSpriteExistsCache = new Dictionary<string, bool>();
+    private static readonly HashSet<string> MissingBreedPreviewWarnings = new HashSet<string>();
 
     private UiSpriteLibrary sprites;
     private RectTransform rectTransform;
@@ -75,6 +87,8 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
     private readonly List<Material> runtimeMaterials = new List<Material>();
     private readonly List<Mesh> runtimeMeshes = new List<Mesh>();
     private readonly List<Camera> sceneCamerasWithPreviewLayer = new List<Camera>();
+    private readonly List<Animator> previewAnimators = new List<Animator>();
+    private readonly List<PlayableGraph> previewPlayableGraphs = new List<PlayableGraph>();
     private Animator previewDogAnimator;
     private Coroutine previewDogAnimationRoutine;
     private bool previewDogAnimationPending;
@@ -188,7 +202,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         }
 
         lastPinchDistance = 0f;
-        if (previewDogAnimator != null && previewDogAnimator.enabled)
+        if (HasActivePreviewAnimator())
         {
             RenderPreview();
             return;
@@ -250,6 +264,11 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
     private bool TryBuildPreview(PawPalCatalogItemDefinition item)
     {
+        if (item != null && item.PreviewMode == PawPalShopPreviewMode.BreedTriptychDog)
+        {
+            return TryBuildBreedTriptychPreview(item);
+        }
+
         string prefabPath = ResolvePreviewPrefabPath(item);
         if (string.IsNullOrEmpty(prefabPath))
         {
@@ -301,6 +320,64 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         ApplyCameraZoom();
         RenderPreview();
         return true;
+    }
+
+    private bool TryBuildBreedTriptychPreview(PawPalCatalogItemDefinition item)
+    {
+        PawPalBreedShopPreviewEntry breedEntry;
+        if (!PawPalBreedShopPreviewLibrary.TryResolveEntry(item, out breedEntry) || breedEntry == null)
+        {
+            WarnMissingBreedPreview(item, "missing breed preview entry");
+            return false;
+        }
+
+#if UNITY_EDITOR
+        GameObject centerPrefab = PawPalBreedShopPreviewLibrary.LoadCenterPrefab(breedEntry);
+        GameObject leftPrefab = PawPalBreedShopPreviewLibrary.LoadLeftPrefab(breedEntry);
+        GameObject rightPrefab = PawPalBreedShopPreviewLibrary.LoadRightPrefab(breedEntry);
+        if (centerPrefab == null || leftPrefab == null || rightPrefab == null)
+        {
+            WarnMissingBreedPreview(item, "missing one or more breed preview prefabs");
+            return false;
+        }
+
+        activePreviewMode = item.PreviewMode;
+        CreatePreviewStage();
+        modelRoot = new GameObject("ShopBreedPreviewTriptych").transform;
+        modelRoot.SetParent(stageRoot.transform, false);
+        modelRoot.localPosition = breedEntry.GroupOffset;
+        modelRoot.localRotation = Quaternion.identity;
+        modelRoot.localScale = Vector3.one * Mathf.Max(0.01f, breedEntry.GroupScale);
+
+        if (!TryBuildBreedPreviewDog(leftPrefab, breedEntry.BreedKey, new Vector3(-PreviewTriptychSpacing, 0f, PreviewTriptychForwardOffset), Quaternion.Euler(0f, 12f, 0f), PreviewBreedPose.Lie)
+            || !TryBuildBreedPreviewDog(centerPrefab, breedEntry.BreedKey, new Vector3(0f, 0f, 0f), Quaternion.identity, PreviewBreedPose.Stand)
+            || !TryBuildBreedPreviewDog(rightPrefab, breedEntry.BreedKey, new Vector3(PreviewTriptychSpacing, 0f, PreviewTriptychForwardOffset), Quaternion.Euler(0f, -12f, 0f), PreviewBreedPose.Sit))
+        {
+            WarnMissingBreedPreview(item, "failed to construct one or more preview dogs");
+            return false;
+        }
+
+        focusRoot = modelRoot;
+        SetLayerRecursively(stageRoot.transform, PreviewLayer);
+        if (!TryFrameModel(PreviewTriptychPadding))
+        {
+            WarnMissingBreedPreview(item, "failed to frame breed triptych preview");
+            return false;
+        }
+
+        fallbackImage.enabled = false;
+        previewImage.enabled = true;
+        previewImage.texture = renderTexture;
+        previewYaw = 180f;
+        zoomScale = 2.15f;
+        ApplyModelRotation();
+        ApplyCameraZoom();
+        RenderPreview();
+        return true;
+#else
+        WarnMissingBreedPreview(item, "breed 3D preview is only available in the Unity editor");
+        return false;
+#endif
     }
 
     private bool TryBuildSpritePreview(PawPalCatalogItemDefinition item)
@@ -398,6 +475,36 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         RenderPreview();
         return true;
     }
+
+#if UNITY_EDITOR
+    private bool TryBuildBreedPreviewDog(GameObject prefab, string breedKey, Vector3 localPosition, Quaternion localRotation, PreviewBreedPose pose)
+    {
+        if (prefab == null || modelRoot == null)
+        {
+            return false;
+        }
+
+        GameObject dog = Instantiate(prefab, modelRoot, false);
+        dog.name = prefab.name;
+        dog.transform.localPosition = localPosition;
+        dog.transform.localRotation = localRotation;
+        dog.transform.localScale = Vector3.one;
+        StripPreviewOnlyComponents(dog, true);
+
+        Animator animator = ConfigurePreviewDogAnimator(dog, breedKey, prefab.name, dog.name);
+        if (animator == null)
+        {
+            return false;
+        }
+
+        RegisterPreviewAnimator(animator);
+        if (!TryPlayLoopingBreedPreviewPose(dog, animator, breedKey, pose))
+        {
+            SettleBreedPreviewPose(dog, animator, breedKey, pose);
+        }
+        return true;
+    }
+#endif
 
     private static bool ShouldUseProceduralToyPreview(PawPalCatalogItemDefinition item)
     {
@@ -645,6 +752,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         dog.name = dogSource.name;
         StripPreviewOnlyComponents(dog, true);
         previewDogAnimator = ConfigurePreviewDogAnimator(dog);
+        RegisterPreviewAnimator(previewDogAnimator);
 
         Transform placementReference;
         Transform parent;
@@ -809,9 +917,9 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         previewCamera.enabled = false;
 
         ExcludePreviewLayerFromSceneCameras();
-        CreatePreviewLight("KeyLight", new Vector3(-1.8f, 2.2f, -2.2f), 2.4f, 8f);
-        CreatePreviewLight("FillLight", new Vector3(2.2f, 1.4f, -1.2f), 0.9f, 7f);
-        CreatePreviewLight("RimLight", new Vector3(0f, 1.8f, 2.4f), 0.75f, 7f);
+        CreatePreviewLight("KeyLight", new Vector3(-1.15f, 2.6f, -1.65f), 2.85f, 9f);
+        CreatePreviewLight("FillLight", new Vector3(1.45f, 1.9f, -1.15f), 1.35f, 8f);
+        CreatePreviewLight("RimLight", new Vector3(0.2f, 2.05f, 2.05f), 0.92f, 8f);
     }
 
     private Vector2Int GetPreviewTextureSize()
@@ -1172,13 +1280,26 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
     private static Animator ConfigurePreviewDogAnimator(GameObject dog)
     {
+        return ConfigurePreviewDogAnimator(dog, System.Array.Empty<string>());
+    }
+
+    private static Animator ConfigurePreviewDogAnimator(GameObject dog, params string[] identityValues)
+    {
         if (dog == null)
         {
             return null;
         }
 
         Animator animator = dog.GetComponentInChildren<Animator>(true);
-        if (animator == null || animator.runtimeAnimatorController == null)
+        if (animator == null)
+        {
+            return null;
+        }
+
+#if UNITY_EDITOR
+        ApplyEditorPreviewOverride(animator, identityValues);
+#endif
+        if (animator.runtimeAnimatorController == null)
         {
             return null;
         }
@@ -1299,7 +1420,9 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
                 layerName + ".IdleSM." + stateName,
                 "Base Layer.IdleSM." + stateName,
                 layerName + ".IdleSM.SitSM." + stateName,
-                "Base Layer.IdleSM.SitSM." + stateName
+                "Base Layer.IdleSM.SitSM." + stateName,
+                layerName + ".IdleSM.LieSM." + stateName,
+                "Base Layer.IdleSM.LieSM." + stateName
             };
 
             for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
@@ -1380,6 +1503,249 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
 
         return false;
     }
+
+    private bool HasActivePreviewAnimator()
+    {
+        for (int i = previewAnimators.Count - 1; i >= 0; i--)
+        {
+            Animator animator = previewAnimators[i];
+            if (animator == null)
+            {
+                previewAnimators.RemoveAt(i);
+                continue;
+            }
+
+            if (animator.enabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void RegisterPreviewAnimator(Animator animator)
+    {
+        if (animator != null && !previewAnimators.Contains(animator))
+        {
+            previewAnimators.Add(animator);
+        }
+    }
+
+    private static void WarnMissingBreedPreview(PawPalCatalogItemDefinition item, string reason)
+    {
+        string itemId = item != null ? item.Id : "<null>";
+        string key = itemId + "|" + reason;
+        if (MissingBreedPreviewWarnings.Add(key))
+        {
+            Debug.LogWarning("ShopItem3DPreviewView: Falling back to sprite preview for '" + itemId + "' because " + reason + ".");
+        }
+    }
+
+#if UNITY_EDITOR
+    private static void ApplyEditorPreviewOverride(Animator animator, params string[] identityValues)
+    {
+        if (animator == null)
+        {
+            return;
+        }
+
+        PawPalPetAnimationEntry entry;
+        if (!PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(out entry, identityValues) || entry == null)
+        {
+            return;
+        }
+
+        RuntimeAnimatorController baseController = PawPalPetAnimationRegistry.ResolveEditorBaseController(entry);
+        RuntimeAnimatorController overrideController = PawPalPetAnimationRegistry.ResolveEditorOverrideController(baseController, entry);
+        if (overrideController != null)
+        {
+            animator.runtimeAnimatorController = overrideController;
+        }
+        else if (baseController != null)
+        {
+            animator.runtimeAnimatorController = baseController;
+        }
+    }
+
+    private bool TryPlayLoopingBreedPreviewPose(GameObject dog, Animator animator, string breedKey, PreviewBreedPose pose)
+    {
+        PawPalPetAnimationEntry entry;
+        if (dog == null
+            || animator == null
+            || !PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(out entry, breedKey, dog.name, animator.name)
+            || entry == null)
+        {
+            return false;
+        }
+
+        Dictionary<string, AnimationClip> clips = PawPalPetAnimationRegistry.GetEditorImportedClips(entry);
+        AnimationClip clip;
+        float normalizedStartTime;
+        if (!TryResolveBreedPreviewLoopClip(clips, pose, out clip, out normalizedStartTime) || clip == null)
+        {
+            return false;
+        }
+
+        PlayableGraph graph = PlayableGraph.Create("ShopBreedPreview_" + entry.CanonicalKey + "_" + pose);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.UnscaledGameTime);
+
+        AnimationPlayableOutput output = AnimationPlayableOutput.Create(graph, "BreedPreviewOutput", animator);
+        AnimationClipPlayable playable = AnimationClipPlayable.Create(graph, clip);
+        playable.SetApplyFootIK(false);
+        playable.SetApplyPlayableIK(false);
+        playable.SetTime(Mathf.Clamp01(normalizedStartTime) * Mathf.Max(0.01f, clip.length));
+        output.SetSourcePlayable(playable);
+        graph.Play();
+
+        previewPlayableGraphs.Add(graph);
+        animator.enabled = true;
+        return true;
+    }
+
+    private static bool TryResolveBreedPreviewLoopClip(Dictionary<string, AnimationClip> clips, PreviewBreedPose pose, out AnimationClip clip, out float normalizedStartTime)
+    {
+        clip = null;
+        normalizedStartTime = 0f;
+        if (clips == null)
+        {
+            return false;
+        }
+
+        switch (pose)
+        {
+            case PreviewBreedPose.Lie:
+                normalizedStartTime = 0.35f;
+                return TryGetImportedPreviewClip(clips, "Lie_belly_loop_1", out clip);
+            case PreviewBreedPose.Sit:
+                normalizedStartTime = 0.35f;
+                return TryGetImportedPreviewClip(clips, "Sitting_loop_1", out clip);
+            default:
+                normalizedStartTime = 0.2f;
+                return TryGetImportedPreviewClip(clips, "Idle_2", out clip)
+                    || TryGetImportedPreviewClip(clips, "Idle_1", out clip);
+        }
+    }
+
+    private static void SettleBreedPreviewPose(GameObject dog, Animator animator, string breedKey, PreviewBreedPose pose)
+    {
+        if (dog == null || animator == null)
+        {
+            return;
+        }
+
+        if (TrySampleBreedPreviewPose(dog, animator, breedKey, pose))
+        {
+            return;
+        }
+
+        ResetPreviewDogParameters(animator);
+        switch (pose)
+        {
+            case PreviewBreedPose.Sit:
+                PlayPreviewPoseState(animator, PreviewSittingStartSeconds, "SittingStart", "Sitting_start", "Sit start", "SitStart");
+                PlayPreviewPoseState(animator, PreviewLieLoopSettleSeconds, "SittingLoop1", "Sitting_loop_1", "Sit loop", "Sit");
+                break;
+            case PreviewBreedPose.Lie:
+                PlayPreviewPoseState(animator, PreviewLieStartSeconds, "LieBellyStart", "Lie_belly_start");
+                PlayPreviewPoseState(animator, PreviewLieLoopSettleSeconds, "LieBellyLoop", "Lie_belly_loop_1", "CatSimple_Lie_side_loop_1");
+                break;
+            default:
+                PlayPreviewPoseState(animator, 0.1f, "Idle2", "Idle_2", "Idle_Base");
+                break;
+        }
+    }
+
+    private static bool TrySampleBreedPreviewPose(GameObject dog, Animator animator, string breedKey, PreviewBreedPose pose)
+    {
+        PawPalPetAnimationEntry entry;
+        if (dog == null
+            || animator == null
+            || !PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(out entry, breedKey, dog.name, animator.name)
+            || entry == null)
+        {
+            return false;
+        }
+
+        Dictionary<string, AnimationClip> clips = PawPalPetAnimationRegistry.GetEditorImportedClips(entry);
+        if (clips == null || clips.Count == 0)
+        {
+            return false;
+        }
+
+        string clipSuffix;
+        float normalizedTime;
+        switch (pose)
+        {
+            case PreviewBreedPose.Lie:
+                clipSuffix = "Lie_belly_loop_1";
+                normalizedTime = 0.35f;
+                break;
+            case PreviewBreedPose.Sit:
+                clipSuffix = "Sitting_loop_1";
+                normalizedTime = 0.35f;
+                break;
+            default:
+                clipSuffix = "Idle_2";
+                normalizedTime = 0.2f;
+                break;
+        }
+
+        AnimationClip clip;
+        if (!TryGetImportedPreviewClip(clips, clipSuffix, out clip) || clip == null)
+        {
+            return false;
+        }
+
+        clip.SampleAnimation(dog, Mathf.Clamp(normalizedTime, 0f, 1f) * Mathf.Max(0.01f, clip.length));
+        animator.enabled = false;
+        return true;
+    }
+
+    private static bool TryGetImportedPreviewClip(Dictionary<string, AnimationClip> clips, string suffix, out AnimationClip clip)
+    {
+        clip = null;
+        if (clips == null || string.IsNullOrWhiteSpace(suffix))
+        {
+            return false;
+        }
+
+        string canonicalSuffix = suffix.Trim().ToLowerInvariant();
+        if (clips.TryGetValue(canonicalSuffix, out clip) && clip != null)
+        {
+            return true;
+        }
+
+        foreach (KeyValuePair<string, AnimationClip> pair in clips)
+        {
+            if (pair.Value == null)
+            {
+                continue;
+            }
+
+            if (pair.Key.EndsWith("|" + suffix, System.StringComparison.OrdinalIgnoreCase)
+                || pair.Key.EndsWith(suffix, System.StringComparison.OrdinalIgnoreCase))
+            {
+                clip = pair.Value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void PlayPreviewPoseState(Animator animator, float settleSeconds, params string[] stateNames)
+    {
+        int stateHash = ResolveAnimatorStateHash(animator, stateNames);
+        if (stateHash == 0)
+        {
+            return;
+        }
+
+        animator.CrossFadeInFixedTime(stateHash, PreviewAnimationCrossFadeSeconds, AnimatorBaseLayerIndex, 0f);
+        animator.Update(Mathf.Max(0.01f, settleSeconds));
+    }
+#endif
 
     private void ApplyPreviewTint(GameObject instance, Color tint)
     {
@@ -1610,8 +1976,18 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         lastPinchDistance = 0f;
         RestorePreviewLayerOnSceneCameras();
         StopPreviewDogAnimation(false);
+        for (int i = 0; i < previewPlayableGraphs.Count; i++)
+        {
+            if (previewPlayableGraphs[i].IsValid())
+            {
+                previewPlayableGraphs[i].Destroy();
+            }
+        }
+
+        previewPlayableGraphs.Clear();
 
         previewDogAnimator = null;
+        previewAnimators.Clear();
         modelRoot = null;
         focusRoot = null;
         previewCamera = null;
@@ -1662,5 +2038,12 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             Destroy(renderTexture);
             renderTexture = null;
         }
+    }
+
+    private enum PreviewBreedPose
+    {
+        Stand,
+        Sit,
+        Lie
     }
 }

@@ -226,11 +226,8 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             string animatorName = animator.name.ToLowerInvariant();
             string rootName = root != null ? root.name.ToLowerInvariant() : string.Empty;
             bool likelyDog = animator.GetComponentInParent<NavMeshAgent>() != null
-                || animatorName.Contains("puppy")
-                || animatorName.Contains("labrador")
+                || PawPalPetAnimationRegistry.IsKnownPetIdentity(animatorName, rootName)
                 || animatorName.Contains("dog")
-                || rootName.Contains("puppy")
-                || rootName.Contains("labrador")
                 || rootName.Contains("dog");
 
             if (!likelyDog)

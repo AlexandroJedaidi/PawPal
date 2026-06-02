@@ -195,6 +195,14 @@ public class AppShellController : MonoBehaviour
         }
     }
 
+    public void ShowDogInteractionUnrecognizedCommand()
+    {
+        if (dogInteractionModeController != null)
+        {
+            dogInteractionModeController.ShowUnrecognizedCommandReaction();
+        }
+    }
+
     public void ToggleDogInteractionMic()
     {
         HomeScreenView home = GetHomeScreenView();

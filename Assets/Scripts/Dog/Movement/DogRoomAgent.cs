@@ -95,8 +95,6 @@ public class DogRoomAgent : MonoBehaviour
     private const int BaseLayerIndex = 0;
     private const int MovementIdleIndex = -1;
     private const int NeutralIdleIndex = 99;
-    private const string ImportedLabradorPuppyAnimationAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx";
-    private const string ImportedLabradorPuppyPettingAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_petting.fbx";
     private const float BigBallHitImpulseScale = 0.75f;
     private const float BigBallHitTorqueScale = 0.75f;
     private const float InterruptedToyMovementRecoveryDuration = 0.18f;
@@ -796,31 +794,6 @@ public class DogRoomAgent : MonoBehaviour
 
     private string GetBarkBreedKey()
     {
-        PawPalDogState runtimeDog = GetRuntimeDogState();
-        if (runtimeDog != null && !string.IsNullOrWhiteSpace(runtimeDog.Breed))
-        {
-            string runtimeBreed = runtimeDog.Breed.ToLowerInvariant();
-            if (runtimeBreed.Contains("corgi"))
-            {
-                return "corgi";
-            }
-
-            if (runtimeBreed.Contains("labrador"))
-            {
-                return "labrador";
-            }
-
-            if (runtimeBreed.Contains("husky"))
-            {
-                return "husky";
-            }
-
-            if (runtimeBreed.Contains("retriever"))
-            {
-                return "retriever";
-            }
-        }
-
         return GetBreedKey();
     }
 
@@ -842,6 +815,9 @@ public class DogRoomAgent : MonoBehaviour
             DisableLegacyControllers();
         }
 
+#if UNITY_EDITOR
+        ApplyEditorRuntimeControllerOverride();
+#endif
         ConfigureAgent();
         locomotionStateHash = ResolveAnimatorStateHash(locomotionStateName);
         runStateHash = ResolveAnimatorStateHash(runStateName);
@@ -2089,6 +2065,29 @@ public class DogRoomAgent : MonoBehaviour
     {
         return candidate != null && candidate.runtimeAnimatorController != null;
     }
+
+#if UNITY_EDITOR
+    private void ApplyEditorRuntimeControllerOverride()
+    {
+        if (animator == null)
+        {
+            return;
+        }
+
+        PawPalPetAnimationEntry entry;
+        if (!TryResolveRegistryEntry(out entry))
+        {
+            return;
+        }
+
+        RuntimeAnimatorController baseController = PawPalPetAnimationRegistry.ResolveEditorBaseController(entry);
+        RuntimeAnimatorController overrideController = PawPalPetAnimationRegistry.ResolveEditorOverrideController(baseController, entry);
+        if (overrideController != null && animator.runtimeAnimatorController != overrideController)
+        {
+            animator.runtimeAnimatorController = overrideController;
+        }
+    }
+#endif
 
     private void ResolveOneShotStateHashes()
     {
@@ -4861,7 +4860,13 @@ public class DogRoomAgent : MonoBehaviour
         SetNeutralIdle();
         isPlayingOneShotAnimation = true;
 
-        if (pickupStateHash != 0)
+        AnimationClip pickupClip;
+        bool usedImportedPickupClip = TryGetImportedPickupClip("Pick_up", out pickupClip);
+        if (usedImportedPickupClip)
+        {
+            StartCoroutine(PlayDirectClip(pickupClip, Mathf.Max(0.2f, pickupAnimationDuration), false));
+        }
+        else if (pickupStateHash != 0)
         {
             CrossFadeState(pickupStateHash, oneShotCrossFadeDuration);
         }
@@ -4885,7 +4890,19 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         float remainingPickupDuration = Mathf.Max(0.05f, pickupAnimationDuration - Mathf.Max(0f, pickupAttachDelay));
-        yield return WaitForCurrentOneShotStateToFinish(pickupStateHash, pickupStateName, remainingPickupDuration);
+        if (usedImportedPickupClip)
+        {
+            yield return new WaitForSeconds(remainingPickupDuration);
+        }
+        else if (pickupStateHash != 0)
+        {
+            yield return WaitForCurrentOneShotStateToFinish(pickupStateHash, pickupStateName, remainingPickupDuration);
+        }
+        else
+        {
+            yield return new WaitForSeconds(remainingPickupDuration);
+        }
+
         isPlayingOneShotAnimation = false;
     }
 
@@ -4934,7 +4951,13 @@ public class DogRoomAgent : MonoBehaviour
         SetNeutralIdle();
         isPlayingOneShotAnimation = true;
 
-        if (putDownStateHash != 0)
+        AnimationClip putDownClip;
+        bool usedImportedPutDownClip = TryGetImportedPickupClip("Put_down", out putDownClip);
+        if (usedImportedPutDownClip)
+        {
+            StartCoroutine(PlayDirectClip(putDownClip, Mathf.Max(0.2f, putDownAnimationDuration), false));
+        }
+        else if (putDownStateHash != 0)
         {
             CrossFadeState(putDownStateHash, oneShotCrossFadeDuration);
         }
@@ -4946,7 +4969,19 @@ public class DogRoomAgent : MonoBehaviour
         yield return new WaitForSeconds(Mathf.Max(0f, putDownReleaseDelay));
         DropHeldToyImmediately();
 
-        yield return WaitForOneShotCompletion(putDownStateHash, putDownStateName, putDownAnimationDuration, oneShotAnimationMaxDuration);
+        if (usedImportedPutDownClip)
+        {
+            yield return new WaitForSeconds(Mathf.Max(0.05f, putDownAnimationDuration));
+        }
+        else if (putDownStateHash != 0)
+        {
+            yield return WaitForOneShotCompletion(putDownStateHash, putDownStateName, putDownAnimationDuration, oneShotAnimationMaxDuration);
+        }
+        else
+        {
+            yield return new WaitForSeconds(Mathf.Max(0.05f, putDownAnimationDuration));
+        }
+
         isPlayingOneShotAnimation = false;
     }
 
@@ -5873,6 +5908,17 @@ public class DogRoomAgent : MonoBehaviour
         return TryGetImportedClip(suffix, out clip);
     }
 
+    private bool TryGetImportedPickupClip(string suffix, out AnimationClip clip)
+    {
+        clip = null;
+        if (string.IsNullOrEmpty(suffix))
+        {
+            return false;
+        }
+
+        return TryGetImportedClip(suffix, out clip);
+    }
+
     private bool TryGetImportedPettingClip(out AnimationClip clip)
     {
         clip = null;
@@ -6165,107 +6211,21 @@ public class DogRoomAgent : MonoBehaviour
 
     private string GetImportedAnimationAssetPath()
     {
-        string key = GetBreedKey();
-        if (key == "corgi")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Corgi/Dog/FBX/Anim/Corgi_anim_IP.fbx";
-        }
-
-        if (key == "labrador")
-        {
-            return IsLabradorPuppyVariant()
-                ? ImportedLabradorPuppyAnimationAssetPath
-                : "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx";
-        }
-
-        if (key == "husky")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Husky/Dog/FBX/Anim/Husky_anim_IP.fbx";
-        }
-
-        if (key == "pug")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pug/Dog/FBX/Anim/Pug_anim_IP.fbx";
-        }
-
-        if (key == "cat_simple")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_RM.fbx";
-        }
-
-        if (key == "cat_chubby")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Fat/CatFat/FBX/Anim/CatFat_anim_RM.fbx";
-        }
-
-        if (key == "frenchbulldog")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/FrenchBulldog/Dog/FBX/Anim/FrenchBulldog_anim_IP.fbx";
-        }
-
-        if (key == "golden" || key == "retriever")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/GoldenRetriever/Dog/FBX/Anim/Retriever_anim_IP.fbx";
-        }
-
-        if (key == "shepherd")
-        {
-            return "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Shepherd/Dog/FBX/Anim/Shepherd_anim_IP.fbx";
-        }
-
-        return null;
+        PawPalPetAnimationEntry entry;
+        return TryResolveRegistryEntry(out entry) ? entry.ImportedAnimationAssetPath : null;
     }
 
     private string GetImportedPettingAnimationAssetPath()
     {
-        return IsLabradorPuppyVariant() ? ImportedLabradorPuppyPettingAssetPath : null;
+        PawPalPetAnimationEntry entry;
+        return TryResolveRegistryEntry(out entry) ? entry.PettingAnimationAssetPath : null;
     }
 #endif
 
     private string GetImportedClipPrefix()
     {
-        string key = GetBreedKey();
-        if (key == "corgi")
-        {
-            return "Arm_Corgi";
-        }
-
-        if (key == "labrador")
-        {
-            return "Arm_Labrador";
-        }
-
-        if (key == "husky")
-        {
-            return "Arm_Husky";
-        }
-
-        if (key == "pug")
-        {
-            return "Arm_Pug";
-        }
-
-        if (key == "cat_simple" || key == "cat_chubby")
-        {
-            return "Arm_Cat";
-        }
-
-        if (key == "frenchbulldog")
-        {
-            return "Arm_FrBulldog";
-        }
-
-        if (key == "golden" || key == "retriever")
-        {
-            return "Arm_Retriever";
-        }
-
-        if (key == "shepherd")
-        {
-            return "Arm_Shepherd";
-        }
-
-        return null;
+        PawPalPetAnimationEntry entry;
+        return TryResolveRegistryEntry(out entry) ? entry.ImportedClipPrefix : null;
     }
 
     private static string BuildPrefixedStateName(string prefix, string suffix)
@@ -6280,59 +6240,30 @@ public class DogRoomAgent : MonoBehaviour
 
     private bool IsLabradorPuppyVariant()
     {
-        string source = BuildVariantIdentitySource();
-        return source.Contains("labrador") && source.Contains("puppy");
+        PawPalPetAnimationEntry entry;
+        return TryResolveRegistryEntry(out entry)
+            && entry.LifeStage == PawPalPetLifeStage.Puppy
+            && entry.CanonicalKey == "puppy_labrador";
     }
 
     private string GetBreedKey()
     {
-        string source = BuildVariantIdentitySource();
-        if (source.Contains("corgi"))
-        {
-            return "corgi";
-        }
+        PawPalPetAnimationEntry entry;
+        return TryResolveRegistryEntry(out entry) ? entry.CanonicalKey : null;
+    }
 
-        if (source.Contains("labrador"))
-        {
-            return "labrador";
-        }
-
-        if (source.Contains("husky"))
-        {
-            return "husky";
-        }
-
-        if (source.Contains("pug"))
-        {
-            return "pug";
-        }
-
-        if (source.Contains("cat_simple") || source.Contains("catsimple"))
-        {
-            return "cat_simple";
-        }
-
-        if (source.Contains("cat_chubby") || source.Contains("catfat") || source.Contains("chubbycat"))
-        {
-            return "cat_chubby";
-        }
-
-        if (source.Contains("french") || source.Contains("bulldog"))
-        {
-            return "frenchbulldog";
-        }
-
-        if (source.Contains("gold") || source.Contains("retriever"))
-        {
-            return "retriever";
-        }
-
-        if (source.Contains("shepherd"))
-        {
-            return "shepherd";
-        }
-
-        return null;
+    private bool TryResolveRegistryEntry(out PawPalPetAnimationEntry entry)
+    {
+        PawPalDogState runtimeDog = GetRuntimeDogState();
+        return PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(
+            out entry,
+            selectedPetDefinition != null ? selectedPetDefinition.PetId : null,
+            selectedPetDefinition != null ? selectedPetDefinition.BreedLabel : null,
+            runtimeDog != null ? runtimeDog.Breed : null,
+            BuildVariantIdentitySource(),
+            name,
+            animator != null && animator.runtimeAnimatorController != null ? animator.runtimeAnimatorController.name : null,
+            animator != null && animator.avatar != null ? animator.avatar.name : null);
     }
 
     private string BuildVariantIdentitySource()

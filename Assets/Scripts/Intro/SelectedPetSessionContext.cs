@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 
@@ -153,45 +152,6 @@ public static class PawPalPetMovementProfiles
     private const float MediumTrotAnimatorBaseline = 0.78f;
     private const float MediumRunAnimatorBaseline = 1f;
 
-    private static readonly HashSet<string> SmallBreedKeys = new HashSet<string>
-    {
-        "puppylabrador",
-        "kittensimple",
-        "chihuahua",
-        "jackrussellterrier",
-        "toyterrier"
-    };
-
-    private static readonly HashSet<string> MediumBreedKeys = new HashSet<string>
-    {
-        "catsimple",
-        "catchubby",
-        "catstray",
-        "pug",
-        "corgi",
-        "beagle",
-        "bullterrier",
-        "frenchbulldog",
-        "shibainu",
-        "spitz",
-        "cur"
-    };
-
-    private static readonly HashSet<string> LargeBreedKeys = new HashSet<string>
-    {
-        "bordercollie",
-        "boxer",
-        "dalmatian",
-        "doberman",
-        "goldenretriever",
-        "husky",
-        "labrador",
-        "pitbull",
-        "rottweiler",
-        "shepherd",
-        "germanshepherd"
-    };
-
     private static readonly PawPalPetMovementProfile SmallProfile = BuildProfile(
         PawPalPetSizeClass.Small,
         0.24f,
@@ -245,53 +205,7 @@ public static class PawPalPetMovementProfiles
 
     public static PawPalPetSizeClass ResolveSizeClass(string petId, string breedName, string runtimeBreed, string objectName)
     {
-        string[] exactCandidates =
-        {
-            NormalizeKey(petId),
-            NormalizeKey(breedName),
-            NormalizeKey(runtimeBreed),
-            NormalizeKey(objectName)
-        };
-
-        for (int i = 0; i < exactCandidates.Length; i++)
-        {
-            string candidate = exactCandidates[i];
-            if (string.IsNullOrEmpty(candidate))
-            {
-                continue;
-            }
-
-            if (candidate.Contains("puppy") || candidate.Contains("kitten"))
-            {
-                return PawPalPetSizeClass.Small;
-            }
-        }
-
-        for (int i = 0; i < exactCandidates.Length; i++)
-        {
-            string candidate = exactCandidates[i];
-            if (string.IsNullOrEmpty(candidate))
-            {
-                continue;
-            }
-
-            if (SmallBreedKeys.Contains(candidate))
-            {
-                return PawPalPetSizeClass.Small;
-            }
-
-            if (MediumBreedKeys.Contains(candidate))
-            {
-                return PawPalPetSizeClass.Medium;
-            }
-
-            if (LargeBreedKeys.Contains(candidate))
-            {
-                return PawPalPetSizeClass.Large;
-            }
-        }
-
-        return PawPalPetSizeClass.Medium;
+        return PawPalPetAnimationRegistry.ResolveSizeClass(petId, breedName, runtimeBreed, objectName);
     }
 
     private static PawPalPetMovementProfile GetProfile(PawPalPetSizeClass sizeClass)
@@ -350,23 +264,4 @@ public static class PawPalPetMovementProfiles
         return baseline * (targetSpeed / mediumSpeed);
     }
 
-    private static string NormalizeKey(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        StringBuilder builder = new StringBuilder(value.Length);
-        for (int i = 0; i < value.Length; i++)
-        {
-            char character = char.ToLowerInvariant(value[i]);
-            if (char.IsLetterOrDigit(character))
-            {
-                builder.Append(character);
-            }
-        }
-
-        return builder.ToString();
-    }
 }

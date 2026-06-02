@@ -1833,18 +1833,21 @@ public class DogSocialDirector : MonoBehaviour
             return null;
         }
 
-        string lowerName = agent.name.ToLowerInvariant();
-        if (lowerName.Contains("labrador"))
+        PawPalPetAnimationEntry entry;
+        if (!PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(out entry, agent.name))
         {
-            return labradorBarkClip;
+            return null;
         }
 
-        if (lowerName.Contains("corgi"))
+        switch (entry.VocalClass)
         {
-            return corgiBarkClip;
+            case PawPalPetVocalClass.BarkDark:
+                return corgiBarkClip;
+            case PawPalPetVocalClass.BarkLight:
+                return labradorBarkClip;
+            default:
+                return null;
         }
-
-        return null;
     }
 
     private void EnsureBackgroundMusicSource()

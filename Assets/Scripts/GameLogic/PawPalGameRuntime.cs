@@ -80,7 +80,8 @@ public enum PawPalShopPreviewMode
 {
     SpriteOnly,
     StandaloneModel,
-    WearableOnDog
+    WearableOnDog,
+    BreedTriptychDog
 }
 
 [Serializable]
@@ -3052,35 +3053,25 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     private void BuildCatalog()
     {
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "dog_husky",
-            DisplayName = "Husky",
-            Category = PawPalItemCategory.Dogs,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 800,
-            AppearsInInventory = false,
-            DisabledInShop = true,
-            DisabledReason = "Dog breeds are not purchasable in this milestone.",
-            Description = "A playful premium dog breed with high energy and strong mobility.",
-            ShopSpritePath = DownloadedShopSpriteRoot + "husky",
-            PreviewSpritePath = DownloadedShopSpriteRoot + "husky"
-        });
-
-        AddCatalogItem(new PawPalCatalogItemDefinition
-        {
-            Id = "dog_rottweiler",
-            DisplayName = "Rottweiler",
-            Category = PawPalItemCategory.Dogs,
-            CurrencyType = PawPalCurrencyType.Premium,
-            Price = 600,
-            AppearsInInventory = false,
-            DisabledInShop = true,
-            DisabledReason = "Dog breeds are not purchasable in this milestone.",
-            Description = "A sturdy breed card that stays visible while kennel logic is deferred.",
-            ShopSpritePath = "UI/Figma/Shop/rottweiler",
-            PreviewSpritePath = "UI/Figma/Shop/rottweiler"
-        });
+        AddCatalogItem(BuildDogBreedDefinition("dog_beagle", "Beagle", "beagle", 650));
+        AddCatalogItem(BuildDogBreedDefinition("dog_border_collie", "Border Collie", "border_collie", 850));
+        AddCatalogItem(BuildDogBreedDefinition("dog_boxer", "Boxer", "boxer", 700));
+        AddCatalogItem(BuildDogBreedDefinition("dog_bullterrier", "Bull Terrier", "bullterrier", 650));
+        AddCatalogItem(BuildDogBreedDefinition("dog_corgi", "Corgi", "corgi", 700));
+        AddCatalogItem(BuildDogBreedDefinition("dog_dalmatian", "Dalmatian", "dalmatian", 750));
+        AddCatalogItem(BuildDogBreedDefinition("dog_doberman", "Doberman", "doberman", 800));
+        AddCatalogItem(BuildDogBreedDefinition("dog_frenchbulldog", "French Bulldog", "frenchbulldog", 700));
+        AddCatalogItem(BuildDogBreedDefinition("dog_goldenretriever", "Golden Retriever", "goldenretriever", 850));
+        AddCatalogItem(BuildDogBreedDefinition("dog_husky", "Husky", "husky", 800));
+        AddCatalogItem(BuildDogBreedDefinition("dog_jackrussellterrier", "Jack Russell Terrier", "jackrussellterrier", 600));
+        AddCatalogItem(BuildDogBreedDefinition("dog_labrador", "Labrador", "labrador", 800));
+        AddCatalogItem(BuildDogBreedDefinition("dog_pitbull", "Pitbull", "pitbull", 750));
+        AddCatalogItem(BuildDogBreedDefinition("dog_pug", "Pug", "pug", 650));
+        AddCatalogItem(BuildDogBreedDefinition("dog_rottweiler", "Rottweiler", "rottweiler", 800));
+        AddCatalogItem(BuildDogBreedDefinition("dog_shepherd", "Shepherd", "shepherd", 800));
+        AddCatalogItem(BuildDogBreedDefinition("dog_shibainu", "Shiba Inu", "shibainu", 700));
+        AddCatalogItem(BuildDogBreedDefinition("dog_spitz", "Spitz", "spitz", 650));
+        AddCatalogItem(BuildDogBreedDefinition("dog_toyterrier", "Toy Terrier", "toyterrier", 600));
 
         AddCatalogItem(new PawPalCatalogItemDefinition
         {
@@ -3162,6 +3153,24 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_1_color_2", "Denim Bed", "bed_1_color_2"));
         AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_2_color_1", "Pawprint Bed", "bed_2_color_1"));
         AddCatalogItem(BuildDownloadedFurnitureDefinition("bed_2_color_2", "Sage Bed", "bed_2_color_2"));
+    }
+
+    private PawPalCatalogItemDefinition BuildDogBreedDefinition(string id, string displayName, string spriteName, int price)
+    {
+        string spritePath = DownloadedShopSpriteRoot + spriteName;
+        return new PawPalCatalogItemDefinition
+        {
+            Id = id,
+            DisplayName = displayName,
+            Category = PawPalItemCategory.Dogs,
+            CurrencyType = PawPalCurrencyType.Premium,
+            Price = Mathf.Max(1, price),
+            AppearsInInventory = false,
+            Description = "Unlock the " + displayName + " breed for your pawfriends collection.",
+            ShopSpritePath = spritePath,
+            PreviewSpritePath = spritePath,
+            PreviewMode = PawPalShopPreviewMode.BreedTriptychDog
+        };
     }
 
     private PawPalCatalogItemDefinition BuildDownloadedToyDefinition(

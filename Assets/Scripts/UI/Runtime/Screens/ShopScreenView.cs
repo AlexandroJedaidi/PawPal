@@ -64,6 +64,7 @@ public class ShopScreenView : AppScreenViewBase
     private static readonly Color32 CatalogPanelFill = new Color32(255, 250, 239, 255);
     private static readonly Color32 CatalogPanelBorder = new Color32(238, 219, 188, 255);
     private static readonly Color32 CatalogDivider = new Color32(238, 219, 188, 255);
+    private static readonly Color32 CatalogSectionHeaderBorder = new Color32(252, 248, 232, 255);
     private static readonly Color32 CategoryTileFill = new Color32(255, 252, 245, 255);
     private static readonly Color32 CategoryTileShadow = new Color32(229, 207, 178, 255);
     private static readonly Color32 ItemCardBorder = new Color32(231, 215, 188, 255);
@@ -446,7 +447,7 @@ public class ShopScreenView : AppScreenViewBase
         modalBlocker.raycastTarget = true;
         UiFactory.Stretch(modalBlocker.rectTransform, 0f, 0f, 0f, 0f);
 
-        itemDetailsPanel = CreateCenteredNode("ItemDetailsPanel", modalLayer, 314f, 398f, 0f);
+        itemDetailsPanel = CreateCenteredNode("ItemDetailsPanel", modalLayer, 314f, 430f, 0f);
 
         itemSuccessPanel = CreateCenteredNode("ItemSuccessPanel", modalLayer, 281f, 203f, 0f);
         RebuildModalPanels();
@@ -968,7 +969,7 @@ public class ShopScreenView : AppScreenViewBase
     private void BuildItemDetailsPanel(RectTransform parent)
     {
         ClearChildren(parent);
-        BuildPanelShell(parent, 314f, 398f, 10f, 2f, true);
+        BuildPanelShell(parent, 314f, 430f, 10f, 2f, true);
 
         PawPalCatalogItemDefinition item = GetSelectedCatalogItem();
         if (item == null)
@@ -978,17 +979,9 @@ public class ShopScreenView : AppScreenViewBase
 
         BuildItemPreview(parent, item);
 
-        RectTransform header = CreateNode("DetailsHeader", parent, 11.5f, 168f, 291f, 21f);
-        Image line = UiFactory.CreateImage("Line", header, GetHorizontalLineSprite(291, 1), UiTheme.NavBrand);
-        line.type = Image.Type.Simple;
-        line.preserveAspect = false;
-        line.raycastTarget = false;
-        SetTopLeft(line.rectTransform, 0f, 13f, 291f, 1f);
+        BuildModalSectionHeader(parent, "DetailsHeader", "Details", 11.5f, 192f, 291f);
 
-        TextMeshProUGUI details = CreateText(header, "DetailsText", "Details", 14, UiTheme.NavBrand, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        SetTopLeft(details.rectTransform, 90.40776f, 0f, 109.24272f, 21f);
-
-        RectTransform itemFrame = CreateNode("ItemFrame", parent, 10f, 195f, 294f, 115f);
+        RectTransform itemFrame = CreateNode("ItemFrame", parent, 10f, 219f, 294f, 115f);
         BuildProductCard(itemFrame, item.Id + "MiniCard", 0f, 0f, item.DisplayName, GetFieldSpriteForItem(item), GetShopSpritePath(item), GetShopImageRect(item, item.Category, 0), GetModalBadgeKind(item), GetModalBadgeText(item), GetModalBadgeWidth(item), CtaBlue, Color.white, null);
 
         RectTransform textFrame = CreateNode("DescriptionFrame", itemFrame, 117f, 0f, 177f, 115f);
@@ -997,7 +990,7 @@ public class ShopScreenView : AppScreenViewBase
         description.overflowMode = TextOverflowModes.Overflow;
         SetTopLeft(description.rectTransform, 10f, 10f, 157f, 95f);
 
-        RectTransform purchase = CreateNode("Purchase", parent, 77f, 316f, 160f, 77f);
+        RectTransform purchase = CreateNode("Purchase", parent, 77f, 348f, 160f, 77f);
         TextMeshProUGUI confirm = CreateText(purchase, "Confirm", GetDetailsPrompt(item), 15, UiTheme.NavBrand, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
         SetTopLeft(confirm.rectTransform, 10f, 10.5f, 140f, 22f);
 
@@ -1045,23 +1038,65 @@ public class ShopScreenView : AppScreenViewBase
         });
     }
 
+    private void BuildModalSectionHeader(RectTransform parent, string name, string title, float x, float y, float width)
+    {
+        RectTransform header = CreateNode(name, parent, x, y, width, 24f);
+        float labelWidth = Mathf.Clamp(title.Length * 8.5f + 16f, 54f, 126f);
+        float labelX = Mathf.Round((width - labelWidth) * 0.5f);
+        float pawSize = 14f;
+        float leftPawX = labelX - pawSize - 5f;
+        float rightPawX = labelX + labelWidth + 5f;
+
+        Image leftLine = UiFactory.CreateImage("LeftLine", header, UiTheme.WhiteSprite, UiTheme.NavBrand);
+        leftLine.type = Image.Type.Simple;
+        leftLine.preserveAspect = false;
+        leftLine.raycastTarget = false;
+        SetTopLeft(leftLine.rectTransform, 0f, 13f, Mathf.Max(0f, leftPawX - 6f), 1f);
+
+        Image rightLine = UiFactory.CreateImage("RightLine", header, UiTheme.WhiteSprite, UiTheme.NavBrand);
+        rightLine.type = Image.Type.Simple;
+        rightLine.preserveAspect = false;
+        rightLine.raycastTarget = false;
+        float rightLineX = rightPawX + pawSize + 6f;
+        SetTopLeft(rightLine.rectTransform, rightLineX, 13f, Mathf.Max(0f, width - rightLineX), 1f);
+
+        Image leftPaw = UiFactory.CreateImage("LeftPaw", header, sprites.GetIcon("icon_paw_brand"), UiTheme.NavBrand);
+        leftPaw.type = Image.Type.Simple;
+        leftPaw.preserveAspect = true;
+        leftPaw.raycastTarget = false;
+        SetTopLeft(leftPaw.rectTransform, leftPawX, 5f, pawSize, pawSize);
+
+        TextMeshProUGUI label = CreateText(header, "Label", title, 16, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 10f;
+        label.fontSizeMax = 16f;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        SetTopLeft(label.rectTransform, labelX, 0f, labelWidth, 24f);
+
+        Image rightPaw = UiFactory.CreateImage("RightPaw", header, sprites.GetIcon("icon_paw_brand"), UiTheme.NavBrand);
+        rightPaw.type = Image.Type.Simple;
+        rightPaw.preserveAspect = true;
+        rightPaw.raycastTarget = false;
+        SetTopLeft(rightPaw.rectTransform, rightPawX, 5f, pawSize, pawSize);
+    }
+
     private void BuildItemPreview(RectTransform parent, PawPalCatalogItemDefinition item)
     {
-        RectTransform previewRoot = CreateNode("ItemPreview", parent, 10f, 8f, 294f, 154f);
+        RectTransform previewRoot = CreateNode("ItemPreview", parent, 10f, 8f, 294f, 178f);
 
-        Image fill = UiFactory.CreateImage("PreviewFill", previewRoot, GetRoundedRectSprite(294, 154, 8f, 0f, true), SupportFill);
+        Image fill = UiFactory.CreateImage("PreviewFill", previewRoot, GetRoundedRectSprite(294, 178, 8f, 0f, true), SupportFill);
         fill.type = Image.Type.Sliced;
         fill.preserveAspect = false;
         fill.raycastTarget = false;
-        SetTopLeft(fill.rectTransform, 0f, 0f, 294f, 154f);
+        SetTopLeft(fill.rectTransform, 0f, 0f, 294f, 178f);
 
-        Image border = UiFactory.CreateImage("PreviewBorder", previewRoot, GetRoundedRectSprite(294, 154, 8f, 1f, false), UiTheme.NavBrand);
+        Image border = UiFactory.CreateImage("PreviewBorder", previewRoot, GetRoundedRectSprite(294, 178, 8f, 1f, false), UiTheme.NavBrand);
         border.type = Image.Type.Sliced;
         border.preserveAspect = false;
         border.raycastTarget = false;
-        SetTopLeft(border.rectTransform, 0f, 0f, 294f, 154f);
+        SetTopLeft(border.rectTransform, 0f, 0f, 294f, 178f);
 
-        RectTransform previewContent = CreateNode("PreviewContent", previewRoot, 8f, 6f, 278f, 142f);
+        RectTransform previewContent = CreateNode("PreviewContent", previewRoot, 8f, 6f, 278f, 166f);
         ShopItem3DPreviewView previewView = previewContent.gameObject.AddComponent<ShopItem3DPreviewView>();
         previewView.Initialize(sprites);
         previewView.ShowItem(item);
@@ -1166,22 +1201,46 @@ public class ShopScreenView : AppScreenViewBase
 
     private RectTransform BuildCatalogSectionHeader(RectTransform parent, string name, string title, string iconName, Rect iconRect)
     {
-        RectTransform header = CreateNode(name, parent, 16f, 0f, 240f, 40f);
+        const float headerX = 16f;
+        const float headerY = 0f;
+        const float headerHeight = 28f;
+        const float minHeaderWidth = 72f;
+        const float horizontalPadding = 5f;
+        const float iconWidth = 22f;
+        const float iconHeight = 20f;
+        const float iconY = 4f;
+        const float labelGap = 5f;
 
-        Image badge = UiFactory.CreateImage("Badge", header, UiTheme.CircleSprite, UiTheme.NavBrand);
-        badge.type = Image.Type.Simple;
-        badge.preserveAspect = false;
-        badge.raycastTarget = false;
-        SetTopLeft(badge.rectTransform, 0f, 0f, 38f, 38f);
+        RectTransform header = CreateNode(name, parent, headerX, headerY, 240f, headerHeight);
+
+        Image fill = UiFactory.CreateImage("Fill", header, GetRoundedRectSprite(240, Mathf.RoundToInt(headerHeight), 5f, 0f, true), UiTheme.NavBrand);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = false;
+
+        Image border = UiFactory.CreateImage("Border", header, GetRoundedRectSprite(240, Mathf.RoundToInt(headerHeight), 5f, 1f, false), CatalogSectionHeaderBorder);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        border.raycastTarget = false;
 
         Image icon = UiFactory.CreateImage("Icon", header, sprites.GetIcon(iconName), Color.white);
         icon.type = Image.Type.Simple;
         icon.preserveAspect = true;
         icon.raycastTarget = false;
-        SetTopLeft(icon.rectTransform, iconRect.x, iconRect.y, iconRect.width, iconRect.height);
+        SetTopLeft(icon.rectTransform, horizontalPadding, iconY, iconWidth, iconHeight);
 
-        TextMeshProUGUI label = CreateText(header, "Label", title, 16, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        SetTopLeft(label.rectTransform, 50f, 6f, 180f, 25f);
+        TextMeshProUGUI label = CreateText(header, "Label", title, 14, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.MidlineLeft);
+        label.overflowMode = TextOverflowModes.Overflow;
+        label.ForceMeshUpdate();
+
+        float textX = horizontalPadding + iconWidth + labelGap;
+        float preferredLabelWidth = Mathf.Ceil(label.preferredWidth);
+        float headerWidth = Mathf.Max(minHeaderWidth, textX + preferredLabelWidth + horizontalPadding);
+
+        SetTopLeft(header, headerX, headerY, headerWidth, headerHeight);
+        SetTopLeft(fill.rectTransform, 0f, 0f, headerWidth, headerHeight);
+        SetTopLeft(border.rectTransform, 0f, 0f, headerWidth, headerHeight);
+        SetTopLeft(label.rectTransform, textX, 0f, Mathf.Max(1f, headerWidth - textX - horizontalPadding), headerHeight);
         return header;
     }
 
