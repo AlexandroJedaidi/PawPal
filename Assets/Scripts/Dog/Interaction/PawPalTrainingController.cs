@@ -228,11 +228,12 @@ public sealed class PawPalTrainingController : MonoBehaviour
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         PawPalDogState dogState = runtime != null ? runtime.ActiveDog : null;
         DogRoomAgent dogAgent = ResolveActiveDogAgent();
+        PawPalCatRoomAgent catAgent = ResolveActiveCatAgent();
         PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
         if (dogState == null || definition == null)
         {
             state = PawPalTrainingState.TrickFailed;
-            feedbackText = "Training needs an active dog.";
+            feedbackText = "Training needs an active pet.";
             canPraise = false;
             SetBusy(false);
             Refresh();
@@ -266,6 +267,17 @@ public sealed class PawPalTrainingController : MonoBehaviour
             yield break;
         }
 
+        if (catAgent != null && !catAgent.CanPerformTrainingAnimation())
+        {
+            state = PawPalTrainingState.BreakNeeded;
+            feedbackText = dogState.DisplayName + " is busy right now.";
+            canPraise = false;
+            SetBusy(false);
+            Refresh();
+            attemptRoutine = null;
+            yield break;
+        }
+
         bool posePrerequisite = trickId != PawPalTrickId.Lie || lastPosture == TrainingDogPosture.Sitting || runtime.IsActiveDogTrickLearned(PawPalTrickId.Sit);
         PawPalTrickAttemptResult result = PawPalTrickProgressionService.AttemptTrick(dogState, definition, config, false, false, posePrerequisite);
         if (runtime != null)
@@ -283,12 +295,24 @@ public sealed class PawPalTrainingController : MonoBehaviour
                 state = PawPalTrainingState.AttemptingTrick;
                 yield return StartCoroutine(dogAgent.PlayTrainingTrick(definition, true));
             }
+            else if (catAgent != null)
+            {
+                state = PawPalTrainingState.AttemptingTrick;
+                yield return StartCoroutine(catAgent.PlayTrainingTrick(definition, Camera.main));
+            }
 
             UpdatePostureAfterSuccess(trickId);
 
-            if (result.MadeProgress && view != null && dogAgent != null)
+            if (result.MadeProgress && view != null)
             {
-                view.ShowTrainingProgressCue(dogAgent, Camera.main, definition.DisplayName, result.PreviousProgress01, result.CurrentProgress01);
+                if (dogAgent != null)
+                {
+                    view.ShowTrainingProgressCue(dogAgent, Camera.main, definition.DisplayName, result.PreviousProgress01, result.CurrentProgress01);
+                }
+                else if (catAgent != null)
+                {
+                    view.ShowTrainingProgressCue(catAgent.transform, catAgent.FocusTransform, Camera.main, definition.DisplayName, result.PreviousProgress01, result.CurrentProgress01);
+                }
             }
         }
 
@@ -339,7 +363,15 @@ public sealed class PawPalTrainingController : MonoBehaviour
             return;
         }
 
-        gestureRecognizer.Configure(ResolveActiveDogAgent(), Camera.main, config != null ? config.GestureLeniency : 1f);
+        DogRoomAgent dog = ResolveActiveDogAgent();
+        if (dog != null)
+        {
+            gestureRecognizer.Configure(dog, Camera.main, config != null ? config.GestureLeniency : 1f);
+            return;
+        }
+
+        PawPalCatRoomAgent cat = ResolveActiveCatAgent();
+        gestureRecognizer.Configure(cat != null ? cat.transform : null, Camera.main, config != null ? config.GestureLeniency : 1f);
     }
 
     private void SetBusy(bool busy)
@@ -364,6 +396,11 @@ public sealed class PawPalTrainingController : MonoBehaviour
     private static DogRoomAgent ResolveActiveDogAgent()
     {
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime != null && runtime.ActivePetSpecies == IntroPetSpecies.Cat)
+        {
+            return null;
+        }
+
         DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
         if (dogs == null || dogs.Length == 0)
         {
@@ -403,5 +440,32 @@ public sealed class PawPalTrainingController : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static PawPalCatRoomAgent ResolveActiveCatAgent()
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null || runtime.ActivePetSpecies != IntroPetSpecies.Cat)
+        {
+            return null;
+        }
+
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
+        if (cats == null || cats.Length == 0)
+        {
+            return null;
+        }
+
+        string activePetId = runtime.ActiveDog != null ? runtime.ActiveDog.Id : string.Empty;
+        for (int i = 0; i < cats.Length; i++)
+        {
+            PawPalCatRoomAgent candidate = cats[i];
+            if (candidate != null && string.Equals(candidate.RuntimePetId, activePetId, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return cats[0];
     }
 }

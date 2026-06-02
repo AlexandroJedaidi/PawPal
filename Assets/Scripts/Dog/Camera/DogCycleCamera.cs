@@ -167,6 +167,11 @@ public class DogCycleCamera : MonoBehaviour
 
     public static bool TryFocusRuntimeActiveDogFromSelection()
     {
+        if (PawPalPetFollowCamera.TryFocusRuntimeActivePet())
+        {
+            return true;
+        }
+
         if (IsDogSwitchingLocked)
         {
             return false;
@@ -209,6 +214,11 @@ public class DogCycleCamera : MonoBehaviour
 
     public static bool TryForceFocusRuntimeActiveDogFromSelection()
     {
+        if (PawPalPetFollowCamera.TryFocusRuntimeActivePet())
+        {
+            return true;
+        }
+
         PawPalGameRuntime runtimeInstance = PawPalGameRuntime.Instance;
         Camera mainCamera = Camera.main;
         DogCycleCamera dogCamera = null;

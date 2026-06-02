@@ -1419,6 +1419,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private readonly Dictionary<int, TrainerMilestoneDefinition> trainerMilestonesByLevel = new Dictionary<int, TrainerMilestoneDefinition>();
     private readonly List<int> pendingUnsupportedTrainerMilestoneLevels = new List<int>();
     private readonly HashSet<string> temporaryIntroDogIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IntroPetSpecies> petSpeciesById = new Dictionary<string, IntroPetSpecies>(StringComparer.OrdinalIgnoreCase);
 
     [SerializeField] private float secondsPerGameHour = DefaultSecondsPerGameHour;
 
@@ -1505,6 +1506,15 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
             activeDogIndex = Mathf.Clamp(activeDogIndex, 0, dogs.Count - 1);
             return dogs[activeDogIndex];
+        }
+    }
+
+    public IntroPetSpecies ActivePetSpecies
+    {
+        get
+        {
+            PawPalDogState activePet = ActiveDog;
+            return activePet != null ? GetPetSpecies(activePet.Id) : IntroPetSpecies.Dog;
         }
     }
 
@@ -1731,6 +1741,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public bool RegisterTemporaryIntroDog(PawPalDogState dogState, bool setActive)
     {
+        return RegisterTemporaryIntroPet(dogState, IntroPetSpecies.Dog, setActive);
+    }
+
+    public bool RegisterTemporaryIntroPet(PawPalDogState dogState, IntroPetSpecies species, bool setActive)
+    {
         if (dogState == null)
         {
             return false;
@@ -1767,6 +1782,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         temporaryIntroDogIds.Add(dogState.Id);
+        petSpeciesById[dogState.Id] = species;
         EnsureDogEquipmentState(dogState.Id);
 
         if (setActive)
@@ -1777,6 +1793,17 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
         CommitState(false, false, false);
         return true;
+    }
+
+    public IntroPetSpecies GetPetSpecies(string petId)
+    {
+        if (string.IsNullOrWhiteSpace(petId))
+        {
+            return IntroPetSpecies.Dog;
+        }
+
+        IntroPetSpecies species;
+        return petSpeciesById.TryGetValue(petId, out species) ? species : IntroPetSpecies.Dog;
     }
 
     public bool TryFeedActiveDog()

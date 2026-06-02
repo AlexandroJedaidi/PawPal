@@ -5,13 +5,16 @@ using UnityEngine.EventSystems;
 [DisallowMultipleComponent]
 public sealed class IntroPetSelectionController : MonoBehaviour
 {
+    private const int IntroDogSpawnCount = 3;
+    private const int IntroCatSpawnCount = 2;
+
     private readonly List<IntroPetRuntimeSelection> selections = new List<IntroPetRuntimeSelection>();
     private IntroPetSpawner spawner;
     private PetSelectionCameraController cameraController;
     private IntroPetUIController uiController;
-    private IntroPetDefinition[] definitions = new IntroPetDefinition[0];
     private int currentIndex;
     private bool initialized;
+    private IntroPetUiState uiState = IntroPetUiState.Selection;
 
     public IntroPetAgent CurrentAgent
     {
@@ -49,20 +52,27 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
         spawner = gameObject.AddComponent<IntroPetSpawner>();
         spawner.Initialize(this, fieldBounds);
-        definitions = spawner.LoadDefinitions();
-        BuildSelections(definitions);
-        spawner.Spawn(definitions, selections);
+        BuildSelections(BuildSpawnRoster(spawner.LoadDefinitions()));
+        ApplySpawnResults(spawner.Spawn(selections));
 
         uiController = new GameObject("IntroPetSelectionCanvas", typeof(RectTransform)).AddComponent<IntroPetUIController>();
         uiController.Build();
         BindUi();
+        RefreshUi();
 
-        SelectPet(0, true);
+        if (spawner.Agents.Count > 0)
+        {
+            SelectPet(0, false);
+        }
+        else if (selections.Count > 0)
+        {
+            Debug.LogError("IntroPetSelection failed to spawn any pet agents for the intro roster.");
+        }
     }
 
     public void SelectAgent(IntroPetAgent agent)
     {
-        if (agent == null)
+        if (agent == null || uiState != IntroPetUiState.Selection)
         {
             return;
         }
@@ -72,7 +82,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private void Update()
     {
-        if (!initialized)
+        if (!initialized || uiState != IntroPetUiState.Selection)
         {
             return;
         }
@@ -101,6 +111,77 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         }
     }
 
+    private static IntroPetDefinition[] BuildSpawnRoster(IntroPetDefinition[] sourceDefinitions)
+    {
+        if (sourceDefinitions == null || sourceDefinitions.Length == 0)
+        {
+            return new IntroPetDefinition[0];
+        }
+
+        List<IntroPetDefinition> dogs = new List<IntroPetDefinition>();
+        List<IntroPetDefinition> cats = new List<IntroPetDefinition>();
+        for (int i = 0; i < sourceDefinitions.Length; i++)
+        {
+            IntroPetDefinition definition = sourceDefinitions[i];
+            if (definition == null)
+            {
+                continue;
+            }
+
+            if (definition.Species == IntroPetSpecies.Cat)
+            {
+                cats.Add(definition);
+            }
+            else
+            {
+                dogs.Add(definition);
+            }
+        }
+
+        Shuffle(dogs);
+        Shuffle(cats);
+
+        List<IntroPetDefinition> roster = new List<IntroPetDefinition>();
+        AddSpeciesRoster(roster, dogs, IntroDogSpawnCount, "dog");
+        AddSpeciesRoster(roster, cats, IntroCatSpawnCount, "cat");
+        return roster.ToArray();
+    }
+
+    private static void AddSpeciesRoster(List<IntroPetDefinition> roster, List<IntroPetDefinition> source, int count, string speciesLabel)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        int targetCount = Mathf.Min(count, source.Count);
+        for (int i = 0; i < targetCount; i++)
+        {
+            roster.Add(source[i]);
+        }
+
+        if (source.Count < count)
+        {
+            Debug.LogWarning("IntroPetSelection only found " + source.Count + " " + speciesLabel + " definition(s). Spawning all available unique breeds.");
+        }
+    }
+
+    private static void Shuffle(List<IntroPetDefinition> definitionsToShuffle)
+    {
+        if (definitionsToShuffle == null)
+        {
+            return;
+        }
+
+        for (int i = definitionsToShuffle.Count - 1; i > 0; i--)
+        {
+            int swapIndex = Random.Range(0, i + 1);
+            IntroPetDefinition temp = definitionsToShuffle[i];
+            definitionsToShuffle[i] = definitionsToShuffle[swapIndex];
+            definitionsToShuffle[swapIndex] = temp;
+        }
+    }
+
     private void BindUi()
     {
         if (uiController == null)
@@ -109,17 +190,17 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         }
 
         uiController.PetStepRequested += StepPet;
-        uiController.FurStepRequested += StepFur;
         uiController.FurIndexRequested += SetFurIndex;
         uiController.GenderChanged += SetGender;
         uiController.NameChanged += SetName;
-        uiController.ConfirmRequested += ShowConfirmModal;
+        uiController.ContinueRequested += ShowConfirmCard;
+        uiController.BackRequested += ShowSelectionCard;
         uiController.ConfirmAccepted += ConfirmSelection;
     }
 
     private void StepPet(int direction)
     {
-        if (selections.Count == 0)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
         {
             return;
         }
@@ -130,9 +211,16 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private void SelectPet(int index, bool snapCamera)
     {
-        if (selections.Count == 0 || spawner == null || spawner.Agents.Count == 0)
+        if (selections.Count == 0)
         {
             Debug.LogWarning("IntroPetSelection has no pet definitions to display. Add IntroPetDefinition assets under Resources/PawPal/IntroPets/Definitions.");
+            return;
+        }
+
+        if (spawner == null || spawner.Agents.Count == 0)
+        {
+            currentIndex = Mathf.Clamp(index, 0, selections.Count - 1);
+            RefreshUi();
             return;
         }
 
@@ -153,22 +241,9 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         RefreshUi();
     }
 
-    private void StepFur(int direction)
-    {
-        if (selections.Count == 0)
-        {
-            return;
-        }
-
-        IntroPetRuntimeSelection selection = selections[currentIndex];
-        selection.SetFurIndex(selection.FurIndex + direction);
-        ReplaceCurrentAgentVariant(selection);
-        RefreshUi();
-    }
-
     private void SetFurIndex(int furIndex)
     {
-        if (selections.Count == 0)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
         {
             return;
         }
@@ -202,7 +277,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private void SetGender(PawPalDogGender gender)
     {
-        if (selections.Count == 0)
+        if (selections.Count == 0 || uiState != IntroPetUiState.Selection)
         {
             return;
         }
@@ -222,15 +297,26 @@ public sealed class IntroPetSelectionController : MonoBehaviour
         RefreshUi();
     }
 
-    private void ShowConfirmModal()
+    private void ShowConfirmCard()
     {
         if (uiController == null || selections.Count == 0)
         {
             return;
         }
 
-        selections[currentIndex].SetName(selections[currentIndex].PetName);
-        uiController.ShowConfirmModal(true, selections[currentIndex]);
+        uiState = IntroPetUiState.Confirm;
+        RefreshUi();
+    }
+
+    private void ShowSelectionCard()
+    {
+        if (uiController == null)
+        {
+            return;
+        }
+
+        uiState = IntroPetUiState.Selection;
+        RefreshUi();
     }
 
     private void ConfirmSelection()
@@ -253,7 +339,31 @@ public sealed class IntroPetSelectionController : MonoBehaviour
             return;
         }
 
+        uiController.SetState(uiState);
         uiController.Refresh(selections[currentIndex], currentIndex, selections.Count);
+    }
+
+    private void ApplySpawnResults(IReadOnlyList<IntroPetSpawnOutcome> results)
+    {
+        if (results == null)
+        {
+            selections.Clear();
+            return;
+        }
+
+        List<IntroPetRuntimeSelection> usableSelections = new List<IntroPetRuntimeSelection>();
+        for (int i = 0; i < results.Count; i++)
+        {
+            IntroPetSpawnOutcome result = results[i];
+            if (result != null && result.IsUsable)
+            {
+                usableSelections.Add(result.Selection);
+            }
+        }
+
+        selections.Clear();
+        selections.AddRange(usableSelections);
+        currentIndex = Mathf.Clamp(currentIndex, 0, Mathf.Max(0, selections.Count - 1));
     }
 
     private static void EnsureEventSystem()

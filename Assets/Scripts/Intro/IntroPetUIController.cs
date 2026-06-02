@@ -4,6 +4,12 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
+public enum IntroPetUiState
+{
+    Selection,
+    Confirm
+}
+
 public sealed class IntroPetUIController : MonoBehaviour
 {
     private static readonly Color PanelFill = UiTheme.NavBackgroundCream;
@@ -12,31 +18,35 @@ public sealed class IntroPetUIController : MonoBehaviour
     private static readonly Color SoftLine = new Color32(238, 205, 190, 255);
     private static readonly Color MutedText = new Color32(137, 104, 92, 255);
     private static readonly Color SoftBlue = new Color32(57, 169, 226, 255);
+    private static readonly Color ChipFill = new Color32(255, 241, 232, 255);
 
     private RectTransform root;
-    private RectTransform modalLayer;
-    private TextMeshProUGUI titleLabel;
+    private RectTransform selectionCard;
+    private RectTransform confirmCard;
+    private TextMeshProUGUI breedLabel;
     private TextMeshProUGUI speciesLabel;
+    private TextMeshProUGUI counterLabel;
     private TextMeshProUGUI descriptionLabel;
-    private TextMeshProUGUI furLabel;
     private TextMeshProUGUI personalityLabel;
-    private TextMeshProUGUI selectionCounterLabel;
-    private TextMeshProUGUI confirmModalLabel;
+    private Image maleToggleFill;
+    private Image femaleToggleFill;
+    private TextMeshProUGUI maleToggleLabel;
+    private TextMeshProUGUI femaleToggleLabel;
     private TMP_InputField nameInput;
-    private Image maleButtonFill;
-    private Image femaleButtonFill;
-    private TextMeshProUGUI maleButtonLabel;
-    private TextMeshProUGUI femaleButtonLabel;
-    private Image[] swatchFills = new Image[0];
-    private Image[] swatchBorders = new Image[0];
+    private TextMeshProUGUI confirmPromptLabel;
+    private TextMeshProUGUI confirmContextLabel;
+    private Button[] furButtons = new Button[0];
+    private Image[] furButtonFills = new Image[0];
+    private TextMeshProUGUI[] furButtonLabels = new TextMeshProUGUI[0];
     private bool suppressNameEvent;
+    private IntroPetUiState state;
 
     public event Action<int> PetStepRequested;
-    public event Action<int> FurStepRequested;
     public event Action<int> FurIndexRequested;
     public event Action<PawPalDogGender> GenderChanged;
+    public event Action ContinueRequested;
     public event Action<string> NameChanged;
-    public event Action ConfirmRequested;
+    public event Action BackRequested;
     public event Action ConfirmAccepted;
 
     public void Build()
@@ -63,9 +73,23 @@ public sealed class IntroPetUIController : MonoBehaviour
         UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
         root.gameObject.AddComponent<SafeAreaFitter>();
 
-        BuildSelectionChrome();
-        BuildBottomPanel();
-        BuildConfirmModal();
+        BuildSelectionCard();
+        BuildConfirmCard();
+        SetState(IntroPetUiState.Selection);
+    }
+
+    public void SetState(IntroPetUiState nextState)
+    {
+        state = nextState;
+        if (selectionCard != null)
+        {
+            selectionCard.gameObject.SetActive(state == IntroPetUiState.Selection);
+        }
+
+        if (confirmCard != null)
+        {
+            confirmCard.gameObject.SetActive(state == IntroPetUiState.Confirm);
+        }
     }
 
     public void Refresh(IntroPetRuntimeSelection selection, int index, int total)
@@ -76,189 +100,164 @@ public sealed class IntroPetUIController : MonoBehaviour
         }
 
         IntroPetDefinition definition = selection.Definition;
-        titleLabel.text = definition != null ? definition.BreedLabel : "Pet";
+        string safeName = selection.SafePetName;
+        breedLabel.text = definition != null ? definition.BreedLabel : "Pet";
         speciesLabel.text = definition != null ? definition.SpeciesLabel : "Pet";
+        counterLabel.text = (index + 1).ToString() + " / " + Mathf.Max(1, total).ToString();
         descriptionLabel.text = definition != null ? definition.Description : string.Empty;
-        furLabel.text = selection.FurVariant != null ? selection.FurVariant.SafeDisplayName : "Default";
         personalityLabel.text = IntroPetFormatting.FormatPersonality(selection.Personality);
-        selectionCounterLabel.text = (index + 1).ToString() + " / " + Mathf.Max(1, total).ToString();
+        confirmContextLabel.text = (definition != null ? definition.BreedLabel : "Pet") + " / " + IntroPetFormatting.FormatGender(selection.Gender);
+        confirmPromptLabel.text = "Name your new companion and bring " + safeName + " home.";
 
         RefreshGender(selection.Gender);
-        RefreshSwatches(definition, selection.FurIndex);
+        RefreshFurButtons(definition, selection.FurIndex);
 
-        string safeName = selection.SafePetName;
         if (nameInput != null && !nameInput.isFocused && nameInput.text != safeName)
         {
             suppressNameEvent = true;
             nameInput.SetTextWithoutNotify(safeName);
             suppressNameEvent = false;
         }
-
-        if (confirmModalLabel != null)
-        {
-            confirmModalLabel.text = "Bring " + safeName + " home?";
-        }
     }
 
-    public void ShowConfirmModal(bool visible, IntroPetRuntimeSelection selection)
+    private void BuildSelectionCard()
     {
-        if (modalLayer == null)
-        {
-            return;
-        }
+        selectionCard = CreateCard(root, "SelectionCard", new Vector2(370f, 251f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 20f));
 
-        if (selection != null && confirmModalLabel != null)
-        {
-            confirmModalLabel.text = "Bring " + selection.SafePetName + " home?";
-        }
+        CreateMetadataChips(selectionCard);
 
-        modalLayer.gameObject.SetActive(visible);
-    }
+        Image breedField = UiFactory.CreateImage("BreedField", selectionCard, UiTheme.DogDetailsFieldFillSprite, Color.white);
+        breedField.preserveAspect = false;
+        Place(breedField.rectTransform, 92f, 28f, 186f, 24f);
+        Image breedFieldBorder = UiFactory.CreateImage("BreedFieldBorder", selectionCard, UiTheme.DogDetailsFieldOutlineSprite, SoftLine);
+        breedFieldBorder.preserveAspect = false;
+        Place(breedFieldBorder.rectTransform, 92f, 28f, 186f, 24f);
+        breedLabel = CreateLabel(selectionCard, "BreedLabel", "Labrador", 14, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        Place(breedLabel.rectTransform, 100f, 31f, 170f, 18f);
 
-    private void BuildSelectionChrome()
-    {
-        RectTransform previousButton = CreateButton(root, "PreviousPet", "<", new Vector2(14f, 368f), new Vector2(48f, 48f), PanelFill, PrimaryDark, delegate
+        CreateArrowButton(selectionCard, "PrevBreed", new Vector2(44f, 28f), new Vector2(24f, 24f), true, delegate
         {
             RaisePetStep(-1);
         });
-        previousButton.anchorMin = new Vector2(0f, 0.5f);
-        previousButton.anchorMax = new Vector2(0f, 0.5f);
-        previousButton.pivot = new Vector2(0f, 0.5f);
-        previousButton.anchoredPosition = new Vector2(14f, 40f);
-
-        RectTransform nextButton = CreateButton(root, "NextPet", ">", new Vector2(331f, 368f), new Vector2(48f, 48f), PanelFill, PrimaryDark, delegate
+        CreateArrowButton(selectionCard, "NextBreed", new Vector2(302f, 28f), new Vector2(24f, 24f), false, delegate
         {
             RaisePetStep(1);
         });
-        nextButton.anchorMin = new Vector2(1f, 0.5f);
-        nextButton.anchorMax = new Vector2(1f, 0.5f);
-        nextButton.pivot = new Vector2(1f, 0.5f);
-        nextButton.anchoredPosition = new Vector2(-14f, 40f);
-    }
 
-    private void BuildBottomPanel()
-    {
-        RectTransform panel = UiFactory.CreateRect("SelectionPanel", root);
-        UiFactory.AnchorBottomStretch(panel, 14f, 14f, 14f, 292f);
-        Image panelImage = panel.gameObject.AddComponent<Image>();
-        panelImage.sprite = UiTheme.RoundedTenSprite;
-        panelImage.color = PanelFill;
-        Shadow shadow = panel.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = new Color(80f / 255f, 50f / 255f, 38f / 255f, 0.2f);
-        shadow.effectDistance = new Vector2(0f, -3f);
-
-        titleLabel = CreateLabel(panel, "Breed", "Labrador", 20, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(titleLabel.rectTransform, 18f, 15f, 205f, 28f);
-
-        speciesLabel = CreateLabel(panel, "Species", "Dog", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        Place(speciesLabel.rectTransform, 242f, 17f, 48f, 22f);
-
-        selectionCounterLabel = CreateLabel(panel, "SelectionCounter", "1 / 6", 11, MutedText, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Right);
-        Place(selectionCounterLabel.rectTransform, 294f, 18f, 48f, 22f);
-
-        descriptionLabel = CreateLabel(panel, "Description", string.Empty, 12, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
+        descriptionLabel = CreateLabel(selectionCard, "DescriptionLabel", string.Empty, 12, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
         descriptionLabel.textWrappingMode = TextWrappingModes.Normal;
         descriptionLabel.overflowMode = TextOverflowModes.Ellipsis;
-        Place(descriptionLabel.rectTransform, 18f, 48f, 324f, 42f);
+        Place(descriptionLabel.rectTransform, 32f, 67f, 306f, 48f);
 
-        CreateLabel(panel, "FurCaption", "Fur", 11, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(panel.Find("FurCaption") as RectTransform, 18f, 101f, 42f, 20f);
+        CreateLabel(selectionCard, "FurCaption", "Fur type:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        Place(selectionCard.Find("FurCaption") as RectTransform, 32f, 122f, 88f, 18f);
+        BuildFurButtons(selectionCard);
 
-        RectTransform previousFur = CreateButton(panel, "PreviousFur", "<", new Vector2(68f, 96f), new Vector2(30f, 28f), UiTheme.CardWhite, PrimaryDark, delegate
-        {
-            RaiseFurStep(-1);
-        });
-        previousFur.GetComponent<Image>().sprite = UiTheme.RoundedFiveOutlineSprite;
+        CreateLabel(selectionCard, "GenderCaption", "Gender:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        Place(selectionCard.Find("GenderCaption") as RectTransform, 32f, 164f, 70f, 18f);
+        BuildGenderToggle(selectionCard);
 
-        furLabel = CreateLabel(panel, "FurName", "Default", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        Place(furLabel.rectTransform, 104f, 100f, 98f, 20f);
-
-        RectTransform nextFur = CreateButton(panel, "NextFur", ">", new Vector2(207f, 96f), new Vector2(30f, 28f), UiTheme.CardWhite, PrimaryDark, delegate
-        {
-            RaiseFurStep(1);
-        });
-        nextFur.GetComponent<Image>().sprite = UiTheme.RoundedFiveOutlineSprite;
-
-        BuildSwatches(panel);
-        BuildGenderButtons(panel);
-
-        CreateLabel(panel, "PersonalityCaption", "Personality", 11, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(panel.Find("PersonalityCaption") as RectTransform, 18f, 151f, 92f, 18f);
-
-        Image personalityChip = UiFactory.CreateImage("PersonalityChip", panel, UiTheme.RoundedFiveSprite, new Color32(255, 241, 232, 255));
-        Place(personalityChip.rectTransform, 108f, 146f, 118f, 28f);
-        personalityLabel = CreateLabel(personalityChip.rectTransform, "Personality", "Loyal", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        CreateLabel(selectionCard, "PersonalityCaption", "Personality", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        Place(selectionCard.Find("PersonalityCaption") as RectTransform, 32f, 196f, 90f, 18f);
+        Image personalityChip = UiFactory.CreateImage("PersonalityChip", selectionCard, UiTheme.RoundedFiveSprite, ChipFill);
+        Place(personalityChip.rectTransform, 125f, 192f, 96f, 24f);
+        personalityLabel = CreateLabel(personalityChip.rectTransform, "PersonalityLabel", "Loyal", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
         UiFactory.Stretch(personalityLabel.rectTransform, 8f, 2f, 8f, 2f);
 
-        BuildNameInput(panel);
-
-        RectTransform confirm = CreateButton(panel, "Confirm", "Let's go home", new Vector2(217f, 224f), new Vector2(125f, 40f), SoftBlue, Color.white, delegate
+        RectTransform continueButton = CreateButton(selectionCard, "ContinueButton", "Continue", new Vector2(246f, 186f), new Vector2(92f, 30f), SoftBlue, Color.white, delegate
         {
-            Action handler = ConfirmRequested;
+            Action handler = ContinueRequested;
             if (handler != null)
             {
                 handler();
             }
         });
-        confirm.GetComponent<Image>().sprite = UiTheme.RoundedTenSprite;
+        continueButton.GetComponent<Image>().sprite = UiTheme.RoundedFiveSprite;
     }
 
-    private void BuildSwatches(RectTransform panel)
+    private void CreateMetadataChips(RectTransform parent)
     {
-        swatchFills = new Image[4];
-        swatchBorders = new Image[4];
-        for (int i = 0; i < swatchFills.Length; i++)
+        Image speciesChip = UiFactory.CreateImage("SpeciesChip", parent, UiTheme.RoundedFiveSprite, ChipFill);
+        speciesChip.preserveAspect = false;
+        Place(speciesChip.rectTransform, 225f, 8f, 52f, 22f);
+        speciesLabel = CreateLabel(speciesChip.rectTransform, "SpeciesLabel", "Dog", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        UiFactory.Stretch(speciesLabel.rectTransform, 6f, 2f, 6f, 2f);
+
+        counterLabel = CreateLabel(parent, "CounterLabel", "1 / 5", 11, MutedText, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Right);
+        Place(counterLabel.rectTransform, 286f, 10f, 52f, 18f);
+    }
+
+    private void BuildFurButtons(RectTransform parent)
+    {
+        const int buttonCount = 4;
+        furButtons = new Button[buttonCount];
+        furButtonFills = new Image[buttonCount];
+        furButtonLabels = new TextMeshProUGUI[buttonCount];
+        float startX = 114f;
+        for (int i = 0; i < buttonCount; i++)
         {
-            RectTransform swatch = UiFactory.CreateRect("FurSwatch" + i.ToString(), panel);
-            Place(swatch, 249f + i * 24f, 98f, 20f, 20f);
-            Image border = UiFactory.CreateImage("Border", swatch, UiTheme.CircleOutlineSprite, SoftLine);
+            RectTransform button = CreateButton(parent, "FurButton" + i.ToString(), "Default", new Vector2(startX + i * 56f, 118f), new Vector2(48f, 24f), Color.white, PrimaryDark, null);
+            button.GetComponent<Image>().sprite = UiTheme.DogDetailsFieldFillSprite;
+            button.GetComponent<Image>().preserveAspect = false;
+            Image border = UiFactory.CreateImage("Border", button, UiTheme.DogDetailsFieldOutlineSprite, SoftLine);
+            border.preserveAspect = false;
             UiFactory.Stretch(border.rectTransform, 0f, 0f, 0f, 0f);
-            Image fill = UiFactory.CreateImage("Fill", swatch, UiTheme.CircleSprite, Color.white);
-            UiFactory.Stretch(fill.rectTransform, 4f, 4f, 4f, 4f);
-            int swatchIndex = i;
-            UiFactory.AddButton(swatch.gameObject, delegate
+            int furIndex = i;
+            Button clickable = UiFactory.AddButton(button.gameObject, delegate
             {
-                Action<int> handler = FurIndexRequested;
-                if (handler != null)
-                {
-                    handler(swatchIndex);
-                }
+                RaiseFurIndex(furIndex);
             });
-            swatchFills[i] = fill;
-            swatchBorders[i] = border;
+
+            furButtons[i] = clickable;
+            furButtonFills[i] = button.GetComponent<Image>();
+            furButtonLabels[i] = button.GetComponentInChildren<TextMeshProUGUI>();
         }
     }
 
-    private void BuildGenderButtons(RectTransform panel)
+    private void BuildGenderToggle(RectTransform parent)
     {
-        CreateLabel(panel, "GenderCaption", "Gender", 11, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(panel.Find("GenderCaption") as RectTransform, 18f, 196f, 62f, 18f);
+        RectTransform toggleRoot = UiFactory.CreateRect("GenderToggle", parent);
+        Place(toggleRoot, 114f, 158f, 120f, 32f);
+        Image fill = toggleRoot.gameObject.AddComponent<Image>();
+        fill.sprite = UiTheme.RoundedTenSprite;
+        fill.color = new Color32(245, 233, 224, 255);
+        fill.preserveAspect = false;
 
-        RectTransform male = CreateButton(panel, "GenderMale", "Male", new Vector2(82f, 188f), new Vector2(76f, 30f), UiTheme.CardWhite, PrimaryDark, delegate
+        RectTransform male = CreateButton(toggleRoot, "MaleToggle", "Male", new Vector2(3f, 3f), new Vector2(54f, 26f), Color.white, PrimaryDark, delegate
         {
             RaiseGender(PawPalDogGender.Male);
         });
-        maleButtonFill = male.GetComponent<Image>();
-        maleButtonLabel = male.GetComponentInChildren<TextMeshProUGUI>();
+        maleToggleFill = male.GetComponent<Image>();
+        maleToggleLabel = male.GetComponentInChildren<TextMeshProUGUI>();
 
-        RectTransform female = CreateButton(panel, "GenderFemale", "Female", new Vector2(160f, 188f), new Vector2(76f, 30f), UiTheme.CardWhite, PrimaryDark, delegate
+        RectTransform female = CreateButton(toggleRoot, "FemaleToggle", "Female", new Vector2(63f, 3f), new Vector2(54f, 26f), Color.white, PrimaryDark, delegate
         {
             RaiseGender(PawPalDogGender.Female);
         });
-        femaleButtonFill = female.GetComponent<Image>();
-        femaleButtonLabel = female.GetComponentInChildren<TextMeshProUGUI>();
+        femaleToggleFill = female.GetComponent<Image>();
+        femaleToggleLabel = female.GetComponentInChildren<TextMeshProUGUI>();
     }
 
-    private void BuildNameInput(RectTransform panel)
+    private void BuildConfirmCard()
     {
-        CreateLabel(panel, "NameCaption", "Name", 11, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(panel.Find("NameCaption") as RectTransform, 18f, 237f, 52f, 18f);
+        confirmCard = CreateCard(root, "ConfirmCard", new Vector2(362f, 167f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 20f));
 
-        RectTransform inputRoot = UiFactory.CreateRect("NameInput", panel);
-        Place(inputRoot, 67f, 226f, 137f, 36f);
+        confirmContextLabel = CreateLabel(confirmCard, "ConfirmContextLabel", "Labrador / Male", 14, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        Place(confirmContextLabel.rectTransform, 30f, 18f, 302f, 20f);
+
+        confirmPromptLabel = CreateLabel(confirmCard, "ConfirmPromptLabel", string.Empty, 13, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.Center);
+        confirmPromptLabel.textWrappingMode = TextWrappingModes.Normal;
+        Place(confirmPromptLabel.rectTransform, 42f, 46f, 278f, 36f);
+
+        RectTransform inputRoot = UiFactory.CreateRect("NameInputRoot", confirmCard);
+        Place(inputRoot, 57f, 93f, 247f, 24f);
         Image inputFill = inputRoot.gameObject.AddComponent<Image>();
-        inputFill.sprite = UiTheme.RoundedTenOutlineSprite;
-        inputFill.color = UiTheme.CardWhite;
+        inputFill.sprite = UiTheme.DogDetailsFieldFillSprite;
+        inputFill.color = Color.white;
+        inputFill.preserveAspect = false;
+        Image inputBorder = UiFactory.CreateImage("InputBorder", inputRoot, UiTheme.DogDetailsFieldOutlineSprite, SoftLine);
+        inputBorder.preserveAspect = false;
+        UiFactory.Stretch(inputBorder.rectTransform, 0f, 0f, 0f, 0f);
 
         nameInput = inputRoot.gameObject.AddComponent<TMP_InputField>();
         nameInput.lineType = TMP_InputField.LineType.SingleLine;
@@ -266,50 +265,24 @@ public sealed class IntroPetUIController : MonoBehaviour
         nameInput.targetGraphic = inputFill;
 
         TextMeshProUGUI placeholder = CreateLabel(inputRoot, "Placeholder", "Buddy", 13, new Color32(190, 151, 138, 255), UiTheme.NavRegularFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(placeholder.rectTransform, 8f, 3f, 8f, 3f);
-
+        UiFactory.Stretch(placeholder.rectTransform, 8f, 2f, 8f, 2f);
         TextMeshProUGUI text = CreateLabel(inputRoot, "Text", string.Empty, 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(text.rectTransform, 8f, 3f, 8f, 3f);
-
+        UiFactory.Stretch(text.rectTransform, 8f, 2f, 8f, 2f);
         nameInput.placeholder = placeholder;
         nameInput.textComponent = text;
         nameInput.onValueChanged.AddListener(HandleNameChanged);
-    }
 
-    private void BuildConfirmModal()
-    {
-        modalLayer = UiFactory.CreateRect("ConfirmModal", root);
-        UiFactory.Stretch(modalLayer, 0f, 0f, 0f, 0f);
-        Image blocker = modalLayer.gameObject.AddComponent<Image>();
-        blocker.color = new Color(0f, 0f, 0f, 0.36f);
-        UiFactory.AddButton(modalLayer.gameObject, delegate
+        RectTransform backButton = CreateButton(confirmCard, "BackButton", "Back", new Vector2(57f, 125f), new Vector2(92f, 26f), Color.white, PrimaryDark, delegate
         {
-            ShowConfirmModal(false, null);
+            Action handler = BackRequested;
+            if (handler != null)
+            {
+                handler();
+            }
         });
+        backButton.GetComponent<Image>().sprite = UiTheme.RoundedFiveOutlineSprite;
 
-        RectTransform panel = UiFactory.CreateRect("Panel", modalLayer);
-        panel.anchorMin = new Vector2(0.5f, 0.5f);
-        panel.anchorMax = new Vector2(0.5f, 0.5f);
-        panel.pivot = new Vector2(0.5f, 0.5f);
-        panel.anchoredPosition = new Vector2(0f, -18f);
-        panel.sizeDelta = new Vector2(304f, 154f);
-        Image fill = panel.gameObject.AddComponent<Image>();
-        fill.sprite = UiTheme.RoundedTenSprite;
-        fill.color = PanelFill;
-
-        confirmModalLabel = CreateLabel(panel, "Title", "Bring Buddy home?", 20, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        Place(confirmModalLabel.rectTransform, 18f, 23f, 268f, 30f);
-
-        TextMeshProUGUI detail = CreateLabel(panel, "Detail", "Your choice will load into the home scene for this play session.", 12, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.Center);
-        detail.textWrappingMode = TextWrappingModes.Normal;
-        Place(detail.rectTransform, 28f, 59f, 248f, 34f);
-
-        CreateButton(panel, "Cancel", "Back", new Vector2(35f, 105f), new Vector2(101f, 35f), UiTheme.CardWhite, PrimaryDark, delegate
-        {
-            ShowConfirmModal(false, null);
-        });
-
-        CreateButton(panel, "Accept", "Confirm", new Vector2(164f, 105f), new Vector2(105f, 35f), SoftBlue, Color.white, delegate
+        RectTransform confirmButton = CreateButton(confirmCard, "ConfirmButton", "Let's go home!", new Vector2(162f, 125f), new Vector2(142f, 26f), SoftBlue, Color.white, delegate
         {
             Action handler = ConfirmAccepted;
             if (handler != null)
@@ -317,42 +290,45 @@ public sealed class IntroPetUIController : MonoBehaviour
                 handler();
             }
         });
-
-        modalLayer.gameObject.SetActive(false);
+        confirmButton.GetComponent<Image>().sprite = UiTheme.RoundedFiveSprite;
     }
 
     private void RefreshGender(PawPalDogGender gender)
     {
         bool maleSelected = gender == PawPalDogGender.Male;
-        SetSegment(maleButtonFill, maleButtonLabel, maleSelected);
-        SetSegment(femaleButtonFill, femaleButtonLabel, !maleSelected);
+        SetToggleState(maleToggleFill, maleToggleLabel, maleSelected);
+        SetToggleState(femaleToggleFill, femaleToggleLabel, !maleSelected);
     }
 
-    private void RefreshSwatches(IntroPetDefinition definition, int activeIndex)
+    private void RefreshFurButtons(IntroPetDefinition definition, int activeIndex)
     {
-        int count = definition != null && definition.FurVariants != null ? definition.FurVariants.Length : 0;
-        for (int i = 0; i < swatchFills.Length; i++)
+        FurVariantDefinition[] variants = definition != null ? definition.FurVariants : null;
+        for (int i = 0; i < furButtons.Length; i++)
         {
-            bool visible = i < count;
-            if (swatchFills[i] != null)
+            bool isVisible = variants != null && i < variants.Length;
+            if (furButtons[i] != null)
             {
-                swatchFills[i].transform.parent.gameObject.SetActive(visible);
-                swatchFills[i].color = visible && definition.FurVariants[i] != null ? definition.FurVariants[i].SwatchColor : Color.white;
+                furButtons[i].gameObject.SetActive(isVisible);
             }
 
-            if (swatchBorders[i] != null)
+            if (!isVisible)
             {
-                swatchBorders[i].color = i == activeIndex ? Primary : SoftLine;
+                continue;
             }
+
+            bool isActive = i == activeIndex;
+            furButtonFills[i].color = isActive ? Primary : Color.white;
+            furButtonLabels[i].color = isActive ? Color.white : PrimaryDark;
+            furButtonLabels[i].text = GetVariantButtonLabel(variants[i], i);
         }
     }
 
-    private void SetSegment(Image fill, TextMeshProUGUI label, bool selected)
+    private void SetToggleState(Image fill, TextMeshProUGUI label, bool selected)
     {
         if (fill != null)
         {
             fill.sprite = UiTheme.RoundedTenSprite;
-            fill.color = selected ? Primary : UiTheme.CardWhite;
+            fill.color = selected ? Primary : Color.white;
         }
 
         if (label != null)
@@ -392,12 +368,12 @@ public sealed class IntroPetUIController : MonoBehaviour
         }
     }
 
-    private void RaiseFurStep(int direction)
+    private void RaiseFurIndex(int index)
     {
-        Action<int> handler = FurStepRequested;
+        Action<int> handler = FurIndexRequested;
         if (handler != null)
         {
-            handler(direction);
+            handler(index);
         }
     }
 
@@ -410,14 +386,63 @@ public sealed class IntroPetUIController : MonoBehaviour
         }
     }
 
+    private static RectTransform CreateCard(Transform parent, string name, Vector2 size, Vector2 anchorMin, Vector2 anchorMax, Vector2 anchoredPosition)
+    {
+        RectTransform card = UiFactory.CreateRect(name, parent);
+        card.anchorMin = anchorMin;
+        card.anchorMax = anchorMax;
+        card.pivot = new Vector2(0.5f, 0f);
+        card.anchoredPosition = anchoredPosition;
+        card.sizeDelta = size;
+
+        Image fill = card.gameObject.AddComponent<Image>();
+        fill.sprite = UiTheme.RoundedTenSprite;
+        fill.color = PanelFill;
+        fill.preserveAspect = false;
+
+        Shadow shadow = card.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(80f / 255f, 50f / 255f, 38f / 255f, 0.18f);
+        shadow.effectDistance = new Vector2(0f, -3f);
+        return card;
+    }
+
+    private static void CreateArrowButton(RectTransform parent, string name, Vector2 position, Vector2 size, bool flipX, UnityAction onClick)
+    {
+        Image hitArea = UiFactory.CreateImage(name, parent, UiTheme.CircleSprite, new Color32(255, 255, 255, 0));
+        RectTransform rect = hitArea.rectTransform;
+        Place(rect, position.x, position.y, size.x, size.y);
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        UiFactory.AddButton(hitArea.gameObject, onClick);
+
+        Sprite arrowSprite = Resources.Load<Sprite>("UI/Icons/icon_nextarrow");
+        if (arrowSprite == null)
+        {
+            TextMeshProUGUI fallback = CreateLabel(rect, "ArrowFallback", flipX ? "<" : ">", 18, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+            UiFactory.Stretch(fallback.rectTransform, 0f, 0f, 0f, 0f);
+            return;
+        }
+
+        Image arrow = UiFactory.CreateImage("Arrow", rect, arrowSprite, PrimaryDark);
+        UiFactory.Stretch(arrow.rectTransform, 4f, 4f, 4f, 4f);
+        arrow.type = Image.Type.Simple;
+        arrow.preserveAspect = true;
+        if (flipX)
+        {
+            arrow.rectTransform.localScale = new Vector3(-1f, 1f, 1f);
+        }
+    }
+
     private static RectTransform CreateButton(RectTransform parent, string name, string text, Vector2 position, Vector2 size, Color fillColor, Color textColor, UnityAction onClick)
     {
         Image fill = UiFactory.CreateImage(name, parent, UiTheme.RoundedTenSprite, fillColor);
+        fill.preserveAspect = false;
         RectTransform rect = fill.rectTransform;
         Place(rect, position.x, position.y, size.x, size.y);
         UiFactory.AddButton(fill.gameObject, onClick);
 
-        TextMeshProUGUI label = CreateLabel(rect, "Label", text, 14, textColor, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        TextMeshProUGUI label = CreateLabel(rect, "Label", text, 13, textColor, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
         UiFactory.Stretch(label.rectTransform, 4f, 2f, 4f, 2f);
         return rect;
     }
@@ -430,6 +455,17 @@ public sealed class IntroPetUIController : MonoBehaviour
         label.fontSizeMin = Mathf.Max(8, fontSize - 3);
         label.fontSizeMax = fontSize;
         return label;
+    }
+
+    private static string GetVariantButtonLabel(FurVariantDefinition variant, int index)
+    {
+        string label = variant != null ? variant.SafeDisplayName : "Fur " + (index + 1).ToString();
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            label = "Fur " + (index + 1).ToString();
+        }
+
+        return label.Length > 9 ? label.Substring(0, 9) : label;
     }
 
     private static void Place(RectTransform rect, float x, float y, float width, float height)

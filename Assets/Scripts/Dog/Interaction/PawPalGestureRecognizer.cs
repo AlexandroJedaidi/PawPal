@@ -38,7 +38,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
 
     private readonly List<Vector2> gesturePoints = new List<Vector2>();
 
-    private DogRoomAgent targetDog;
+    private Transform targetRoot;
     private Camera targetCamera;
     private bool recognizerActive;
     private bool tracking;
@@ -53,7 +53,12 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
 
     public void Configure(DogRoomAgent dog, Camera camera, float gestureLeniency)
     {
-        targetDog = dog;
+        Configure(dog != null ? dog.transform : null, camera, gestureLeniency);
+    }
+
+    public void Configure(Transform petRoot, Camera camera, float gestureLeniency)
+    {
+        targetRoot = petRoot;
         targetCamera = camera != null ? camera : Camera.main;
         leniency = Mathf.Clamp(gestureLeniency, 0.1f, 2f);
     }
@@ -294,7 +299,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
 
     private bool IsCircularGesture()
     {
-        if (gesturePoints.Count < 6 || targetDog == null || targetCamera == null)
+        if (gesturePoints.Count < 6 || targetRoot == null || targetCamera == null)
         {
             return false;
         }
@@ -396,7 +401,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
     private bool TryGetDogScreenRect(out Rect rect)
     {
         rect = new Rect();
-        if (targetDog == null)
+        if (targetRoot == null)
         {
             return false;
         }
@@ -407,7 +412,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
             return false;
         }
 
-        Renderer[] renderers = targetDog.GetComponentsInChildren<Renderer>(true);
+        Renderer[] renderers = targetRoot.GetComponentsInChildren<Renderer>(true);
         if (renderers == null || renderers.Length == 0)
         {
             return false;

@@ -1,6 +1,29 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
+
+public enum IntroPetSpawnStatus
+{
+    Spawned,
+    SpawnedWithBasePrefabFallback,
+    Failed
+}
+
+public sealed class IntroPetSpawnOutcome
+{
+    public IntroPetSpawnOutcome(IntroPetRuntimeSelection selection, IntroPetAgent agent, IntroPetSpawnStatus status)
+    {
+        Selection = selection;
+        Agent = agent;
+        Status = status;
+    }
+
+    public IntroPetRuntimeSelection Selection { get; }
+    public IntroPetAgent Agent { get; }
+    public IntroPetSpawnStatus Status { get; }
+    public bool IsUsable => Agent != null && Selection != null;
+}
 
 public sealed class IntroPetSpawner : MonoBehaviour
 {
@@ -26,24 +49,37 @@ public sealed class IntroPetSpawner : MonoBehaviour
         return definitions;
     }
 
-    public void Spawn(IntroPetDefinition[] definitions, IList<IntroPetRuntimeSelection> selections)
+    public List<IntroPetSpawnOutcome> Spawn(IList<IntroPetRuntimeSelection> selections)
     {
         Clear();
+        List<IntroPetSpawnOutcome> outcomes = new List<IntroPetSpawnOutcome>();
 
-        if (definitions == null || selections == null)
+        if (selections == null)
         {
-            return;
+            return outcomes;
         }
 
-        float spacing = 1.75f;
-        float startX = -(definitions.Length - 1) * spacing * 0.5f;
-        for (int i = 0; i < definitions.Length; i++)
+        Vector3[] spawnPositions = BuildSpawnPositions();
+
+        for (int i = 0; i < selections.Count; i++)
         {
-            Vector3 position = new Vector3(startX + i * spacing, 0f, UnityEngine.Random.Range(-0.6f, 1.2f));
+            Vector3 position = i < spawnPositions.Length
+                ? spawnPositions[i]
+                : SampleSpawnPosition(fieldBounds.center);
             Quaternion rotation = Quaternion.Euler(0f, 180f + UnityEngine.Random.Range(-24f, 24f), 0f);
             IntroPetRuntimeSelection selection = selections[i];
-            SpawnAgent(definitions[i], selection.FurVariant, i, position, rotation);
+            IntroPetSpawnStatus status;
+            IntroPetAgent agent = CreateAgent(selection, agents.Count, position, rotation, out status);
+            if (agent != null)
+            {
+                agents.Add(agent);
+                RefreshAgentIndexes();
+            }
+
+            outcomes.Add(new IntroPetSpawnOutcome(selection, agent, status));
         }
+
+        return outcomes;
     }
 
     public IntroPetAgent ReplaceAgentVariant(IntroPetAgent oldAgent, IntroPetRuntimeSelection selection)
@@ -53,102 +89,346 @@ public sealed class IntroPetSpawner : MonoBehaviour
             return oldAgent;
         }
 
-        GameObject desiredPrefab = PetVariantApplier.GetPrefabForVariant(selection.Definition, selection.FurVariant);
-        if (desiredPrefab == null || desiredPrefab == oldAgent.SourcePrefab)
-        {
-            oldAgent.ApplyFurVariant(selection.FurVariant);
-            return oldAgent;
-        }
-
         int index = oldAgent.SelectionIndex;
         Vector3 position = oldAgent.transform.position;
         Quaternion rotation = oldAgent.transform.rotation;
         bool wasSelected = controller != null && controller.CurrentAgent == oldAgent;
 
+        IntroPetSpawnStatus status;
+        IntroPetAgent replacement = CreateAgent(selection, index, position, rotation, out status);
+        if (replacement == null)
+        {
+            oldAgent.ApplyFurVariant(selection.FurVariant);
+            return oldAgent;
+        }
+
         agents.Remove(oldAgent);
         Destroy(oldAgent.gameObject);
-
-        IntroPetAgent replacement = SpawnAgent(selection.Definition, selection.FurVariant, index, position, rotation);
-        if (replacement != null)
-        {
-            replacement.SetSelected(wasSelected, Camera.main);
-        }
+        agents.Insert(Mathf.Clamp(index, 0, agents.Count), replacement);
+        RefreshAgentIndexes();
+        replacement.SetSelected(wasSelected, Camera.main);
 
         return replacement;
     }
 
-    private IntroPetAgent SpawnAgent(IntroPetDefinition definition, FurVariantDefinition variant, int index, Vector3 position, Quaternion rotation)
+    private IntroPetAgent CreateAgent(IntroPetRuntimeSelection selection, int index, Vector3 position, Quaternion rotation, out IntroPetSpawnStatus status)
     {
-        GameObject prefab = PetVariantApplier.GetPrefabForVariant(definition, variant);
-        if (prefab == null)
+        status = IntroPetSpawnStatus.Failed;
+        IntroPetDefinition definition = selection != null ? selection.Definition : null;
+        FurVariantDefinition variant = selection != null ? selection.FurVariant : null;
+        if (definition == null)
         {
-            Debug.LogWarning("IntroPetSelection is missing a prefab for " + (definition != null ? definition.DisplayName : "an intro pet") + ".");
+            Debug.LogWarning("IntroPetSelection could not create an intro pet because the roster definition was null.");
             return null;
         }
 
-        GameObject instance = InstantiatePrefabObject(prefab, definition, variant, position, rotation);
+        bool usedBasePrefabFallback;
+        GameObject usedPrefab;
+        GameObject instance = InstantiatePrefabObject(definition, variant, position, rotation, out usedBasePrefabFallback, out usedPrefab);
         if (instance == null)
         {
             return null;
         }
 
+        Vector3 navMeshPosition;
+        if (TryResolveSpawnPoint(position, out navMeshPosition))
+        {
+            instance.transform.position = navMeshPosition;
+        }
+        else
+        {
+            navMeshPosition = instance.transform.position;
+            Debug.LogWarning("IntroPetSelection could not find an in-field NavMesh point for " + GetPetLabel(definition) + ". Spawning at fallback position " + navMeshPosition + ".");
+        }
+
         instance.name = "IntroPet_" + (definition != null ? definition.DisplayName : "Pet");
+        SelectedPetSessionData session = selection != null ? selection.ToSessionData() : SelectionToSession(definition, variant, index);
+        PawPalRoomPetHandle roomPet = BuildRuntimeRoomPet(instance, definition, session);
+        SnapRuntimePetToNavMesh(instance, navMeshPosition);
         IntroPetAgent agent = instance.GetComponent<IntroPetAgent>();
         if (agent == null)
         {
             agent = instance.AddComponent<IntroPetAgent>();
         }
 
-        agent.Initialize(controller, definition, variant, prefab, index, fieldBounds);
-        agents.Insert(Mathf.Clamp(index, 0, agents.Count), agent);
-        RefreshAgentIndexes();
+        agent.Initialize(controller, definition, variant, usedPrefab, index, roomPet);
+        if (usedBasePrefabFallback)
+        {
+            agent.ApplyFurVariant(variant);
+            status = IntroPetSpawnStatus.SpawnedWithBasePrefabFallback;
+            Debug.LogWarning("IntroPetSelection spawned " + GetPetLabel(definition) + " from the base prefab because variant '" + GetVariantLabel(variant) + "' could not be instantiated directly.");
+        }
+        else
+        {
+            status = IntroPetSpawnStatus.Spawned;
+        }
+
         return agent;
     }
 
+    private SelectedPetSessionData SelectionToSession(IntroPetDefinition definition, FurVariantDefinition variant, int index)
+    {
+        IntroPetRuntimeSelection selection = IntroPetRuntimeSelection.Create(definition, index);
+        selection.SetFurIndex(0);
+        selection.FurVariant = variant != null ? variant : selection.FurVariant;
+        return selection.ToSessionData();
+    }
+
+    private PawPalRoomPetHandle BuildRuntimeRoomPet(GameObject instance, IntroPetDefinition definition, SelectedPetSessionData session)
+    {
+        if (instance == null)
+        {
+            return null;
+        }
+
+        UnityEngine.AI.NavMeshAgent navMeshAgent = instance.GetComponent<UnityEngine.AI.NavMeshAgent>();
+        if (navMeshAgent == null)
+        {
+            navMeshAgent = instance.AddComponent<UnityEngine.AI.NavMeshAgent>();
+        }
+
+        if (definition != null && definition.Species == IntroPetSpecies.Cat)
+        {
+            PawPalCatRoomAgent catAgent = instance.GetComponent<PawPalCatRoomAgent>();
+            if (catAgent == null)
+            {
+                catAgent = instance.AddComponent<PawPalCatRoomAgent>();
+            }
+
+            catAgent.ConfigureRoomBounds(fieldBounds);
+            catAgent.Initialize(session);
+            return new PawPalRoomPetHandle(catAgent);
+        }
+
+        DogRoomAgent dogAgent = instance.GetComponent<DogRoomAgent>();
+        if (dogAgent == null)
+        {
+            dogAgent = instance.AddComponent<DogRoomAgent>();
+        }
+
+        dogAgent.SetRuntimeDogId(session != null ? session.RuntimePetId : string.Empty);
+        dogAgent.ConfigureRoomBounds(fieldBounds);
+        dogAgent.ApplySelectedPetPresentation(session);
+        return new PawPalRoomPetHandle(dogAgent);
+    }
+
+    private void SnapRuntimePetToNavMesh(GameObject instance, Vector3 candidate)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        NavMeshAgent navMeshAgent = instance.GetComponent<NavMeshAgent>();
+        if (navMeshAgent == null || !navMeshAgent.enabled)
+        {
+            return;
+        }
+
+        Vector3 resolved;
+        if (TryResolveSpawnPoint(candidate, out resolved))
+        {
+            if (!navMeshAgent.Warp(resolved))
+            {
+                Debug.LogWarning("IntroPetSelection failed to warp " + instance.name + " onto the intro NavMesh at " + resolved + ".");
+            }
+        }
+    }
+
     private GameObject InstantiatePrefabObject(
-        GameObject prefab,
         IntroPetDefinition definition,
         FurVariantDefinition variant,
         Vector3 position,
-        Quaternion rotation)
+        Quaternion rotation,
+        out bool usedBasePrefabFallback,
+        out GameObject usedPrefab)
     {
-        try
+        usedBasePrefabFallback = false;
+        usedPrefab = null;
+        GameObject preferredPrefab = variant != null && variant.VariantPrefab != null
+            ? variant.VariantPrefab
+            : (definition != null ? definition.BasePrefab : null);
+        if (preferredPrefab == null)
         {
-            UnityEngine.Object clone = UnityEngine.Object.Instantiate((UnityEngine.Object)prefab, position, rotation, transform);
-            if (clone is GameObject gameObject)
-            {
-                return gameObject;
-            }
-
-            if (clone is Component component)
-            {
-                return component.gameObject;
-            }
-
-            Debug.LogWarning(
-                "IntroPetSelection could not spawn "
-                + GetPetLabel(definition)
-                + " because the prefab reference resolved to "
-                + (clone != null ? clone.GetType().Name : "null")
-                + " instead of a GameObject.");
-
-            if (clone != null)
-            {
-                Destroy(clone);
-            }
+            Debug.LogWarning("IntroPetSelection is missing a prefab for " + GetPetLabel(definition) + ".");
+            return null;
         }
-        catch (InvalidCastException exception)
+
+        string preferredError;
+        if (PetVariantApplier.TryInstantiatePrefab(preferredPrefab, position, rotation, transform, out GameObject preferredInstance, out preferredError))
         {
-            Debug.LogWarning(
-                "IntroPetSelection could not spawn "
-                + GetPetLabel(definition)
-                + " from variant '"
-                + GetVariantLabel(variant)
-                + "' because its prefab reference is not a valid GameObject. "
-                + exception.Message);
+            usedPrefab = preferredPrefab;
+            return preferredInstance;
         }
+
+        GameObject basePrefab = definition != null ? definition.BasePrefab : null;
+        if (basePrefab != null && basePrefab != preferredPrefab)
+        {
+            string baseError;
+            if (PetVariantApplier.TryInstantiatePrefab(basePrefab, position, rotation, transform, out GameObject baseInstance, out baseError))
+            {
+                usedBasePrefabFallback = true;
+                usedPrefab = basePrefab;
+                return baseInstance;
+            }
+
+            preferredError = string.IsNullOrWhiteSpace(baseError) ? preferredError : preferredError + " " + baseError;
+        }
+
+        Debug.LogWarning(
+            "IntroPetSelection could not spawn "
+            + GetPetLabel(definition)
+            + " from variant '"
+            + GetVariantLabel(variant)
+            + "'. "
+            + preferredError);
 
         return null;
+    }
+
+    private Vector3[] BuildSpawnPositions()
+    {
+        Vector3 center = fieldBounds.center;
+        Vector3 extents = fieldBounds.extents;
+        Vector3[] candidates =
+        {
+            new Vector3(center.x - extents.x * 0.34f, fieldBounds.min.y, center.z + extents.z * 0.18f),
+            new Vector3(center.x - extents.x * 0.16f, fieldBounds.min.y, center.z + extents.z * 0.32f),
+            new Vector3(center.x + extents.x * 0.02f, fieldBounds.min.y, center.z + extents.z * 0.18f),
+            new Vector3(center.x + extents.x * 0.21f, fieldBounds.min.y, center.z + extents.z * 0.3f),
+            new Vector3(center.x + extents.x * 0.38f, fieldBounds.min.y, center.z + extents.z * 0.14f)
+        };
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            candidates[i] = SampleSpawnPosition(candidates[i]);
+        }
+
+        return candidates;
+    }
+
+    private Vector3 SampleSpawnPosition(Vector3 candidate)
+    {
+        Vector3 resolved;
+        if (TryResolveSpawnPoint(candidate, out resolved))
+        {
+            return resolved;
+        }
+
+        return ClampToField(candidate);
+    }
+
+    private bool TryResolveSpawnPoint(Vector3 candidate, out Vector3 position)
+    {
+        Vector3 clampedCandidate = ClampToField(candidate);
+        if (TrySampleNavMesh(clampedCandidate, 2.5f, out position))
+        {
+            return true;
+        }
+
+        Vector3 centerCandidate = ClampToField(new Vector3(fieldBounds.center.x, clampedCandidate.y, fieldBounds.center.z));
+        if (TrySampleNavMesh(centerCandidate, 4f, out position))
+        {
+            return true;
+        }
+
+        Vector3[] ringCandidates =
+        {
+            centerCandidate + new Vector3(-fieldBounds.extents.x * 0.18f, 0f, fieldBounds.extents.z * 0.16f),
+            centerCandidate + new Vector3(fieldBounds.extents.x * 0.18f, 0f, fieldBounds.extents.z * 0.16f),
+            centerCandidate + new Vector3(-fieldBounds.extents.x * 0.22f, 0f, -fieldBounds.extents.z * 0.08f),
+            centerCandidate + new Vector3(fieldBounds.extents.x * 0.22f, 0f, -fieldBounds.extents.z * 0.08f),
+            centerCandidate + new Vector3(0f, 0f, fieldBounds.extents.z * 0.24f)
+        };
+
+        for (int i = 0; i < ringCandidates.Length; i++)
+        {
+            if (TrySampleNavMesh(ClampToField(ringCandidates[i]), 4f, out position))
+            {
+                return true;
+            }
+        }
+
+        if (TryFindGridSample(clampedCandidate, out position))
+        {
+            return true;
+        }
+
+        position = ClampToField(centerCandidate);
+        if (Terrain.activeTerrain != null)
+        {
+            position.y = Terrain.activeTerrain.SampleHeight(position) + Terrain.activeTerrain.transform.position.y;
+        }
+
+        return false;
+    }
+
+    private bool TrySampleNavMesh(Vector3 candidate, float radius, out Vector3 position)
+    {
+        NavMeshHit navHit;
+        if (NavMesh.SamplePosition(candidate, out navHit, radius, NavMesh.AllAreas) && IsInsideField(navHit.position))
+        {
+            position = navHit.position;
+            return true;
+        }
+
+        position = Vector3.zero;
+        return false;
+    }
+
+    private bool TryFindGridSample(Vector3 preferred, out Vector3 position)
+    {
+        Vector3 bestPosition = Vector3.zero;
+        float bestDistance = float.PositiveInfinity;
+        bool found = false;
+        float minX = fieldBounds.min.x + 0.7f;
+        float maxX = fieldBounds.max.x - 0.7f;
+        float minZ = fieldBounds.min.z + 0.7f;
+        float maxZ = fieldBounds.max.z - 0.7f;
+        const int gridSteps = 6;
+
+        for (int x = 0; x <= gridSteps; x++)
+        {
+            float xLerp = gridSteps == 0 ? 0f : (float)x / gridSteps;
+            float sampleX = Mathf.Lerp(minX, maxX, xLerp);
+            for (int z = 0; z <= gridSteps; z++)
+            {
+                float zLerp = gridSteps == 0 ? 0f : (float)z / gridSteps;
+                Vector3 candidate = new Vector3(sampleX, preferred.y, Mathf.Lerp(minZ, maxZ, zLerp));
+                Vector3 sampled;
+                if (!TrySampleNavMesh(candidate, 1.75f, out sampled))
+                {
+                    continue;
+                }
+
+                float distance = (sampled - preferred).sqrMagnitude;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestPosition = sampled;
+                    found = true;
+                }
+            }
+        }
+
+        position = found ? bestPosition : Vector3.zero;
+        return found;
+    }
+
+    private Vector3 ClampToField(Vector3 candidate)
+    {
+        return new Vector3(
+            Mathf.Clamp(candidate.x, fieldBounds.min.x + 0.7f, fieldBounds.max.x - 0.7f),
+            candidate.y,
+            Mathf.Clamp(candidate.z, fieldBounds.min.z + 0.7f, fieldBounds.max.z - 0.7f));
+    }
+
+    private bool IsInsideField(Vector3 position)
+    {
+        return position.x >= fieldBounds.min.x - 0.05f
+            && position.x <= fieldBounds.max.x + 0.05f
+            && position.z >= fieldBounds.min.z - 0.05f
+            && position.z <= fieldBounds.max.z + 0.05f;
     }
 
     private void Clear()

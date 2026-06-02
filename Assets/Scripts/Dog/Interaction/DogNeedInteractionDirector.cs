@@ -99,10 +99,10 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             return false;
         }
 
-        DogRoomAgent dog = ResolveActiveDog();
-        if (dog == null)
+        PawPalRoomPetHandle pet = ResolveActivePet();
+        if (pet == null || !pet.IsValid)
         {
-            Debug.LogWarning("DogNeedInteractionDirector could not start because no active DogRoomAgent was found.");
+            Debug.LogWarning("DogNeedInteractionDirector could not start because no active room pet was found.");
             return false;
         }
 
@@ -113,13 +113,13 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             return false;
         }
 
-        dog.WakeForPlayerInteraction();
-        if (!dog.PrepareForPlayerInteraction(true))
+        pet.WakeForPlayerInteraction();
+        if (!pet.PrepareForPlayerInteraction(true))
         {
             return false;
         }
 
-        activeRoutine = StartCoroutine(InteractionRoutine(dog, prefab, need, onCompleted));
+        activeRoutine = StartCoroutine(InteractionRoutine(pet, prefab, need, onCompleted));
         return true;
     }
 
@@ -152,45 +152,45 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return null;
     }
 
-    private IEnumerator InteractionRoutine(DogRoomAgent dog, GameObject bowlPrefab, PawPalDogNeed need, Action onCompleted)
+    private IEnumerator InteractionRoutine(PawPalRoomPetHandle pet, GameObject bowlPrefab, PawPalDogNeed need, Action onCompleted)
     {
         bool completed = false;
         int cameraFocusId = 0;
         try
         {
-            dog.PauseForSocial(false);
+            pet.PauseForSocial(false);
 
             activeBowl = Instantiate(bowlPrefab);
             activeBowl.name = bowlPrefab.name;
-            PositionBowl(activeBowl, dog);
+            PositionBowl(activeBowl, pet);
 
             DogCycleCamera resolvedDogCamera = ResolveDogCamera();
-            if (resolvedDogCamera != null)
+            if (resolvedDogCamera != null && pet.RootTransform != null)
             {
-                cameraFocusId = resolvedDogCamera.BeginPairFocus(dog.transform, activeBowl.transform, DogCameraFocusPriority.NeedInteraction, cameraFocusOffset);
+                cameraFocusId = resolvedDogCamera.BeginPairFocus(pet.RootTransform, activeBowl.transform, DogCameraFocusPriority.NeedInteraction, cameraFocusOffset);
             }
 
-            Vector3 approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
-            yield return dog.MoveNearPrecise(approachPoint, moveTimeout, DogMovementPace.Walk, preciseArrivalDistance);
-            if (!IsDogCloseEnoughForBowlUse(dog, activeBowl.transform.position, approachPoint))
+            Vector3 approachPoint = ResolveApproachPoint(pet, activeBowl.transform.position);
+            yield return pet.MoveNearPrecise(approachPoint, moveTimeout, DogMovementPace.Walk, preciseArrivalDistance);
+            if (!IsPetCloseEnoughForBowlUse(pet, activeBowl.transform.position, approachPoint))
             {
-                approachPoint = ResolveApproachPoint(dog, activeBowl.transform.position);
-                yield return dog.MoveNearPrecise(
+                approachPoint = ResolveApproachPoint(pet, activeBowl.transform.position);
+                yield return pet.MoveNearPrecise(
                     approachPoint,
                     Mathf.Max(1f, moveTimeout * 0.45f),
                     DogMovementPace.Walk,
                     preciseArrivalDistance);
 
-                if (!IsDogCloseEnoughForBowlUse(dog, activeBowl.transform.position, approachPoint))
+                if (!IsPetCloseEnoughForBowlUse(pet, activeBowl.transform.position, approachPoint))
                 {
-                    Debug.LogWarning("DogNeedInteractionDirector: " + dog.name + " could not reach a natural bowl-use position.");
+                    Debug.LogWarning("DogNeedInteractionDirector: " + pet.DisplayName + " could not reach a natural bowl-use position.");
                     yield break;
                 }
             }
 
-            yield return dog.FaceTarget(activeBowl.transform, faceDuration);
-            StartCoroutine(PlayBowlUseAudio(dog, activeBowl.transform, need, useLoopDuration));
-            yield return dog.PlayBowlUse(need == PawPalDogNeed.Water, useLoopDuration);
+            yield return pet.FaceTarget(activeBowl.transform, faceDuration);
+            StartCoroutine(PlayBowlUseAudio(pet.RootTransform, activeBowl.transform, need, useLoopDuration));
+            yield return pet.PlayBowlUse(need == PawPalDogNeed.Water, useLoopDuration);
 
             completed = true;
             if (onCompleted != null)
@@ -208,9 +208,9 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 
             CleanupActiveBowl();
 
-            if (dog != null && dog.isActiveAndEnabled)
+            if (pet != null && pet.IsValid)
             {
-                dog.StartRoaming();
+                pet.StartRoaming();
             }
 
             activeRoutine = null;
@@ -222,55 +222,16 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
     }
 
-    private DogRoomAgent ResolveActiveDog()
+    private PawPalRoomPetHandle ResolveActivePet()
     {
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null || dogs.Length == 0)
-        {
-            return null;
-        }
-
-        if (runtime != null && runtime.ActiveDog != null && !string.IsNullOrEmpty(runtime.ActiveDog.Id))
-        {
-            string activeDogId = runtime.ActiveDog.Id;
-            for (int i = 0; i < dogs.Length; i++)
-            {
-                DogRoomAgent candidate = dogs[i];
-                if (candidate != null
-                    && candidate.HasExplicitDogId
-                    && string.Equals(candidate.DogId, activeDogId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        if (runtime != null)
-        {
-            int index = Mathf.Clamp(runtime.ActiveDogIndex, 0, dogs.Length - 1);
-            if (dogs[index] != null)
-            {
-                return dogs[index];
-            }
-        }
-
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            if (dogs[i] != null)
-            {
-                return dogs[i];
-            }
-        }
-
-        return null;
+        return PawPalRoomPetRuntime.ResolveActivePet();
     }
 
-    private void PositionBowl(GameObject bowl, DogRoomAgent dog)
+    private void PositionBowl(GameObject bowl, PawPalRoomPetHandle pet)
     {
-        Vector3 requestedPosition = ResolveCameraSpawnPosition(dog);
+        Vector3 requestedPosition = ResolveCameraSpawnPosition(pet);
         Vector3 roomPoint;
-        if (dog.TryGetRoomSafePoint(requestedPosition, 1.25f, out roomPoint))
+        if (pet.TryGetRoomSafePoint(requestedPosition, 1.25f, out roomPoint))
         {
             requestedPosition = roomPoint;
         }
@@ -278,7 +239,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         Vector3 floorPosition = ResolveFloorPosition(bowl, requestedPosition);
         bowl.transform.position = floorPosition;
 
-        Vector3 lookDirection = dog.transform.position - floorPosition;
+        Vector3 lookDirection = pet.RootTransform.position - floorPosition;
         lookDirection.y = 0f;
         if (lookDirection.sqrMagnitude > 0.001f)
         {
@@ -286,25 +247,25 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
     }
 
-    private Vector3 ResolveCameraSpawnPosition(DogRoomAgent dog)
+    private Vector3 ResolveCameraSpawnPosition(PawPalRoomPetHandle pet)
     {
         Camera camera = ResolveRoomCamera();
         if (camera == null)
         {
-            return dog.transform.position + dog.transform.forward * 0.85f;
+            return pet.RootTransform.position + pet.RootTransform.forward * 0.85f;
         }
 
         Vector3 forward = camera.transform.forward;
         forward.y = 0f;
         if (forward.sqrMagnitude < 0.001f)
         {
-            forward = dog.transform.position - camera.transform.position;
+            forward = pet.RootTransform.position - camera.transform.position;
             forward.y = 0f;
         }
 
         if (forward.sqrMagnitude < 0.001f)
         {
-            forward = dog.transform.forward;
+            forward = pet.RootTransform.forward;
         }
 
         return camera.transform.position + forward.normalized * Mathf.Max(0.2f, spawnDistanceFromCamera);
@@ -323,12 +284,12 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return requestedPosition + Vector3.up * (bottomOffset + bowlFloorPadding);
     }
 
-    private Vector3 ResolveApproachPoint(DogRoomAgent dog, Vector3 bowlPosition)
+    private Vector3 ResolveApproachPoint(PawPalRoomPetHandle pet, Vector3 bowlPosition)
     {
-        float approachDistance = GetEffectiveBowlApproachDistance(dog);
-        Vector3 preferredDirection = ResolvePreferredApproachDirection(dog, bowlPosition);
+        float approachDistance = GetEffectiveBowlApproachDistance(pet);
+        Vector3 preferredDirection = ResolvePreferredApproachDirection(pet, bowlPosition);
         Vector3 preferredPoint;
-        if (TryResolveApproachCandidate(dog, bowlPosition, preferredDirection, approachDistance, out preferredPoint))
+        if (TryResolveApproachCandidate(pet, bowlPosition, preferredDirection, approachDistance, out preferredPoint))
         {
             return preferredPoint;
         }
@@ -342,7 +303,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             float angle = preferredYaw + side * step * (180f / candidateCount);
             Vector3 direction = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
             Vector3 point;
-            if (TryResolveApproachCandidate(dog, bowlPosition, direction, approachDistance, out point))
+            if (TryResolveApproachCandidate(pet, bowlPosition, direction, approachDistance, out point))
             {
                 return point;
             }
@@ -350,7 +311,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 
         Vector3 requested = bowlPosition + preferredDirection * approachDistance;
         Vector3 safePoint;
-        if (dog.TryGetRoomSafePoint(requested, 0.25f, out safePoint))
+        if (pet.TryGetRoomSafePoint(requested, 0.25f, out safePoint))
         {
             return safePoint;
         }
@@ -358,7 +319,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return requested;
     }
 
-    private bool TryResolveApproachCandidate(DogRoomAgent dog, Vector3 bowlPosition, Vector3 direction, float approachDistance, out Vector3 point)
+    private bool TryResolveApproachCandidate(PawPalRoomPetHandle pet, Vector3 bowlPosition, Vector3 direction, float approachDistance, out Vector3 point)
     {
         direction.y = 0f;
         if (direction.sqrMagnitude < 0.001f)
@@ -368,29 +329,25 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
 
         Vector3 requested = bowlPosition + direction.normalized * approachDistance;
-        if (!dog.TryGetRoomSafePoint(requested, 0.25f, out point))
+        if (!pet.TryGetRoomSafePoint(requested, 0.25f, out point))
         {
             return false;
         }
 
-        return IsPointClearOfOtherDogs(point, dog, Mathf.Max(0.25f, otherDogClearanceRadius * 0.55f));
+        return IsPointClearOfOtherPets(point, pet.RootTransform, Mathf.Max(0.25f, otherDogClearanceRadius * 0.55f));
     }
 
-    private static bool IsPointClearOfOtherDogs(Vector3 point, DogRoomAgent ignoredDog, float radius)
+    private static bool IsPointClearOfOtherPets(Vector3 point, Transform ignoredRoot, float radius)
     {
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null)
-        {
-            return true;
-        }
-
         float sqrRadius = Mathf.Max(0f, radius) * Mathf.Max(0f, radius);
         Vector3 flatPoint = point;
         flatPoint.y = 0f;
+
+        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
         for (int i = 0; i < dogs.Length; i++)
         {
             DogRoomAgent otherDog = dogs[i];
-            if (otherDog == null || otherDog == ignoredDog)
+            if (otherDog == null || otherDog.transform == ignoredRoot)
             {
                 continue;
             }
@@ -403,10 +360,27 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             }
         }
 
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < cats.Length; i++)
+        {
+            PawPalCatRoomAgent cat = cats[i];
+            if (cat == null || cat.transform == ignoredRoot)
+            {
+                continue;
+            }
+
+            Vector3 otherPosition = cat.transform.position;
+            otherPosition.y = 0f;
+            if ((otherPosition - flatPoint).sqrMagnitude < sqrRadius)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
-    private Vector3 ResolvePreferredApproachDirection(DogRoomAgent dog, Vector3 bowlPosition)
+    private Vector3 ResolvePreferredApproachDirection(PawPalRoomPetHandle pet, Vector3 bowlPosition)
     {
         Camera camera = ResolveRoomCamera();
         if (camera != null)
@@ -419,21 +393,21 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             }
         }
 
-        Vector3 fromBowlToDog = dog.transform.position - bowlPosition;
+        Vector3 fromBowlToDog = pet.RootTransform.position - bowlPosition;
         fromBowlToDog.y = 0f;
         if (fromBowlToDog.sqrMagnitude > 0.001f)
         {
             return fromBowlToDog.normalized;
         }
 
-        Vector3 fallback = -dog.transform.forward;
+        Vector3 fallback = -pet.RootTransform.forward;
         fallback.y = 0f;
         return fallback.sqrMagnitude > 0.001f ? fallback.normalized : Vector3.back;
     }
 
-    private bool IsDogCloseEnoughForBowlUse(DogRoomAgent dog, Vector3 bowlPosition, Vector3 approachPoint)
+    private bool IsPetCloseEnoughForBowlUse(PawPalRoomPetHandle pet, Vector3 bowlPosition, Vector3 approachPoint)
     {
-        Vector3 dogPosition = dog.transform.position;
+        Vector3 dogPosition = pet.RootTransform.position;
         dogPosition.y = 0f;
         Vector3 flatBowlPosition = bowlPosition;
         flatBowlPosition.y = 0f;
@@ -443,17 +417,17 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         float approachDistance = Vector3.Distance(dogPosition, flatApproachPoint);
         float bowlDistance = Vector3.Distance(dogPosition, flatBowlPosition);
         return approachDistance <= Mathf.Max(0.08f, preciseArrivalDistance * 3f)
-            && bowlDistance <= Mathf.Max(GetEffectiveBowlApproachDistance(dog) + 0.18f, maxBowlUsePlanarDistance);
+            && bowlDistance <= Mathf.Max(GetEffectiveBowlApproachDistance(pet) + 0.18f, maxBowlUsePlanarDistance);
     }
 
-    private float GetEffectiveBowlApproachDistance(DogRoomAgent dog)
+    private float GetEffectiveBowlApproachDistance(PawPalRoomPetHandle pet)
     {
         float mediumDistance = dogApproachDistance > 0f ? dogApproachDistance : 0.28f;
         float smallDistance = Mathf.Min(mediumDistance, smallDogApproachDistance > 0f ? smallDogApproachDistance : 0.2f);
         float largeDistance = Mathf.Max(mediumDistance, largeDogApproachDistance > 0f ? largeDogApproachDistance : 0.38f);
 
         float size01;
-        if (!TryGetDogBowlApproachSize01(dog, out size01))
+        if (!TryGetPetBowlApproachSize01(pet, out size01))
         {
             return Mathf.Clamp(mediumDistance, MinRuntimeBowlApproachDistance, MaxRuntimeBowlApproachDistance);
         }
@@ -465,16 +439,16 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return Mathf.Clamp(distance, MinRuntimeBowlApproachDistance, MaxRuntimeBowlApproachDistance);
     }
 
-    private bool TryGetDogBowlApproachSize01(DogRoomAgent dog, out float size01)
+    private bool TryGetPetBowlApproachSize01(PawPalRoomPetHandle pet, out float size01)
     {
         size01 = 0.5f;
-        if (dog == null)
+        if (pet == null || !pet.IsValid || pet.RootTransform == null)
         {
             return false;
         }
 
         Bounds bounds;
-        if (TryGetRendererBounds(dog.gameObject, out bounds))
+        if (TryGetRendererBounds(pet.RootTransform.gameObject, out bounds))
         {
             float planarSize = Mathf.Max(bounds.size.x, bounds.size.z);
             float heightAdjustedSize = bounds.size.y * 1.15f;
@@ -484,7 +458,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             size01 = Mathf.InverseLerp(minSize, maxSize, sizeMetric);
         }
 
-        string dogName = dog.name;
+        string dogName = pet.DisplayName;
         if (ContainsIgnoreCase(dogName, "puppy"))
         {
             size01 = Mathf.Min(size01, 0.18f);
@@ -512,16 +486,16 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return Vector3.Distance(point, start + segment * t);
     }
 
-    private IEnumerator PlayBowlUseAudio(DogRoomAgent dog, Transform bowl, PawPalDogNeed need, float duration)
+    private IEnumerator PlayBowlUseAudio(Transform petRoot, Transform bowl, PawPalDogNeed need, float duration)
     {
         AudioClip clip = need == PawPalDogNeed.Water ? drinkingClip : eatingClip;
-        if (clip == null || dog == null)
+        if (clip == null || petRoot == null)
         {
             yield break;
         }
 
-        GameObject audioObject = new GameObject(dog.name + "_" + need + "Audio");
-        audioObject.transform.position = bowl != null ? bowl.position : dog.transform.position;
+        GameObject audioObject = new GameObject(petRoot.name + "_" + need + "Audio");
+        audioObject.transform.position = bowl != null ? bowl.position : petRoot.position;
 
         AudioSource source = audioObject.AddComponent<AudioSource>();
         source.clip = clip;

@@ -11,7 +11,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
     private PawPalPhotoModeView view;
     private PawPalPhotoDogCommandDirector photoDogCommands;
     private DogCycleCamera dogCamera;
-    private DogRoomAgent activeDog;
+    private PawPalRoomPetHandle activePet;
     private Texture2D pendingCapture;
     private Coroutine captureRoutine;
     private bool active;
@@ -64,26 +64,44 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
     public bool TryEnterPhotoMode()
     {
         dogCamera = ResolveDogCamera();
-        activeDog = ResolvePreferredDog(dogCamera);
+        activePet = ResolvePreferredPet(dogCamera);
 
-        if (dogCamera == null || activeDog == null)
+        if (activePet == null || !activePet.IsValid)
         {
             if (view != null)
             {
-                view.ShowToast("Photo mode needs a dog camera.");
+                view.ShowToast("Photo mode needs an active pet.");
             }
 
             return false;
         }
 
-        if (!dogCamera.EnterPhotoMode(activeDog))
+        if (activePet.IsDog)
         {
-            if (view != null)
+            if (dogCamera == null || !dogCamera.EnterPhotoMode(activePet.DogAgent))
             {
-                view.ShowToast("Photo mode could not start.");
+                if (view != null)
+                {
+                    view.ShowToast("Photo mode could not start.");
+                }
+
+                return false;
+            }
+        }
+        else
+        {
+            PawPalPetFollowCamera followCamera = EnsurePetFollowCamera();
+            if (followCamera == null)
+            {
+                if (view != null)
+                {
+                    view.ShowToast("Photo mode needs a camera.");
+                }
+
+                return false;
             }
 
-            return false;
+            followCamera.Focus(activePet.FocusTransform, activePet.HomeCameraOffset, true);
         }
 
         active = true;
@@ -94,7 +112,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         if (view != null)
         {
             view.ShowLiveMode();
-            view.SetZoom01(dogCamera.PhotoZoom01);
+            view.SetZoom01(dogCamera != null ? dogCamera.PhotoZoom01 : 0.35f);
         }
 
         RequestDogAttention(1.75f);
@@ -128,7 +146,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
 
         dogCamera = null;
-        activeDog = null;
+        activePet = null;
         active = false;
         HideView();
 
@@ -199,23 +217,30 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private void HandlePoseSelected(PawPalPhotoPoseId poseId)
     {
-        if (!active || dogCamera == null)
+        if (!active)
         {
             return;
         }
 
-        activeDog = ResolvePreferredDog(dogCamera);
-        dogCamera.FocusPhotoModeOnActiveDog();
+        activePet = ResolvePreferredPet(dogCamera);
+        if (dogCamera != null && activePet != null && activePet.IsDog)
+        {
+            dogCamera.FocusPhotoModeOnActiveDog();
+        }
 
         string failureReason;
-        if (photoDogCommands != null && !photoDogCommands.TryPose(activeDog, ResolvePhotoCamera(), poseId, out failureReason) && view != null)
+        if (photoDogCommands != null && !photoDogCommands.TryPose(activePet, ResolvePhotoCamera(), poseId, out failureReason) && view != null)
         {
             view.ShowToast(string.IsNullOrEmpty(failureReason) ? "That pose is not available." : failureReason);
         }
 
-        if (view != null)
+        if (view != null && dogCamera != null)
         {
             view.SetZoom01(dogCamera.PhotoZoom01);
+        }
+        else if (view != null)
+        {
+            view.SetZoom01(0.35f);
         }
     }
 
@@ -226,9 +251,9 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
             return;
         }
 
-        activeDog = ResolvePreferredDog(dogCamera);
+        activePet = ResolvePreferredPet(dogCamera);
         string failureReason = string.Empty;
-        if (photoDogCommands != null && photoDogCommands.TryWhistle(activeDog, ResolvePhotoCamera(), out failureReason))
+        if (photoDogCommands != null && photoDogCommands.TryWhistle(activePet, ResolvePhotoCamera(), out failureReason))
         {
             RequestDogAttention(4f);
             return;
@@ -253,8 +278,8 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
 
         PawPalDogState dogState = PawPalGameRuntime.Instance != null ? PawPalGameRuntime.Instance.ActiveDog : null;
-        string dogId = dogState != null ? dogState.Id : activeDog != null ? activeDog.DogId : string.Empty;
-        string dogName = dogState != null ? dogState.DisplayName : activeDog != null ? activeDog.name : "Dog";
+        string dogId = dogState != null ? dogState.Id : activePet != null ? activePet.RuntimePetId : string.Empty;
+        string dogName = dogState != null ? dogState.DisplayName : activePet != null ? activePet.DisplayName : "Pet";
 
         PawPalPhotoRecord record = albumStore.SavePhoto(pendingCapture, dogId, dogName);
         DestroyPendingCapture();
@@ -456,13 +481,13 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private void RequestDogAttention(float duration)
     {
-        DogRoomAgent dog = activeDog != null ? activeDog : ResolvePreferredDog(dogCamera);
-        if (dog == null)
+        PawPalRoomPetHandle pet = activePet != null && activePet.IsValid ? activePet : ResolvePreferredPet(dogCamera);
+        if (pet == null || !pet.IsValid)
         {
             return;
         }
 
-        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
+        DogCameraAttention attention = pet.RootTransform != null ? pet.RootTransform.GetComponentInChildren<DogCameraAttention>(true) : null;
         if (attention != null)
         {
             attention.RequestCameraAttention(duration);
@@ -513,6 +538,16 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private Camera ResolvePhotoCamera()
     {
+        PawPalPetFollowCamera followCamera = EnsurePetFollowCamera();
+        if (followCamera != null && activePet != null && !activePet.IsDog)
+        {
+            Camera follow = followCamera.GetComponent<Camera>();
+            if (follow != null)
+            {
+                return follow;
+            }
+        }
+
         if (dogCamera != null)
         {
             Camera camera = dogCamera.GetComponent<Camera>();
@@ -525,46 +560,45 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         return Camera.main;
     }
 
-    private DogRoomAgent ResolvePreferredDog(DogCycleCamera camera)
+    private PawPalRoomPetHandle ResolvePreferredPet(DogCycleCamera camera)
     {
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-
-        if (runtime != null && runtime.ActiveDog != null && agents != null)
+        PawPalRoomPetHandle runtimePet = PawPalRoomPetRuntime.ResolveActivePet();
+        if (runtimePet != null && runtimePet.IsValid)
         {
-            string activeDogId = runtime.ActiveDog.Id;
-            if (!string.IsNullOrEmpty(activeDogId))
-            {
-                for (int i = 0; i < agents.Length; i++)
-                {
-                    DogRoomAgent agent = agents[i];
-                    if (agent != null && agent.HasExplicitDogId && string.Equals(agent.DogId, activeDogId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return agent;
-                    }
-                }
-            }
-
-            if (runtime.ActiveDogIndex >= 0 && runtime.ActiveDogIndex < agents.Length)
-            {
-                return agents[runtime.ActiveDogIndex];
-            }
+            return runtimePet;
         }
 
         Transform activeTarget = camera != null ? camera.ActiveTarget : null;
-        DogRoomAgent cameraDog = activeTarget != null ? activeTarget.GetComponentInParent<DogRoomAgent>() : null;
-        if (cameraDog != null)
+        PawPalRoomPetHandle cameraPet = PawPalRoomPetRuntime.ResolveFromTransform(activeTarget);
+        if (cameraPet != null && cameraPet.IsValid)
         {
-            return cameraDog;
+            return cameraPet;
         }
 
-        return agents != null && agents.Length > 0 ? agents[0] : null;
+        return null;
     }
 
     private bool HasSceneDogs()
     {
         DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
         return agents != null && agents.Length > 0;
+    }
+
+    private PawPalPetFollowCamera EnsurePetFollowCamera()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return null;
+        }
+
+        PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
+        if (followCamera == null)
+        {
+            followCamera = mainCamera.gameObject.AddComponent<PawPalPetFollowCamera>();
+        }
+
+        return followCamera;
     }
 
     private void DestroyPendingCapture()

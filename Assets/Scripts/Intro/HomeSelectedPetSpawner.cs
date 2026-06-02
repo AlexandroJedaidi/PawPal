@@ -1,9 +1,7 @@
 using System.Collections;
-using TMPro;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 
 public sealed class HomeSelectedPetSpawner : MonoBehaviour
 {
@@ -62,7 +60,7 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         Transform defaultDogAnchor = DisableDefaultSceneDogs();
         if (selection.Species == IntroPetSpecies.Cat)
         {
-            SpawnCat(selection, defaultDogAnchor);
+            SpawnCat(selection, defaultDogAnchor, runtime);
         }
         else
         {
@@ -130,14 +128,30 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
 
         if (runtime != null)
         {
-            runtime.RegisterTemporaryIntroDog(selection.BuildTemporaryDogState(), true);
+            runtime.RegisterTemporaryIntroPet(selection.BuildTemporaryDogState(), selection.Species, true);
+        }
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera != null)
+        {
+            PawPalPetFollowCamera petFollowCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
+            if (petFollowCamera != null)
+            {
+                petFollowCamera.enabled = false;
+            }
+
+            DogCycleCamera dogCamera = mainCamera.GetComponent<DogCycleCamera>();
+            if (dogCamera != null)
+            {
+                dogCamera.enabled = true;
+            }
         }
 
         PawPalIntroSceneFlow.SetAppShellVisible(true);
         DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
     }
 
-    private static void SpawnCat(SelectedPetSessionData selection, Transform defaultDogAnchor)
+    private static void SpawnCat(SelectedPetSessionData selection, Transform defaultDogAnchor, PawPalGameRuntime runtime)
     {
         GameObject petObject = InstantiateSelectedPet(selection, defaultDogAnchor, "SelectedIntroCat");
         if (petObject == null)
@@ -145,22 +159,33 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
             return;
         }
 
-        PetHomeAgent homeAgent = petObject.GetComponent<PetHomeAgent>();
-        if (homeAgent == null)
+        NavMeshAgent navMeshAgent = petObject.GetComponent<NavMeshAgent>();
+        if (navMeshAgent == null)
         {
-            homeAgent = petObject.AddComponent<PetHomeAgent>();
+            navMeshAgent = petObject.AddComponent<NavMeshAgent>();
         }
 
-        homeAgent.Initialize(selection);
-        PawPalIntroSceneFlow.SetAppShellVisible(false);
-        FocusCameraOnCat(petObject.transform, selection.Definition.HomeCameraOffset);
-        CreateCatHomePresentation(selection);
+        PawPalCatRoomAgent catAgent = petObject.GetComponent<PawPalCatRoomAgent>();
+        if (catAgent == null)
+        {
+            catAgent = petObject.AddComponent<PawPalCatRoomAgent>();
+        }
+
+        catAgent.Initialize(selection);
+        if (runtime != null)
+        {
+            runtime.RegisterTemporaryIntroPet(selection.BuildTemporaryDogState(), selection.Species, true);
+        }
+
+        PawPalIntroSceneFlow.SetAppShellVisible(true);
+        FocusCameraOnCat(catAgent);
     }
 
     private static GameObject InstantiateSelectedPet(SelectedPetSessionData selection, Transform defaultDogAnchor, string namePrefix)
     {
-        GameObject prefab = PetVariantApplier.GetPrefabForVariant(selection.Definition, selection.FurVariant);
-        if (prefab == null)
+        GameObject preferredPrefab = PetVariantApplier.GetPrefabForVariant(selection.Definition, selection.FurVariant);
+        GameObject basePrefab = selection.Definition != null ? selection.Definition.BasePrefab : null;
+        if (preferredPrefab == null && basePrefab == null)
         {
             Debug.LogWarning("HomeSelectedPetSpawner could not spawn " + selection.SafeName + " because the selected intro prefab is missing.");
             return null;
@@ -168,7 +193,30 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
 
         Vector3 position = defaultDogAnchor != null ? defaultDogAnchor.position : Vector3.zero;
         Quaternion rotation = defaultDogAnchor != null ? defaultDogAnchor.rotation : Quaternion.Euler(0f, 180f, 0f);
-        GameObject petObject = Instantiate(prefab, position, rotation);
+        string preferredError;
+        GameObject petObject;
+        if (!PetVariantApplier.TryInstantiatePrefab(preferredPrefab != null ? preferredPrefab : basePrefab, position, rotation, null, out petObject, out preferredError))
+        {
+            if (basePrefab != null && basePrefab != preferredPrefab)
+            {
+                string baseError;
+                if (PetVariantApplier.TryInstantiatePrefab(basePrefab, position, rotation, null, out petObject, out baseError))
+                {
+                    PetVariantApplier.ApplyMaterial(petObject, selection.FurVariant);
+                }
+                else
+                {
+                    Debug.LogWarning("HomeSelectedPetSpawner could not spawn " + selection.SafeName + ". " + preferredError + " " + baseError);
+                    return null;
+                }
+            }
+            else
+            {
+                Debug.LogWarning("HomeSelectedPetSpawner could not spawn " + selection.SafeName + ". " + preferredError);
+                return null;
+            }
+        }
+
         petObject.name = namePrefix + "_" + selection.SafeName;
 
         if (selection.Definition.HomeScale != Vector3.zero)
@@ -179,10 +227,10 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         return petObject;
     }
 
-    private static void FocusCameraOnCat(Transform target, Vector3 offset)
+    private static void FocusCameraOnCat(PawPalCatRoomAgent catAgent)
     {
         Camera camera = Camera.main;
-        if (camera == null || target == null)
+        if (camera == null || catAgent == null)
         {
             return;
         }
@@ -199,47 +247,13 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
             legacyFollow.enabled = false;
         }
 
-        Vector3 focusPoint = target.position + Vector3.up * 0.55f;
-        Vector3 cameraOffset = offset == Vector3.zero ? new Vector3(0f, 1.1f, -3.1f) : offset;
-        camera.transform.position = target.position + cameraOffset;
-        camera.transform.rotation = Quaternion.LookRotation(focusPoint - camera.transform.position, Vector3.up);
-    }
+        PawPalPetFollowCamera followCamera = camera.GetComponent<PawPalPetFollowCamera>();
+        if (followCamera == null)
+        {
+            followCamera = camera.gameObject.AddComponent<PawPalPetFollowCamera>();
+        }
 
-    private static void CreateCatHomePresentation(SelectedPetSessionData selection)
-    {
-        GameObject canvasObject = new GameObject("CatHomePresentationCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        Canvas canvas = canvasObject.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 40;
-
-        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(UiTheme.ReferenceWidth, UiTheme.ReferenceHeight);
-        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-
-        RectTransform root = UiFactory.CreateRect("SafeAreaRoot", canvasObject.transform);
-        UiFactory.Stretch(root, 0f, 0f, 0f, 0f);
-        root.gameObject.AddComponent<SafeAreaFitter>();
-
-        Image panel = UiFactory.CreateImage("CatInfoPanel", root, UiTheme.RoundedTenSprite, UiTheme.NavBackgroundCream);
-        UiFactory.AnchorBottomStretch(panel.rectTransform, 18f, 18f, 18f, 88f);
-
-        string headline = selection.SafeName + " the " + selection.BreedName;
-        TextMeshProUGUI title = UiFactory.CreateLabel("Title", panel.rectTransform, headline, 18, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
-        title.font = UiTheme.NavExtraBoldFont;
-        title.enableAutoSizing = true;
-        title.fontSizeMin = 12f;
-        UiFactory.Stretch(title.rectTransform, 16f, 37f, 16f, 12f);
-
-        string detailText = IntroPetFormatting.FormatGender(selection.Gender)
-            + " - "
-            + IntroPetFormatting.FormatPersonality(selection.Personality)
-            + " - "
-            + (selection.FurVariant != null ? selection.FurVariant.SafeDisplayName : "Default");
-        TextMeshProUGUI detail = UiFactory.CreateLabel("Detail", panel.rectTransform, detailText, 12, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Left);
-        detail.font = UiTheme.NavRegularFont;
-        detail.enableAutoSizing = true;
-        detail.fontSizeMin = 9f;
-        UiFactory.Stretch(detail.rectTransform, 16f, 12f, 16f, 44f);
+        followCamera.enabled = true;
+        followCamera.Focus(catAgent.FocusTransform, catAgent.HomeCameraOffset, true);
     }
 }

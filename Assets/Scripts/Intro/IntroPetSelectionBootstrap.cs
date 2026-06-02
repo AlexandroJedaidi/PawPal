@@ -2,6 +2,8 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+using Unity.AI.Navigation;
+using UnityEngine.AI;
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -9,11 +11,21 @@ using UnityEditor.SceneManagement;
 
 public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 {
-    private const float FieldHalfSize = 6f;
     private const string RuntimeRootName = "IntroSceneRuntime";
+    private const string RuntimeNavMeshRootName = "IntroRuntimeNavMesh";
+    private const string RuntimeWalkSurfaceName = "IntroWalkSurface";
     private const string EditorPreviewRootName = RuntimeRootName;
     private const string EditorPreviewCameraName = "Main Camera";
     private const string EditorPreviewLightName = "Warm Sun";
+    private static readonly string[] IntroToyNames =
+    {
+        "Toy_BallLeft",
+        "Toy_BallRight",
+        "Toy_BoneCenter",
+        "Big_ball_1",
+        "BallHole_1",
+        "Bone_2"
+    };
     private static IntroPetSelectionBootstrap instance;
 #if UNITY_EDITOR
     private static IntroBackdropRingController editorPreviewController;
@@ -87,7 +99,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         EnsureEventSystem();
         Camera sceneCamera = EnsureCamera();
         BuildLighting();
-        EnvironmentBuildResult environment = BuildFieldEnvironment();
+        EnvironmentBuildResult environment = BuildFieldEnvironment(sceneCamera);
 
         GameObject controllerObject = new GameObject("IntroPetSelectionController");
         controllerObject.transform.SetParent(environment.Root, false);
@@ -109,6 +121,9 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         camera.fieldOfView = 35f;
         camera.nearClipPlane = 0.05f;
         camera.farClipPlane = 80f;
+        camera.transform.SetPositionAndRotation(
+            PetSelectionCameraController.IntroSceneCameraPosition,
+            Quaternion.Euler(PetSelectionCameraController.IntroSceneCameraEulerAngles));
 
         AudioListener listener = camera.GetComponent<AudioListener>();
         if (listener == null)
@@ -150,7 +165,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         existingSun.intensity = 1.35f;
     }
 
-    private static EnvironmentBuildResult BuildFieldEnvironment()
+    private static EnvironmentBuildResult BuildFieldEnvironment(Camera sceneCamera)
     {
         IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
         GameObject root = GameObject.Find(RuntimeRootName);
@@ -159,7 +174,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
             root = new GameObject(RuntimeRootName);
         }
 
-        Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
+        Bounds fieldBounds = IntroPetPlayfieldResolver.Resolve(sceneCamera);
 
         IntroBackdropRingController backdropRingController = root.GetComponent<IntroBackdropRingController>();
         if (backdropRingController == null)
@@ -176,12 +191,87 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         }
 
         audioController.Configure(catalog, backdropRingController);
+        EnsureRuntimeNavMesh(root, fieldBounds);
+        CleanupIntroSceneToys(root.transform);
 
         return new EnvironmentBuildResult
         {
             FieldBounds = fieldBounds,
             Root = root.transform
         };
+    }
+
+    private static void EnsureRuntimeNavMesh(GameObject root, Bounds fieldBounds)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        NavMeshSurface legacySurface = root.GetComponent<NavMeshSurface>();
+        if (legacySurface != null)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(legacySurface);
+            }
+            else
+            {
+                DestroyImmediate(legacySurface);
+            }
+        }
+
+        Transform navMeshRoot = root.transform.Find(RuntimeNavMeshRootName);
+        if (navMeshRoot == null)
+        {
+            navMeshRoot = new GameObject(RuntimeNavMeshRootName).transform;
+            navMeshRoot.SetParent(root.transform, false);
+        }
+
+        EnsureRuntimeWalkSurface(navMeshRoot, fieldBounds);
+
+        NavMeshSurface surface = navMeshRoot.GetComponent<NavMeshSurface>();
+        if (surface == null)
+        {
+            surface = navMeshRoot.gameObject.AddComponent<NavMeshSurface>();
+        }
+
+        surface.collectObjects = CollectObjects.Children;
+        surface.center = Vector3.zero;
+        surface.size = new Vector3(fieldBounds.size.x, 1f, fieldBounds.size.z);
+        surface.layerMask = Physics.DefaultRaycastLayers;
+        surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
+        surface.BuildNavMesh();
+    }
+
+    private static void EnsureRuntimeWalkSurface(Transform navMeshRoot, Bounds fieldBounds)
+    {
+        if (navMeshRoot == null)
+        {
+            return;
+        }
+
+        Transform existing = navMeshRoot.Find(RuntimeWalkSurfaceName);
+        GameObject walkSurface = existing != null ? existing.gameObject : new GameObject(RuntimeWalkSurfaceName);
+        if (walkSurface.transform.parent != navMeshRoot)
+        {
+            walkSurface.transform.SetParent(navMeshRoot, false);
+        }
+
+        walkSurface.transform.SetPositionAndRotation(
+            new Vector3(fieldBounds.center.x, fieldBounds.min.y - 0.05f, fieldBounds.center.z),
+            Quaternion.identity);
+        walkSurface.transform.localScale = Vector3.one;
+
+        BoxCollider collider = walkSurface.GetComponent<BoxCollider>();
+        if (collider == null)
+        {
+            collider = walkSurface.AddComponent<BoxCollider>();
+        }
+
+        collider.isTrigger = false;
+        collider.center = Vector3.zero;
+        collider.size = new Vector3(fieldBounds.size.x, 0.1f, fieldBounds.size.z);
     }
 
 #if UNITY_EDITOR
@@ -247,8 +337,9 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         editorPreviewController.gameObject.hideFlags = HideFlags.None;
 
         IntroSceneAssetCatalog catalog = Resources.Load<IntroSceneAssetCatalog>("PawPal/IntroPets/IntroSceneAssetCatalog");
-        Bounds fieldBounds = new Bounds(Vector3.zero, new Vector3(FieldHalfSize * 1.65f, 1f, FieldHalfSize * 1.35f));
+        Bounds fieldBounds = IntroPetPlayfieldResolver.Resolve(Camera.main);
         editorPreviewController.Configure(catalog, fieldBounds);
+        CleanupIntroSceneToys(editorPreviewController.transform);
         EnsureEditorPreviewCamera(scene);
         EnsureEditorPreviewLighting(scene);
     }
@@ -282,10 +373,9 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         camera.fieldOfView = 35f;
         camera.nearClipPlane = 0.05f;
         camera.farClipPlane = 80f;
-
-        Vector3 previewPosition = new Vector3(0f, PetSelectionCameraController.HomeSceneCameraHeight, -3.2f);
-        Vector3 focusPoint = new Vector3(0f, 0.55f, 0f);
-        camera.transform.SetPositionAndRotation(previewPosition, Quaternion.LookRotation(focusPoint - previewPosition, Vector3.up));
+        camera.transform.SetPositionAndRotation(
+            PetSelectionCameraController.IntroSceneCameraPosition,
+            Quaternion.Euler(PetSelectionCameraController.IntroSceneCameraEulerAngles));
 
         AudioListener listener = camera.GetComponent<AudioListener>();
         if (listener == null)
@@ -295,6 +385,16 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
         listener.enabled = true;
         DisableOtherAudioListeners(camera);
+
+        SceneView sceneView = SceneView.lastActiveSceneView;
+        if (sceneView != null)
+        {
+            sceneView.LookAtDirect(
+                PetSelectionCameraController.IntroSceneCameraPosition,
+                Quaternion.Euler(PetSelectionCameraController.IntroSceneCameraEulerAngles),
+                4.5f);
+            sceneView.Repaint();
+        }
     }
 
     private static void EnsureEditorPreviewLighting(Scene scene)
@@ -389,6 +489,64 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
             listener.enabled = primaryCamera != null && listener.gameObject == primaryCamera.gameObject;
         }
+    }
+
+    private static void CleanupIntroSceneToys(Transform runtimeRoot)
+    {
+        Transform[] allTransforms = FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            Transform candidate = allTransforms[i];
+            if (candidate == null || candidate == runtimeRoot)
+            {
+                continue;
+            }
+
+            GameObject candidateObject = candidate.gameObject;
+            if (!IsIntroSceneToyObject(candidateObject))
+            {
+                continue;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(candidateObject);
+            }
+            else
+            {
+                DestroyImmediate(candidateObject);
+            }
+        }
+    }
+
+    private static bool IsIntroSceneToyObject(GameObject candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        if (candidate.GetComponent<IntroPetToyAnchor>() != null
+            || candidate.GetComponent<PawPalToyRuntimeMetadata>() != null)
+        {
+            return true;
+        }
+
+        string name = candidate.name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < IntroToyNames.Length; i++)
+        {
+            if (string.Equals(name, IntroToyNames[i], System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void EnsureEventSystem()

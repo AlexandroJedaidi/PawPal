@@ -509,6 +509,39 @@ public class DogRoomAgent : MonoBehaviour
         dogId = string.IsNullOrWhiteSpace(runtimeDogId) ? string.Empty : runtimeDogId;
     }
 
+    public void ConfigureRoomBounds(Bounds bounds)
+    {
+        restrictToRoomBounds = true;
+        roomBoundsCenter = bounds.center;
+        roomBoundsSize = new Vector2(bounds.size.x, bounds.size.z);
+    }
+
+    public void ApplySelectedPetPresentation(SelectedPetSessionData selection)
+    {
+        if (selection == null || selection.Definition == null)
+        {
+            return;
+        }
+
+        if (selection.Definition.HomeScale != Vector3.zero)
+        {
+            transform.localScale = selection.Definition.HomeScale;
+        }
+
+        Animator targetAnimator = GetComponentInChildren<Animator>(true);
+        if (selection.Definition.AnimationSet != null)
+        {
+            selection.Definition.AnimationSet.ApplyTo(targetAnimator);
+        }
+
+        if (selection.FurVariant != null && selection.FurVariant.ReplacementMaterial != null)
+        {
+            PetVariantApplier.ApplyMaterial(gameObject, selection.FurVariant);
+        }
+
+        PetVariantApplier.EnsureTapCollider(gameObject);
+    }
+
     public void ApplyCircadianProfile(DogCircadianProfile profile)
     {
         CaptureCircadianBaseTuning();

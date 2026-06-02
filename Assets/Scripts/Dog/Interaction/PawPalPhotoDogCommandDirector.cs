@@ -13,7 +13,7 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
     private const float WhistleBarkDuration = 0.45f;
 
     private Coroutine activeRoutine;
-    private DogRoomAgent activeDog;
+    private PawPalRoomPetHandle activePet;
     private int nextPoseIndex;
 
     public bool IsRunning
@@ -29,83 +29,103 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
             activeRoutine = null;
         }
 
-        if (resumeDog && activeDog != null)
+        if (resumeDog && activePet != null && activePet.IsValid)
         {
-            activeDog.StartRoaming();
+            activePet.StartRoaming();
         }
 
-        activeDog = null;
+        activePet = null;
     }
 
     public bool TryWhistle(DogRoomAgent dog, Camera camera, out string failureReason)
     {
+        return TryWhistle(dog != null ? new PawPalRoomPetHandle(dog) : null, camera, out failureReason);
+    }
+
+    public bool TryWhistle(PawPalRoomPetHandle pet, Camera camera, out string failureReason)
+    {
         CancelActiveCommand(true);
 
-        if (dog != null)
+        if (pet != null && pet.IsValid)
         {
-            dog.WakeForPlayerInteraction();
-            dog.PrepareForPlayerInteraction(true);
+            pet.WakeForPlayerInteraction();
+            pet.PrepareForPlayerInteraction(true);
         }
 
-        if (!CanStartPhotoCommand(dog, false, false, out failureReason))
+        if (!CanStartPhotoCommand(pet, false, false, out failureReason))
         {
             return false;
         }
 
-        StartPhotoRoutine(WhistleRoutine(dog, camera));
+        StartPhotoRoutine(WhistleRoutine(pet, camera));
         failureReason = string.Empty;
         return true;
     }
 
     public bool TryPose(DogRoomAgent dog, Camera camera, out string failureReason)
     {
-        CancelActiveCommand(true);
-        PrepareDogForPhotoCommand(dog);
+        return TryPose(dog != null ? new PawPalRoomPetHandle(dog) : null, camera, out failureReason);
+    }
 
-        if (!CanStartPhotoCommand(dog, true, true, out failureReason))
+    public bool TryPose(PawPalRoomPetHandle pet, Camera camera, out string failureReason)
+    {
+        CancelActiveCommand(true);
+        PreparePetForPhotoCommand(pet);
+
+        if (!CanStartPhotoCommand(pet, true, true, out failureReason))
         {
             return false;
         }
 
         int poseIndex = nextPoseIndex;
         nextPoseIndex = (nextPoseIndex + 1) % 3;
-        StartPhotoRoutine(PoseRoutine(dog, camera, poseIndex));
+        StartPhotoRoutine(PoseRoutine(pet, camera, poseIndex));
         failureReason = string.Empty;
         return true;
     }
 
     public bool TryPose(DogRoomAgent dog, Camera camera, PawPalTrickId trickId, out string failureReason)
     {
-        CancelActiveCommand(true);
-        PrepareDogForPhotoCommand(dog);
+        return TryPose(dog != null ? new PawPalRoomPetHandle(dog) : null, camera, trickId, out failureReason);
+    }
 
-        if (!CanStartPhotoCommand(dog, true, true, out failureReason))
+    public bool TryPose(PawPalRoomPetHandle pet, Camera camera, PawPalTrickId trickId, out string failureReason)
+    {
+        CancelActiveCommand(true);
+        PreparePetForPhotoCommand(pet);
+
+        if (!CanStartPhotoCommand(pet, true, true, out failureReason))
         {
             return false;
         }
 
-        StartPhotoRoutine(PoseRoutine(dog, camera, trickId));
+        StartPhotoRoutine(PoseRoutine(pet, camera, trickId));
         failureReason = string.Empty;
         return true;
     }
 
     public bool TryPose(DogRoomAgent dog, Camera camera, PawPalPhotoPoseId poseId, out string failureReason)
     {
+        return TryPose(dog != null ? new PawPalRoomPetHandle(dog) : null, camera, poseId, out failureReason);
+    }
+
+    public bool TryPose(PawPalRoomPetHandle pet, Camera camera, PawPalPhotoPoseId poseId, out string failureReason)
+    {
         CancelActiveCommand(true);
-        PrepareDogForPhotoCommand(dog);
+        PreparePetForPhotoCommand(pet);
 
-        if (!CanStartPhotoCommand(dog, false, true, out failureReason))
+        if (!CanStartPhotoCommand(pet, false, true, out failureReason))
         {
             return false;
         }
 
-        if (!dog.CanPlayPhotoPose(poseId))
+        if (pet == null || !pet.CanPlayPhotoPose(poseId))
         {
-            failureReason = "That pose is not available for this dog.";
+            failureReason = "That pose is not available for this pet.";
             return false;
         }
 
-        StartPhotoRoutine(PoseRoutine(dog, camera, poseId));
+        StartPhotoRoutine(PoseRoutine(pet, camera, poseId));
         failureReason = string.Empty;
         return true;
     }
@@ -115,154 +135,155 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
         activeRoutine = StartCoroutine(WrapRoutine(routine));
     }
 
-    private static void PrepareDogForPhotoCommand(DogRoomAgent dog)
+    private static void PreparePetForPhotoCommand(PawPalRoomPetHandle pet)
     {
-        if (dog == null)
+        if (pet == null || !pet.IsValid)
         {
             return;
         }
 
-        dog.WakeForPlayerInteraction();
-        dog.PrepareForPlayerInteraction(true);
+        pet.WakeForPlayerInteraction();
+        pet.PrepareForPlayerInteraction(true);
     }
 
     private IEnumerator WrapRoutine(IEnumerator routine)
     {
         yield return routine;
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.StartRoaming();
+            activePet.StartRoaming();
         }
 
-        activeDog = null;
+        activePet = null;
         activeRoutine = null;
     }
 
-    private IEnumerator WhistleRoutine(DogRoomAgent dog, Camera camera)
+    private IEnumerator WhistleRoutine(PawPalRoomPetHandle pet, Camera camera)
     {
-        activeDog = dog;
-        dog.PauseForSocial(false);
-        yield return FaceCameraAndRequestAttention(dog, camera, CameraAttentionDuration);
+        activePet = pet;
+        pet.PauseForSocial(false);
+        yield return FaceCameraAndRequestAttention(pet, camera, CameraAttentionDuration);
         yield return new WaitForSeconds(WhistleHoldDuration);
     }
 
-    private IEnumerator PoseRoutine(DogRoomAgent dog, Camera camera, int poseIndex)
+    private IEnumerator PoseRoutine(PawPalRoomPetHandle pet, Camera camera, int poseIndex)
     {
-        activeDog = dog;
-        dog.PauseForSocial(false);
-        yield return FaceCameraAndRequestAttention(dog, camera, CameraAttentionDuration);
+        activePet = pet;
+        pet.PauseForSocial(false);
+        yield return FaceCameraAndRequestAttention(pet, camera, CameraAttentionDuration);
         yield return new WaitForSeconds(PhotoPoseSettleDuration);
 
         switch (poseIndex)
         {
             case 0:
-                yield return StartCoroutine(dog.PlaySit(PhotoPoseDuration));
+                yield return StartCoroutine(pet.PlayPhotoPose(PawPalPhotoPoseId.Idle1, PhotoPoseDuration));
                 break;
             case 1:
-                yield return StartCoroutine(dog.PlayTailWag());
+                yield return StartCoroutine(pet.PlayPhotoPose(PawPalPhotoPoseId.Idle3, PhotoPoseDuration));
                 break;
             default:
-                if (!dog.HasHeldToy)
+                if (!pet.HasHeldToy)
                 {
-                    yield return StartCoroutine(dog.PlayBark(WhistleBarkDuration));
+                    yield return StartCoroutine(pet.PlayBark(WhistleBarkDuration));
                 }
                 break;
         }
 
-        yield return FaceCameraAndRequestAttention(dog, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
+        yield return FaceCameraAndRequestAttention(pet, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
     }
 
-    private IEnumerator PoseRoutine(DogRoomAgent dog, Camera camera, PawPalTrickId trickId)
+    private IEnumerator PoseRoutine(PawPalRoomPetHandle pet, Camera camera, PawPalTrickId trickId)
     {
-        activeDog = dog;
-        dog.PauseForSocial(false);
-        yield return FaceCameraAndRequestAttention(dog, camera, CameraAttentionDuration);
+        activePet = pet;
+        pet.PauseForSocial(false);
+        yield return FaceCameraAndRequestAttention(pet, camera, CameraAttentionDuration);
         yield return new WaitForSeconds(PhotoPoseSettleDuration);
 
         switch (trickId)
         {
             case PawPalTrickId.Lie:
-                yield return StartCoroutine(dog.PlayChillRest(PhotoPoseDuration));
+                yield return StartCoroutine(pet.PlayPhotoPose(PawPalPhotoPoseId.LieLoop1, PhotoPoseDuration));
                 break;
             default:
-                yield return StartCoroutine(dog.PlaySit(PhotoPoseDuration));
+                PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
+                yield return StartCoroutine(pet.PlayTrainingTrick(definition, true, camera));
                 break;
         }
 
-        yield return FaceCameraAndRequestAttention(dog, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
+        yield return FaceCameraAndRequestAttention(pet, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
     }
 
-    private IEnumerator PoseRoutine(DogRoomAgent dog, Camera camera, PawPalPhotoPoseId poseId)
+    private IEnumerator PoseRoutine(PawPalRoomPetHandle pet, Camera camera, PawPalPhotoPoseId poseId)
     {
-        activeDog = dog;
-        dog.PauseForSocial(false);
-        yield return FaceCameraAndRequestAttention(dog, camera, CameraAttentionDuration);
+        activePet = pet;
+        pet.PauseForSocial(false);
+        yield return FaceCameraAndRequestAttention(pet, camera, CameraAttentionDuration);
         yield return new WaitForSeconds(PhotoPoseSettleDuration);
-        yield return StartCoroutine(dog.PlayPhotoPose(poseId, PhotoPoseDuration));
-        yield return FaceCameraAndRequestAttention(dog, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
+        yield return StartCoroutine(pet.PlayPhotoPose(poseId, PhotoPoseDuration));
+        yield return FaceCameraAndRequestAttention(pet, camera, Mathf.Max(1.6f, CameraAttentionDuration * 0.5f));
     }
 
-    private IEnumerator FaceCameraAndRequestAttention(DogRoomAgent dog, Camera camera, float attentionDuration)
+    private IEnumerator FaceCameraAndRequestAttention(PawPalRoomPetHandle pet, Camera camera, float attentionDuration)
     {
-        if (dog == null)
+        if (pet == null || !pet.IsValid)
         {
             yield break;
         }
 
         if (camera != null)
         {
-            yield return StartCoroutine(dog.FaceTarget(camera.transform, CameraFaceDuration));
+            yield return StartCoroutine(pet.FaceTarget(camera.transform, CameraFaceDuration));
         }
 
-        RequestCameraAttention(dog, attentionDuration);
+        RequestCameraAttention(pet, attentionDuration);
     }
 
-    private static void RequestCameraAttention(DogRoomAgent dog, float duration)
+    private static void RequestCameraAttention(PawPalRoomPetHandle pet, float duration)
     {
-        if (dog == null)
+        if (pet == null || !pet.IsValid)
         {
             return;
         }
 
-        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
+        DogCameraAttention attention = pet.RootTransform != null ? pet.RootTransform.GetComponentInChildren<DogCameraAttention>(true) : null;
         if (attention != null)
         {
             attention.RequestCameraAttention(duration);
         }
     }
 
-    private static bool CanStartPhotoCommand(DogRoomAgent dog, bool requireNavMeshSpot, bool requireFreeMouth, out string failureReason)
+    private static bool CanStartPhotoCommand(PawPalRoomPetHandle pet, bool requireNavMeshSpot, bool requireFreeMouth, out string failureReason)
     {
-        if (dog == null || !dog.isActiveAndEnabled)
+        if (pet == null || !pet.IsValid || pet.RootTransform == null || !pet.RootTransform.gameObject.activeInHierarchy)
         {
-            failureReason = "No active dog for photo mode.";
+            failureReason = "No active pet for photo mode.";
             return false;
         }
 
-        if (dog.IsSleeping || dog.IsResting)
+        if (pet.IsSleeping || pet.IsResting)
         {
-            failureReason = "Your dog is resting right now.";
+            failureReason = "Your pet is resting right now.";
             return false;
         }
 
-        if (requireFreeMouth && dog.HasHeldToy)
+        if (requireFreeMouth && pet.HasHeldToy)
         {
-            failureReason = "Your dog is holding a toy.";
+            failureReason = "Your pet is holding a toy.";
             return false;
         }
 
-        if (dog.IsBusy || dog.IsPlayingOneShotAnimation)
+        if (pet.IsBusy || pet.IsPlayingOneShotAnimation)
         {
-            failureReason = "Your dog is busy right now.";
+            failureReason = "Your pet is busy right now.";
             return false;
         }
 
         if (requireNavMeshSpot)
         {
             Vector3 safePoint;
-            if (!dog.TryGetRoomSafePoint(dog.transform.position, CameraApproachSampleRadius, out safePoint))
+            if (!pet.TryGetRoomSafePoint(pet.RootTransform.position, CameraApproachSampleRadius, out safePoint))
             {
-                failureReason = "Your dog needs a NavMesh spot.";
+                failureReason = "Your pet needs a NavMesh spot.";
                 return false;
             }
         }

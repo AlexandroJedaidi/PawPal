@@ -37,6 +37,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private PawPalGestureRecognizer gestureRecognizer;
     private PawPalTrainingConfig trainingConfig;
     private DogCycleCamera dogCamera;
+    private PawPalRoomPetHandle activePet;
     private DogRoomAgent activeDog;
     private PawPalTrickId selectedTrick = PawPalTrickId.Sit;
     private Coroutine attemptRoutine;
@@ -98,7 +99,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         if (gestureRecognizer != null)
         {
-            gestureRecognizer.Configure(activeDog, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+            ConfigureGestureRecognizer();
         }
 
         HandleToyTugInput();
@@ -123,21 +124,28 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     public bool TryEnterDogInteractionMode(string dogId, bool keepMicListening)
     {
-        DogRoomAgent dog = ResolveDog(dogId);
-        if (dog == null)
+        activePet = ResolvePet(dogId);
+        activeDog = activePet != null ? activePet.DogAgent : null;
+        if (activePet == null || !activePet.IsValid)
         {
-            ShowToast("No active dog for interaction mode.");
+            ShowToast("No active pet for interaction mode.");
             return false;
         }
 
         dogCamera = ResolveDogCamera();
-        if (dogCamera == null || !dogCamera.EnterDogInteractionMode(dog))
+        if (activeDog != null)
         {
-            ShowToast("Dog interaction needs a dog camera.");
-            return false;
+            if (dogCamera == null || !dogCamera.EnterDogInteractionMode(activeDog))
+            {
+                ShowToast("Dog interaction needs a dog camera.");
+                return false;
+            }
+        }
+        else
+        {
+            FocusCatInteractionCamera();
         }
 
-        activeDog = dog;
         micListening = keepMicListening;
         dogIsSitting = false;
         tugRoundCounted = false;
@@ -161,7 +169,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         Debug.Log(
             "[DogInteractionMode] Enter marker=" + InteractionDebugBuildMarker
-            + " dog=" + activeDog.name
+            + " dog=" + activePet.DisplayName
             + " timeout=" + timeoutSeconds.ToString("F2"),
             this);
 
@@ -170,17 +178,24 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (view != null)
         {
             view.Show(dogState, micListening, timeoutSeconds);
-            view.SetTrackedDog(activeDog, ResolveInteractionCamera());
+            if (activeDog != null)
+            {
+                view.SetTrackedDog(activeDog, ResolveInteractionCamera());
+            }
+            else
+            {
+                view.SetTrackedPet(activePet.RootTransform, activePet.FocusTransform, ResolveInteractionCamera());
+            }
         }
 
         if (gestureRecognizer != null)
         {
-            gestureRecognizer.Configure(activeDog, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+            ConfigureGestureRecognizer();
             gestureRecognizer.SetActive(true);
         }
 
         string failureReason;
-        if (interactionDirector != null && !interactionDirector.TryCallDogToInteraction(activeDog, ResolveInteractionCamera(), out failureReason))
+        if (activeDog != null && interactionDirector != null && !interactionDirector.TryCallDogToInteraction(activeDog, ResolveInteractionCamera(), out failureReason))
         {
             SetStatus(string.IsNullOrWhiteSpace(failureReason) ? "Your dog is busy right now." : failureReason);
             pendingExitReason = "director_start_failed";
@@ -216,24 +231,36 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
                 runtime.SelectDogById(command.DogId, false);
             }
 
-            DogRoomAgent resolvedDog = ResolveDog(command.DogId);
-            if (resolvedDog != null)
+            PawPalRoomPetHandle resolvedPet = ResolvePet(command.DogId);
+            if (resolvedPet != null && resolvedPet.IsValid)
             {
-                if (activeDog != resolvedDog)
+                if (activeDog != resolvedPet.DogAgent)
                 {
                     ApplyInteractionVocalContext(activeDog, DogVocalContext.Ambient);
                 }
 
-                activeDog = resolvedDog;
+                activePet = resolvedPet;
+                activeDog = resolvedPet.DogAgent;
                 ApplyInteractionVocalContext(activeDog, DogVocalContext.InteractionBoosted);
-                if (dogCamera != null)
+                if (dogCamera != null && activeDog != null)
                 {
                     dogCamera.EnterDogInteractionMode(activeDog);
+                }
+                else if (activeDog == null)
+                {
+                    FocusCatInteractionCamera();
                 }
 
                 if (view != null)
                 {
-                    view.SetTrackedDog(activeDog, ResolveInteractionCamera());
+                    if (activeDog != null)
+                    {
+                        view.SetTrackedDog(activeDog, ResolveInteractionCamera());
+                    }
+                    else
+                    {
+                        view.SetTrackedPet(activePet.RootTransform, activePet.FocusTransform, ResolveInteractionCamera());
+                    }
                 }
             }
         }
@@ -317,12 +344,13 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             dogCamera = null;
         }
 
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.StopHeldToyTugAnimation();
+            activePet.StopHeldToyTugAnimation();
         }
 
         ApplyInteractionVocalContext(activeDog, DogVocalContext.Ambient);
+        activePet = null;
         activeDog = null;
         if (view != null)
         {
@@ -388,15 +416,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trickId);
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         PawPalDogState dogState = runtime != null ? runtime.ActiveDog : null;
-        if (definition == null || dogState == null || activeDog == null)
+        if (definition == null || dogState == null || activePet == null || !activePet.IsValid)
         {
-            message = "Training needs an active dog.";
+            message = "Training needs an active pet.";
             return InteractionTrickStartResult.Rejected;
         }
 
-        if (activeDog.HasHeldToy)
+        if (activePet.HasHeldToy)
         {
-            message = "Play tug first; your dog is holding a toy.";
+            message = "Play tug first; your pet is holding a toy.";
             return InteractionTrickStartResult.Rejected;
         }
 
@@ -428,9 +456,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             runtime.RecordTrickTrainingResult(result);
         }
 
-        if (result != null && result.Success && activeDog != null)
+        if (result != null && result.Success && activePet != null && activePet.IsValid)
         {
-            yield return StartCoroutine(activeDog.PlayInteractionTrainingTrick(definition, true));
+            yield return StartCoroutine(activePet.PlayInteractionTrainingTrick(definition, true, ResolveInteractionCamera()));
             UpdatePosture(definition.Id);
 
             if (view != null)
@@ -515,9 +543,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             runtime.ApplyActiveDogInteractionBond(PettingBondGain, PettingMoodGain, PettingActivityGain);
         }
 
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.TryPlayImmediateInteractionPantingVocal();
+            activePet.TryPlayImmediateInteractionPantingVocal();
+            activePet.TryPlayPettingReaction();
         }
 
         if (view != null)
@@ -543,11 +572,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private IEnumerator PlayFailedTeachReactionRoutine(PawPalTrickFailureReason reason)
     {
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.TryPlayImmediateInteractionAnnoyedVocal();
+            activePet.TryPlayImmediateInteractionAnnoyedVocal();
 
-            DogCameraAttention attention = ResolveDogAttention(activeDog);
+            DogCameraAttention attention = activeDog != null ? ResolveDogAttention(activeDog) : null;
             if (attention != null)
             {
                 attention.RequestHeadTilt(FailedTeachHeadTiltAngle, FailedTeachHeadTiltDuration);
@@ -566,14 +595,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private void HandleToyTugInput()
     {
-        if (activeDog == null || !activeDog.HasHeldToy)
+        if (activePet == null || !activePet.IsValid || !activePet.HasHeldToy)
         {
             // Only stop tug visuals when a tug interaction was actually active.
             // Calling StopHeldToyTugAnimation() every frame on the no-toy path forces Move=false
             // and breaks whistle locomotion by kicking the dog back to idle mid-approach.
-            if (activeDog != null && (tugActive || tugPointerId != -1 || tugRoundCounted || completedTugRounds > 0))
+            if (activePet != null && activePet.IsValid && (tugActive || tugPointerId != -1 || tugRoundCounted || completedTugRounds > 0))
             {
-                activeDog.StopHeldToyTugAnimation();
+                activePet.StopHeldToyTugAnimation();
             }
 
             tugActive = false;
@@ -653,9 +682,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         nextTugRewardTime = Time.unscaledTime + 0.35f;
         ignoreGestureUntil = Time.unscaledTime + 0.25f;
         tugRoundCounted = false;
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.StartHeldToyTugAnimation();
+            activePet.StartHeldToyTugAnimation();
         }
 
         ResetActivity();
@@ -679,9 +708,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
                 tugActive = false;
                 tugPointerId = -1;
                 ignoreGestureUntil = Time.unscaledTime + 0.35f;
-                if (activeDog != null)
+                if (activePet != null && activePet.IsValid)
                 {
-                    activeDog.StopHeldToyTugAnimation();
+                    activePet.StopHeldToyTugAnimation();
                 }
 
                 if (attemptRoutine == null)
@@ -712,9 +741,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         tugRoundCounted = false;
         tugPointerId = -1;
         ignoreGestureUntil = Time.unscaledTime + 0.35f;
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            activeDog.StopHeldToyTugAnimation();
+            activePet.StopHeldToyTugAnimation();
         }
 
         tugStartedAt = 0f;
@@ -728,12 +757,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             view.ShowNeutralCue("Drop it");
         }
 
-        if (activeDog != null)
+        if (activePet != null && activePet.IsValid)
         {
-            yield return StartCoroutine(activeDog.PutDownHeldToyForInteraction());
+            yield return StartCoroutine(activePet.PutDownHeldToyForInteraction());
         }
 
-        if (view != null && activeDog != null && !activeDog.HasHeldToy)
+        if (view != null && activePet != null && activePet.IsValid && !activePet.HasHeldToy)
         {
             view.ShowUnderstoodCue("Toy down");
         }
@@ -771,7 +800,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private bool IsPointerOverHeldToy(Vector2 screenPosition)
     {
         Transform toy;
-        if (activeDog == null || !activeDog.TryGetHeldToyTransform(out toy) || toy == null)
+        if (activePet == null || !activePet.IsValid || !activePet.TryGetHeldToyTransform(out toy) || toy == null)
         {
             return false;
         }
@@ -939,6 +968,51 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         ExitDogInteractionMode();
     }
 
+    private void ConfigureGestureRecognizer()
+    {
+        if (gestureRecognizer == null)
+        {
+            return;
+        }
+
+        if (activeDog != null)
+        {
+            gestureRecognizer.Configure(activeDog, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+            return;
+        }
+
+        gestureRecognizer.Configure(activePet != null ? activePet.RootTransform : null, ResolveInteractionCamera(), trainingConfig != null ? trainingConfig.GestureLeniency : 1f);
+    }
+
+    private void FocusCatInteractionCamera()
+    {
+        if (activePet == null || !activePet.IsValid || activePet.RootTransform == null)
+        {
+            return;
+        }
+
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        DogCycleCamera runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
+        if (runtimeDogCamera != null)
+        {
+            runtimeDogCamera.enabled = false;
+        }
+
+        PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
+        if (followCamera == null)
+        {
+            followCamera = mainCamera.gameObject.AddComponent<PawPalPetFollowCamera>();
+        }
+
+        followCamera.enabled = true;
+        followCamera.Focus(activePet.FocusTransform, activePet.HomeCameraOffset, true);
+    }
+
     private Camera ResolveInteractionCamera()
     {
         if (dogCamera != null)
@@ -992,9 +1066,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return dog.gameObject.AddComponent<DogCameraAttention>();
     }
 
-    private DogRoomAgent ResolveDog(string dogId)
+    private PawPalRoomPetHandle ResolvePet(string dogId)
     {
-        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (!string.IsNullOrWhiteSpace(dogId))
         {
@@ -1002,36 +1075,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             {
                 runtime.SelectDogById(dogId, false);
             }
-
-            for (int i = 0; agents != null && i < agents.Length; i++)
-            {
-                DogRoomAgent agent = agents[i];
-                if (agent != null && agent.HasExplicitDogId && string.Equals(agent.DogId, dogId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return agent;
-                }
-            }
         }
 
-        if (runtime != null && runtime.ActiveDog != null && agents != null)
-        {
-            string activeDogId = runtime.ActiveDog.Id;
-            for (int i = 0; i < agents.Length; i++)
-            {
-                DogRoomAgent agent = agents[i];
-                if (agent != null && agent.HasExplicitDogId && string.Equals(agent.DogId, activeDogId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return agent;
-                }
-            }
-
-            if (runtime.ActiveDogIndex >= 0 && runtime.ActiveDogIndex < agents.Length)
-            {
-                return agents[runtime.ActiveDogIndex];
-            }
-        }
-
-        return agents != null && agents.Length > 0 ? agents[0] : null;
+        IntroPetSpecies preferredSpecies = runtime != null && runtime.ActiveDog != null
+            ? runtime.ActivePetSpecies
+            : IntroPetSpecies.Dog;
+        return PawPalRoomPetRuntime.ResolvePetById(dogId, preferredSpecies);
     }
 
     private static bool HasSceneDogs()

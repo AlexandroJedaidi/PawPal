@@ -105,7 +105,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
     private TextMeshProUGUI progressCueTitle;
     private TextMeshProUGUI progressCuePercent;
     private Image progressCueFill;
-    private DogRoomAgent trackedDog;
+    private Transform trackedPetRoot;
     private Camera trackedCamera;
     private Transform trackedHead;
     private float progressCueVisibleUntil;
@@ -176,7 +176,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
 
     public void Hide()
     {
-        trackedDog = null;
+        trackedPetRoot = null;
         trackedCamera = null;
         trackedHead = null;
         HideProgressCue();
@@ -185,14 +185,19 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
 
     public void ShowTrainingProgressCue(DogRoomAgent dog, Camera camera, string trickName, float previousProgress01, float currentProgress01)
     {
+        ShowTrainingProgressCue(dog != null ? dog.transform : null, PawPalRoomPetRuntime.ResolveHeadTransform(dog != null ? dog.transform : null), camera, trickName, previousProgress01, currentProgress01);
+    }
+
+    public void ShowTrainingProgressCue(Transform petRoot, Transform petHead, Camera camera, string trickName, float previousProgress01, float currentProgress01)
+    {
         if (progressCueRoot == null || progressCueFill == null || progressCueTitle == null || progressCuePercent == null)
         {
             return;
         }
 
-        trackedDog = dog;
+        trackedPetRoot = petRoot;
         trackedCamera = camera;
-        trackedHead = ResolveTrackedHead(dog);
+        trackedHead = petHead;
         progressCueTitle.text = string.IsNullOrWhiteSpace(trickName) ? "Training" : trickName;
         progressCueFrom01 = Mathf.Clamp01(previousProgress01);
         progressCueTo01 = Mathf.Clamp01(currentProgress01);
@@ -216,7 +221,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
 
         if (dogNameLabel != null)
         {
-            dogNameLabel.text = dog != null && !string.IsNullOrWhiteSpace(dog.DisplayName) ? dog.DisplayName : "Dog";
+            dogNameLabel.text = dog != null && !string.IsNullOrWhiteSpace(dog.DisplayName) ? dog.DisplayName : "Pet";
         }
 
         if (selectedTrickLabel != null)
@@ -494,7 +499,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
         titleLabel.rectTransform.offsetMin = new Vector2(18f, -46f);
         titleLabel.rectTransform.offsetMax = new Vector2(-72f, -16f);
 
-        dogNameLabel = UiFactory.CreateLabel("DogName", parent, "Dog", 14, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Left);
+        dogNameLabel = UiFactory.CreateLabel("DogName", parent, "Pet", 14, UiTheme.NavBrand, FontStyles.Normal, TextAlignmentOptions.Left);
         dogNameLabel.font = UiTheme.NavExtraBoldFont;
         dogNameLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         dogNameLabel.rectTransform.anchorMax = new Vector2(1f, 1f);
@@ -999,7 +1004,7 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
             return;
         }
 
-        if (Time.unscaledTime >= progressCueVisibleUntil || trackedDog == null || rootRect == null)
+        if (Time.unscaledTime >= progressCueVisibleUntil || trackedPetRoot == null || rootRect == null)
         {
             HideProgressCue();
             return;
@@ -1014,12 +1019,12 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
 
         if (trackedHead == null)
         {
-            trackedHead = ResolveTrackedHead(trackedDog);
+            trackedHead = PawPalRoomPetRuntime.ResolveHeadTransform(trackedPetRoot);
         }
 
         Vector3 worldPoint = trackedHead != null
             ? trackedHead.position + Vector3.up * ProgressCueHeadOffset
-            : trackedDog.transform.position + new Vector3(0f, 0.45f, 0f);
+            : trackedPetRoot.position + new Vector3(0f, 0.45f, 0f);
         Vector3 screenPoint = camera.WorldToScreenPoint(worldPoint);
         if (screenPoint.z <= 0f)
         {
@@ -1060,51 +1065,6 @@ public sealed class PawPalTrainingModeView : MonoBehaviour
             progressCueRoot.gameObject.SetActive(false);
             progressCueRoot.localScale = Vector3.one;
         }
-    }
-
-    private static Transform ResolveTrackedHead(DogRoomAgent dog)
-    {
-        if (dog == null)
-        {
-            return null;
-        }
-
-        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
-        if (attention != null)
-        {
-            Transform ownHead = attention.GetOwnHeadLookTarget();
-            if (ownHead != null)
-            {
-                return ownHead;
-            }
-        }
-
-        Transform[] children = dog.GetComponentsInChildren<Transform>(true);
-        for (int i = 0; i < children.Length; i++)
-        {
-            Transform candidate = children[i];
-            if (candidate != null && string.Equals(candidate.name, "head", StringComparison.OrdinalIgnoreCase))
-            {
-                return candidate;
-            }
-        }
-
-        for (int i = 0; i < children.Length; i++)
-        {
-            Transform candidate = children[i];
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            string lowerName = candidate.name.ToLowerInvariant();
-            if (lowerName.Contains("head") && !lowerName.Contains("aim") && !lowerName.Contains("target") && !lowerName.Contains("helper"))
-            {
-                return candidate;
-            }
-        }
-
-        return dog.transform;
     }
 
     private void RefreshRows(PawPalDogState dog)

@@ -57,7 +57,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
     private Vector2[] symbolBaseOffsets;
     private float symbolVisibleUntil;
     private float symbolShownAt;
-    private DogRoomAgent trackedDog;
+    private Transform trackedPetRoot;
     private Camera trackedCamera;
     private Transform trackedHead;
     private float cueVisibleUntil;
@@ -109,7 +109,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public void Hide()
     {
-        trackedDog = null;
+        trackedPetRoot = null;
         trackedCamera = null;
         trackedHead = null;
         HideCue();
@@ -153,9 +153,14 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
     public void SetTrackedDog(DogRoomAgent dog, Camera camera)
     {
-        trackedDog = dog;
+        SetTrackedPet(dog != null ? dog.transform : null, PawPalRoomPetRuntime.ResolveHeadTransform(dog != null ? dog.transform : null), camera);
+    }
+
+    public void SetTrackedPet(Transform petRoot, Transform petHead, Camera camera)
+    {
+        trackedPetRoot = petRoot;
         trackedCamera = camera;
-        trackedHead = ResolveTrackedHead(dog);
+        trackedHead = petHead;
     }
 
     public void ShowUnderstoodCue(string text)
@@ -601,7 +606,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             return;
         }
 
-        if (Time.unscaledTime >= cueVisibleUntil || trackedDog == null)
+        if (Time.unscaledTime >= cueVisibleUntil || trackedPetRoot == null)
         {
             HideCue();
             return;
@@ -616,12 +621,12 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
         if (trackedHead == null)
         {
-            trackedHead = ResolveTrackedHead(trackedDog);
+            trackedHead = PawPalRoomPetRuntime.ResolveHeadTransform(trackedPetRoot);
         }
 
         Vector3 worldPoint = trackedHead != null
             ? trackedHead.position + Vector3.up * CueHeadOffset
-            : trackedDog.transform.position + new Vector3(0f, 0.45f, 0f);
+            : trackedPetRoot.position + new Vector3(0f, 0.45f, 0f);
         Vector3 screenPoint = camera.WorldToScreenPoint(worldPoint);
         if (screenPoint.z <= 0f)
         {
@@ -656,7 +661,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             return;
         }
 
-        if (Time.unscaledTime >= symbolVisibleUntil || trackedDog == null)
+        if (Time.unscaledTime >= symbolVisibleUntil || trackedPetRoot == null)
         {
             HideSymbolBurst();
             return;
@@ -671,12 +676,12 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
         if (trackedHead == null)
         {
-            trackedHead = ResolveTrackedHead(trackedDog);
+            trackedHead = PawPalRoomPetRuntime.ResolveHeadTransform(trackedPetRoot);
         }
 
         Vector3 worldPoint = trackedHead != null
             ? trackedHead.position + Vector3.up * CueHeadOffset
-            : trackedDog.transform.position + new Vector3(0f, 0.45f, 0f);
+            : trackedPetRoot.position + new Vector3(0f, 0.45f, 0f);
         Vector3 screenPoint = camera.WorldToScreenPoint(worldPoint);
         if (screenPoint.z <= 0f)
         {
@@ -734,7 +739,7 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             return;
         }
 
-        if (Time.unscaledTime >= progressVisibleUntil || trackedDog == null)
+        if (Time.unscaledTime >= progressVisibleUntil || trackedPetRoot == null)
         {
             HideProgressCue();
             return;
@@ -749,12 +754,12 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
 
         if (trackedHead == null)
         {
-            trackedHead = ResolveTrackedHead(trackedDog);
+            trackedHead = PawPalRoomPetRuntime.ResolveHeadTransform(trackedPetRoot);
         }
 
         Vector3 worldPoint = trackedHead != null
             ? trackedHead.position + Vector3.up * CueHeadOffset
-            : trackedDog.transform.position + new Vector3(0f, 0.45f, 0f);
+            : trackedPetRoot.position + new Vector3(0f, 0.45f, 0f);
         Vector3 screenPoint = camera.WorldToScreenPoint(worldPoint);
         if (screenPoint.z <= 0f)
         {
@@ -795,26 +800,6 @@ public sealed class PawPalDogInteractionModeView : MonoBehaviour
             progressRoot.gameObject.SetActive(false);
             progressRoot.localScale = Vector3.one;
         }
-    }
-
-    private Transform ResolveTrackedHead(DogRoomAgent dog)
-    {
-        if (dog == null)
-        {
-            return null;
-        }
-
-        DogCameraAttention attention = dog.GetComponentInChildren<DogCameraAttention>(true);
-        if (attention != null)
-        {
-            Transform ownHead = attention.GetOwnHeadLookTarget();
-            if (ownHead != null)
-            {
-                return ownHead;
-            }
-        }
-
-        return FindHeadTransform(dog.transform);
     }
 
     private static Transform FindHeadTransform(Transform root)

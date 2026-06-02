@@ -4,20 +4,11 @@ using UnityEngine.EventSystems;
 [DisallowMultipleComponent]
 public sealed class IntroPetAgent : MonoBehaviour
 {
-    private const float DestinationReachDistance = 0.18f;
-    private const float TurnSpeed = 8f;
-    private const float SelectedTurnSpeed = 10f;
-
     private IntroPetSelectionController controller;
     private IntroPetDefinition definition;
     private FurVariantDefinition activeVariant;
     private GameObject sourcePrefab;
-    private Animator animator;
-    private Bounds fieldBounds;
-    private Vector3 destination;
-    private Vector3 homePosition;
-    private float moveSpeed;
-    private float nextRoamAt;
+    private PawPalRoomPetHandle roomPet;
     private bool selected;
     private bool warnedMissingVariantMaterial;
     private bool warnedMissingSelectedAnimation;
@@ -41,7 +32,12 @@ public sealed class IntroPetAgent : MonoBehaviour
 
     public Transform FocusTransform
     {
-        get { return transform; }
+        get
+        {
+            return roomPet != null && roomPet.IsValid && roomPet.FocusTransform != null
+                ? roomPet.FocusTransform
+                : transform;
+        }
     }
 
     public void Initialize(
@@ -50,27 +46,14 @@ public sealed class IntroPetAgent : MonoBehaviour
         FurVariantDefinition variant,
         GameObject prefab,
         int index,
-        Bounds roamBounds)
+        PawPalRoomPetHandle runtimePet)
     {
         controller = owner;
         definition = petDefinition;
         activeVariant = variant;
         sourcePrefab = prefab;
+        roomPet = runtimePet;
         SelectionIndex = index;
-        fieldBounds = roamBounds;
-        homePosition = transform.position;
-        moveSpeed = definition != null && definition.Species == IntroPetSpecies.Cat ? 0.72f : 0.58f;
-        animator = GetComponentInChildren<Animator>(true);
-
-        if (definition != null && definition.IntroScale != Vector3.zero)
-        {
-            transform.localScale = definition.IntroScale;
-        }
-
-        if (definition != null && definition.AnimationSet != null)
-        {
-            definition.AnimationSet.ApplyTo(animator);
-        }
 
         if (variant != null && variant.ReplacementMaterial != null && !PetVariantApplier.ApplyMaterial(gameObject, variant))
         {
@@ -78,7 +61,6 @@ public sealed class IntroPetAgent : MonoBehaviour
         }
 
         PetVariantApplier.EnsureTapCollider(gameObject);
-        PickNextDestination(true);
     }
 
     public void SetSelectionIndex(int index)
@@ -89,12 +71,24 @@ public sealed class IntroPetAgent : MonoBehaviour
     public void SetSelected(bool isSelected, Camera camera)
     {
         selected = isSelected;
-
-        if (selected)
+        if (!selected)
         {
-            FaceCamera(camera, SelectedTurnSpeed);
-            PlaySelectedReaction();
+            if (roomPet != null && roomPet.IsValid)
+            {
+                roomPet.StartRoaming();
+            }
+
+            return;
         }
+
+        if (roomPet != null && roomPet.IsValid)
+        {
+            roomPet.PrepareForPlayerInteraction(true);
+            roomPet.PauseForSocial(false);
+            StartCoroutine(roomPet.FaceTarget(camera != null ? camera.transform : null, 0.24f));
+        }
+
+        PlaySelectedReaction();
     }
 
     public void ApplyFurVariant(FurVariantDefinition variant)
@@ -104,18 +98,6 @@ public sealed class IntroPetAgent : MonoBehaviour
         {
             WarnMissingVariantMaterial();
         }
-    }
-
-    private void Update()
-    {
-        if (selected)
-        {
-            FaceCamera(Camera.main, SelectedTurnSpeed);
-            SetAnimatorMoving(false, 0f);
-            return;
-        }
-
-        Roam();
     }
 
     private void OnMouseDown()
@@ -131,98 +113,18 @@ public sealed class IntroPetAgent : MonoBehaviour
         }
     }
 
-    private void Roam()
-    {
-        if (Time.time < nextRoamAt)
-        {
-            SetAnimatorMoving(false, 0f);
-            return;
-        }
-
-        Vector3 delta = destination - transform.position;
-        delta.y = 0f;
-        if (delta.magnitude <= DestinationReachDistance)
-        {
-            PickNextDestination(false);
-            SetAnimatorMoving(false, 0f);
-            return;
-        }
-
-        Vector3 direction = delta.normalized;
-        transform.position += direction * moveSpeed * Time.deltaTime;
-        transform.position = ClampToField(transform.position);
-        FaceDirection(direction, TurnSpeed);
-        SetAnimatorMoving(true, moveSpeed);
-    }
-
-    private void PickNextDestination(bool immediate)
-    {
-        Vector3 center = fieldBounds.center;
-        float radius = definition != null ? Mathf.Max(1.2f, definition.RoamRadius) : 3.2f;
-        Vector2 offset = Random.insideUnitCircle * radius;
-        destination = ClampToField(homePosition + new Vector3(offset.x, 0f, offset.y));
-        nextRoamAt = immediate ? Time.time : Time.time + Random.Range(0.9f, 2.5f);
-    }
-
-    private Vector3 ClampToField(Vector3 position)
-    {
-        if (fieldBounds.size == Vector3.zero)
-        {
-            return position;
-        }
-
-        position.x = Mathf.Clamp(position.x, fieldBounds.min.x, fieldBounds.max.x);
-        position.z = Mathf.Clamp(position.z, fieldBounds.min.z, fieldBounds.max.z);
-        return position;
-    }
-
-    private void FaceCamera(Camera camera, float speed)
-    {
-        if (camera == null)
-        {
-            return;
-        }
-
-        Vector3 direction = camera.transform.position - transform.position;
-        direction.y = 0f;
-        FaceDirection(direction, speed);
-    }
-
-    private void FaceDirection(Vector3 direction, float speed)
-    {
-        if (direction.sqrMagnitude <= 0.0001f)
-        {
-            return;
-        }
-
-        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * speed);
-    }
-
-    private void SetAnimatorMoving(bool moving, float speed)
-    {
-        if (definition != null && definition.AnimationSet != null && definition.AnimationSet.TrySetMoving(animator, moving, speed))
-        {
-            return;
-        }
-
-        if (animator != null)
-        {
-            animator.speed = moving ? 1f : 0.85f;
-        }
-    }
-
     private void PlaySelectedReaction()
     {
-        if (definition == null || definition.AnimationSet == null || animator == null)
+        Animator animator = GetComponentInChildren<Animator>(true);
+        if (definition != null && definition.AnimationSet != null && definition.AnimationSet.TryPlaySelectedReaction(animator))
         {
-            WarnMissingSelectedAnimation();
             return;
         }
 
-        if (!definition.AnimationSet.TryPlaySelectedReaction(animator))
+        if (!warnedMissingSelectedAnimation)
         {
-            WarnMissingSelectedAnimation();
+            warnedMissingSelectedAnimation = true;
+            Debug.LogWarning("IntroPetSelection could not find a selected reaction animation for " + (definition != null ? definition.DisplayName : name) + ".");
         }
     }
 
@@ -234,21 +136,7 @@ public sealed class IntroPetAgent : MonoBehaviour
         }
 
         warnedMissingVariantMaterial = true;
-        string petName = definition != null ? definition.DisplayName : name;
-        string variantName = activeVariant != null ? activeVariant.SafeDisplayName : "selected";
-        Debug.LogWarning("IntroPetSelection could not apply material variant '" + variantName + "' to " + petName + ". Keeping the prefab's existing materials.");
-    }
-
-    private void WarnMissingSelectedAnimation()
-    {
-        if (warnedMissingSelectedAnimation)
-        {
-            return;
-        }
-
-        warnedMissingSelectedAnimation = true;
-        string petName = definition != null ? definition.DisplayName : name;
-        Debug.LogWarning("IntroPetSelection has no selected reaction animation mapping for " + petName + ". The pet will face the camera instead.");
+        Debug.LogWarning("IntroPetSelection could not apply fur material '" + activeVariant.SafeDisplayName + "' to " + (definition != null ? definition.DisplayName : name) + ".");
     }
 
     private static bool IsPointerOverUi()

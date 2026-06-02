@@ -20,30 +20,30 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
 
     public bool TryCallActiveDogToCamera()
     {
-        DogRoomAgent dog = ResolveActiveDog();
-        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
+        PawPalRoomPetHandle pet = ResolveActivePet();
+        if (!PreparePetForVoiceInteraction(pet) || !CanStartVoiceAnimation(pet))
         {
             return false;
         }
 
-        StartVoiceRoutine(CallToCameraRoutine(dog));
+        StartVoiceRoutine(CallToCameraRoutine(pet));
         return true;
     }
 
     public bool TryCallDogToCamera(string dogId)
     {
-        DogRoomAgent dog;
-        if (!TryResolveDogTarget(dogId, out dog))
+        PawPalRoomPetHandle pet;
+        if (!TryResolvePetTarget(dogId, out pet))
         {
             return false;
         }
 
-        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
+        if (!PreparePetForVoiceInteraction(pet) || !CanStartVoiceAnimation(pet))
         {
             return false;
         }
 
-        StartVoiceRoutine(CallToCameraRoutine(dog));
+        StartVoiceRoutine(CallToCameraRoutine(pet));
         return true;
     }
 
@@ -54,30 +54,30 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
 
     public bool TryPerformTrick(PawPalTrickId trick)
     {
-        DogRoomAgent dog = ResolveActiveDog();
-        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
+        PawPalRoomPetHandle pet = ResolveActivePet();
+        if (!PreparePetForVoiceInteraction(pet) || !CanStartVoiceAnimation(pet))
         {
             return false;
         }
 
-        StartVoiceRoutine(PerformTrickRoutine(dog, trick));
+        StartVoiceRoutine(PerformTrickRoutine(pet, trick));
         return true;
     }
 
     public bool TryPerformTrick(string dogId, PawPalTrickId trick)
     {
-        DogRoomAgent dog;
-        if (!TryResolveDogTarget(dogId, out dog))
+        PawPalRoomPetHandle pet;
+        if (!TryResolvePetTarget(dogId, out pet))
         {
             return false;
         }
 
-        if (!PrepareDogForVoiceInteraction(dog) || !CanStartVoiceAnimation(dog))
+        if (!PreparePetForVoiceInteraction(pet) || !CanStartVoiceAnimation(pet))
         {
             return false;
         }
 
-        StartVoiceRoutine(PerformTrickRoutine(dog, trick));
+        StartVoiceRoutine(PerformTrickRoutine(pet, trick));
         return true;
     }
 
@@ -98,9 +98,9 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         activeRoutine = null;
     }
 
-    private IEnumerator CallToCameraRoutine(DogRoomAgent dog)
+    private IEnumerator CallToCameraRoutine(PawPalRoomPetHandle pet)
     {
-        if (dog == null)
+        if (pet == null || !pet.IsValid)
         {
             yield break;
         }
@@ -111,32 +111,32 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
             yield break;
         }
 
-        dog.PauseForSocial();
+        pet.PauseForSocial(false);
 
         Vector3 approachPoint;
-        if (TryResolveCameraApproachPoint(dog, camera, out approachPoint))
+        if (TryResolveCameraApproachPoint(pet, camera, out approachPoint))
         {
-            yield return StartCoroutine(dog.MoveNear(approachPoint, CameraApproachTimeout, DogMovementPace.Trot));
+            yield return StartCoroutine(pet.MoveNear(approachPoint, CameraApproachTimeout, DogMovementPace.Trot));
         }
 
-        yield return StartCoroutine(dog.FaceTarget(camera.transform, CameraFaceDuration));
+        yield return StartCoroutine(pet.FaceTarget(camera.transform, CameraFaceDuration));
 
-        if (!dog.HasHeldToy)
+        if (!pet.HasHeldToy)
         {
-            yield return StartCoroutine(dog.PlayBark(ArrivalBarkDuration));
+            yield return StartCoroutine(pet.PlayBark(ArrivalBarkDuration));
         }
 
-        dog.StartRoaming();
+        pet.StartRoaming();
     }
 
-    private IEnumerator PerformTrickRoutine(DogRoomAgent dog, PawPalVoiceTrick trick)
+    private IEnumerator PerformTrickRoutine(PawPalRoomPetHandle pet, PawPalVoiceTrick trick)
     {
-        yield return PerformTrickRoutine(dog, PawPalTrickId.Sit);
+        yield return PerformTrickRoutine(pet, PawPalTrickId.Sit);
     }
 
-    private IEnumerator PerformTrickRoutine(DogRoomAgent dog, PawPalTrickId trick)
+    private IEnumerator PerformTrickRoutine(PawPalRoomPetHandle pet, PawPalTrickId trick)
     {
-        if (dog == null)
+        if (pet == null || !pet.IsValid)
         {
             yield break;
         }
@@ -144,33 +144,33 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         PawPalTrickDefinition definition = PawPalTrickCatalog.GetDefinition(trick);
         if (definition != null)
         {
-            yield return StartCoroutine(dog.PlayTrainingTrick(definition, true));
+            yield return StartCoroutine(pet.PlayTrainingTrick(definition, true, Camera.main));
         }
     }
 
-    private static bool CanStartVoiceAnimation(DogRoomAgent dog)
+    private static bool CanStartVoiceAnimation(PawPalRoomPetHandle pet)
     {
-        return dog != null
-            && dog.isActiveAndEnabled
-            && !dog.IsBusy
-            && !dog.IsPlayingOneShotAnimation;
+        return pet != null
+            && pet.IsValid
+            && !pet.IsBusy
+            && !pet.IsPlayingOneShotAnimation;
     }
 
-    private static bool PrepareDogForVoiceInteraction(DogRoomAgent dog)
+    private static bool PreparePetForVoiceInteraction(PawPalRoomPetHandle pet)
     {
-        if (dog == null || !dog.isActiveAndEnabled)
+        if (pet == null || !pet.IsValid)
         {
             return false;
         }
 
-        dog.WakeForPlayerInteraction();
-        return dog.PrepareForPlayerInteraction(true);
+        pet.WakeForPlayerInteraction();
+        return pet.PrepareForPlayerInteraction(true);
     }
 
-    private static bool TryResolveCameraApproachPoint(DogRoomAgent dog, Camera camera, out Vector3 approachPoint)
+    private static bool TryResolveCameraApproachPoint(PawPalRoomPetHandle pet, Camera camera, out Vector3 approachPoint)
     {
-        approachPoint = dog != null ? dog.transform.position : Vector3.zero;
-        if (dog == null || camera == null)
+        approachPoint = pet != null && pet.RootTransform != null ? pet.RootTransform.position : Vector3.zero;
+        if (pet == null || !pet.IsValid || pet.RootTransform == null || camera == null)
         {
             return false;
         }
@@ -179,151 +179,42 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         forward.y = 0f;
         if (forward.sqrMagnitude < 0.001f)
         {
-            forward = dog.transform.position - camera.transform.position;
+            forward = pet.RootTransform.position - camera.transform.position;
             forward.y = 0f;
         }
 
         if (forward.sqrMagnitude < 0.001f)
         {
-            forward = -dog.transform.forward;
+            forward = -pet.RootTransform.forward;
         }
 
         Vector3 candidate = camera.transform.position + forward.normalized * CameraApproachDistance;
-        candidate.y = dog.transform.position.y;
-        if (dog.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out approachPoint))
+        candidate.y = pet.RootTransform.position.y;
+        if (pet.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out approachPoint))
         {
             return true;
         }
 
         candidate = camera.transform.position;
-        candidate.y = dog.transform.position.y;
-        return dog.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out approachPoint);
+        candidate.y = pet.RootTransform.position.y;
+        return pet.TryGetRoomSafePoint(candidate, CameraApproachSampleRadius, out approachPoint);
     }
 
-    private static bool TryResolveDogTarget(string dogId, out DogRoomAgent dog)
+    private static bool TryResolvePetTarget(string dogId, out PawPalRoomPetHandle pet)
     {
-        dog = ResolveDogById(dogId);
-        if (dog == null)
+        pet = PawPalRoomPetRuntime.ResolvePetById(dogId, PawPalGameRuntime.Instance != null ? PawPalGameRuntime.Instance.GetPetSpecies(dogId) : IntroPetSpecies.Dog);
+        if (pet == null || !pet.IsValid)
         {
             return false;
         }
 
-        SelectRuntimeDog(dog);
+        PawPalRoomPetRuntime.TrySelectRuntimePet(pet);
         DogCycleCamera.TryForceFocusRuntimeActiveDogFromSelection();
         return true;
     }
 
-    private static void SelectRuntimeDog(DogRoomAgent dog)
+    private static PawPalRoomPetHandle ResolveActivePet()
     {
-        if (dog == null)
-        {
-            return;
-        }
-
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime == null)
-        {
-            return;
-        }
-
-        if (dog.HasExplicitDogId && !string.IsNullOrEmpty(dog.DogId))
-        {
-            runtime.SelectDogById(dog.DogId, false);
-            return;
-        }
-
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            if (dogs[i] == dog)
-            {
-                runtime.SelectDogIndex(i, false);
-                return;
-            }
-        }
-    }
-
-    private static DogRoomAgent ResolveDogById(string dogId)
-    {
-        if (string.IsNullOrWhiteSpace(dogId))
-        {
-            return ResolveActiveDog();
-        }
-
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            DogRoomAgent candidate = dogs[i];
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            if (candidate.HasExplicitDogId && string.Equals(candidate.DogId, dogId, StringComparison.OrdinalIgnoreCase))
-            {
-                return candidate;
-            }
-        }
-
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime != null)
-        {
-            for (int i = 0; i < runtime.Dogs.Count && i < dogs.Length; i++)
-            {
-                PawPalDogState dogState = runtime.Dogs[i];
-                if (dogState != null
-                    && string.Equals(dogState.Id, dogId, StringComparison.OrdinalIgnoreCase)
-                    && dogs[i] != null)
-                {
-                    return dogs[i];
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static DogRoomAgent ResolveActiveDog()
-    {
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        DogRoomAgent[] dogs = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
-        if (dogs == null || dogs.Length == 0)
-        {
-            return null;
-        }
-
-        if (runtime != null && runtime.ActiveDog != null && !string.IsNullOrEmpty(runtime.ActiveDog.Id))
-        {
-            string activeDogId = runtime.ActiveDog.Id;
-            for (int i = 0; i < dogs.Length; i++)
-            {
-                DogRoomAgent candidate = dogs[i];
-                if (candidate != null
-                    && candidate.HasExplicitDogId
-                    && string.Equals(candidate.DogId, activeDogId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        if (runtime != null)
-        {
-            int index = Mathf.Clamp(runtime.ActiveDogIndex, 0, dogs.Length - 1);
-            if (dogs[index] != null)
-            {
-                return dogs[index];
-            }
-        }
-
-        for (int i = 0; i < dogs.Length; i++)
-        {
-            if (dogs[i] != null)
-            {
-                return dogs[i];
-            }
-        }
-
-        return null;
+        return PawPalRoomPetRuntime.ResolveActivePet();
     }
 }
