@@ -476,6 +476,11 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
             return;
         }
 
+        if (string.Equals(SceneManager.GetActiveScene().name, PawPalWalkSceneFlow.WalkSceneName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         if (mainCamera.GetComponent<CameraFollow>() != null)
         {
             return;

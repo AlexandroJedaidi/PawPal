@@ -17,8 +17,6 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
     private const float GroundProbeHeight = 8f;
     private const float GroundProbeDistance = 24f;
-    private const float CameraCollisionProbeRadius = 0.1f;
-
     private static readonly int MoveHash = Animator.StringToHash("Move");
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int DirectionHash = Animator.StringToHash("Direction");
@@ -37,7 +35,6 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private Animator walkerAnimator;
     private Camera sceneCamera;
     private float[] cumulativeRouteDistances = new float[0];
-    private float cameraSideSign = 1f;
     private PawPalPetMovementProfile walkMovementProfile = PawPalPetMovementProfiles.DefaultProfile;
     private float totalRouteDistance = 1f;
     private float currentDistance;
@@ -135,6 +132,11 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (startupFailed)
+        {
+            return;
+        }
+
         PositionCamera(false);
     }
 
@@ -543,7 +545,8 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private void ConfigureSceneCamera()
     {
         Camera[] cameras = Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        sceneCamera = Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Include);
+        Camera authoredCamera = null;
+        Camera existingRuntimeCamera = null;
         for (int i = 0; i < cameras.Length; i++)
         {
             Camera candidate = cameras[i];
@@ -552,21 +555,45 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
                 continue;
             }
 
-            candidate.enabled = false;
-            AudioListener otherListener = candidate.GetComponent<AudioListener>();
-            if (otherListener != null)
+            if (candidate.name == "WalkSideCameraRuntime")
             {
-                otherListener.enabled = false;
+                existingRuntimeCamera = candidate;
+                continue;
+            }
+
+            if (authoredCamera == null)
+            {
+                authoredCamera = candidate;
             }
         }
 
-        GameObject cameraObject = sceneCamera != null && sceneCamera.name == "WalkSideCameraRuntime"
-            ? sceneCamera.gameObject
+        GameObject cameraObject = existingRuntimeCamera != null
+            ? existingRuntimeCamera.gameObject
             : new GameObject("WalkSideCameraRuntime");
         sceneCamera = cameraObject.GetComponent<Camera>();
         if (sceneCamera == null)
         {
             sceneCamera = cameraObject.AddComponent<Camera>();
+        }
+
+        DogCycleCamera dogCycleCamera = cameraObject.GetComponent<DogCycleCamera>();
+        if (dogCycleCamera != null)
+        {
+            dogCycleCamera.enabled = false;
+            Destroy(dogCycleCamera);
+        }
+
+        CameraFollow legacyCameraFollow = cameraObject.GetComponent<CameraFollow>();
+        if (legacyCameraFollow != null)
+        {
+            legacyCameraFollow.enabled = false;
+            Destroy(legacyCameraFollow);
+        }
+
+        if (authoredCamera != null)
+        {
+            cameraObject.transform.SetPositionAndRotation(authoredCamera.transform.position, authoredCamera.transform.rotation);
+            sceneCamera.CopyFrom(authoredCamera);
         }
 
         cameraObject.transform.SetParent(null, false);
@@ -576,6 +603,26 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         sceneCamera.nearClipPlane = 0.03f;
         sceneCamera.farClipPlane = 180f;
         sceneCamera.clearFlags = CameraClearFlags.Skybox;
+        sceneCamera.depth = 100f;
+
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            Camera candidate = cameras[i];
+            if (candidate == null || candidate == sceneCamera)
+            {
+                continue;
+            }
+
+            candidate.enabled = false;
+            candidate.tag = "Untagged";
+            AudioListener otherListener = candidate.GetComponent<AudioListener>();
+            if (otherListener != null)
+            {
+                otherListener.enabled = false;
+            }
+
+            candidate.gameObject.SetActive(false);
+        }
 
         AudioListener[] listeners = Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         for (int i = 0; i < listeners.Length; i++)
@@ -595,87 +642,19 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
         sceneListener.enabled = true;
 
-        Vector3 forward = GetRouteDirectionAtDistance(currentDistance);
-        if (forward.sqrMagnitude <= 0.001f)
-        {
-            forward = Vector3.right;
-        }
-
-        forward.Normalize();
-        Vector3 side = Vector3.Cross(Vector3.up, forward).normalized;
-        cameraSideSign = ResolveCameraSideSign(walker.position, forward, side);
         PositionCamera(true);
     }
 
     private void PositionCamera(bool immediate)
     {
-        if (sceneCamera == null || walker == null)
+        if (sceneCamera == null || walker == null || sceneBindings == null)
         {
             return;
         }
 
-        Vector3 forward = GetRouteDirectionAtDistance(currentDistance);
-        if (forward.sqrMagnitude <= 0.001f)
-        {
-            forward = Vector3.right;
-        }
-
-        forward.Normalize();
-        Vector3 side = Vector3.Cross(Vector3.up, forward).normalized;
-        Vector3 desiredPosition = BuildCameraPosition(walker.position, forward, side, cameraSideSign, out Vector3 lookTarget);
-        sceneCamera.transform.position = desiredPosition;
-        sceneCamera.transform.rotation = Quaternion.LookRotation((lookTarget - desiredPosition).normalized, Vector3.up);
-    }
-
-    private float ResolveCameraSideSign(Vector3 walkerPosition, Vector3 forward, Vector3 side)
-    {
-        Vector3 preferred = BuildCameraPosition(walkerPosition, forward, side, 1f, out Vector3 preferredLookTarget);
-        float preferredObstruction = MeasureCameraObstruction(preferredLookTarget, preferred);
-
-        Vector3 alternate = BuildCameraPosition(walkerPosition, forward, side, -1f, out Vector3 alternateLookTarget);
-        float alternateObstruction = MeasureCameraObstruction(alternateLookTarget, alternate);
-
-        if (alternateObstruction + 0.01f < preferredObstruction)
-        {
-            return -1f;
-        }
-
-        return 1f;
-    }
-
-    private Vector3 BuildCameraPosition(Vector3 walkerPosition, Vector3 forward, Vector3 side, float sideSign, out Vector3 lookTarget)
-    {
-        Vector3 sideOffset = side * (sceneBindings.CameraOffset.z * sideSign);
-        Vector3 lookSideOffset = side * (sceneBindings.LookAtOffset.x * sideSign);
-        lookTarget = walkerPosition
-            + lookSideOffset
-            + Vector3.up * sceneBindings.LookAtOffset.y
-            + forward * sceneBindings.LookAtOffset.z;
-        return walkerPosition
-            + sideOffset
-            + Vector3.up * sceneBindings.CameraOffset.y
-            + forward * sceneBindings.CameraOffset.x;
-    }
-
-    private float MeasureCameraObstruction(Vector3 lookTarget, Vector3 desiredPosition)
-    {
-        Vector3 direction = desiredPosition - lookTarget;
-        float distance = direction.magnitude;
-        if (distance <= 0.001f)
-        {
-            return 0f;
-        }
-
-        direction /= distance;
-        if (Physics.SphereCast(lookTarget, CameraCollisionProbeRadius, direction, out RaycastHit hit, distance))
-        {
-            if (!IsWalkerHit(hit.transform))
-            {
-                return distance - hit.distance;
-            }
-        }
-
-        return 0f;
+        Vector3 desiredPosition = walker.position + sceneBindings.CameraFollowWorldOffset;
+        Quaternion desiredRotation = Quaternion.Euler(sceneBindings.CameraFixedEulerAngles);
+        sceneCamera.transform.SetPositionAndRotation(desiredPosition, desiredRotation);
     }
 
     private void MoveWalkerToDistance(float routeDistance, bool immediate)

@@ -15,6 +15,8 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
     [SerializeField] private PawPalWalkGraph graph;
     [SerializeField] private List<Transform> routeMarkers = new List<Transform>();
     [SerializeField] private List<Collider> allowedRoadColliders = new List<Collider>();
+    [SerializeField] private Vector3 cameraFollowWorldOffset = new Vector3(0.021f, 0.623f, -1.551f);
+    [SerializeField] private Vector3 cameraFixedEulerAngles = new Vector3(8.904f, 0f, 0f);
     [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 1.35f, -3.2f);
     [SerializeField] private Vector3 lookAtOffset = new Vector3(0f, 0.7f, 0.35f);
     [SerializeField] private Vector2 pauseIntervalRange = new Vector2(5f, 9f);
@@ -26,6 +28,8 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
 
     public Transform SpawnPoint => spawnPoint;
     public PawPalWalkGraph Graph => graph;
+    public Vector3 CameraFollowWorldOffset => cameraFollowWorldOffset;
+    public Vector3 CameraFixedEulerAngles => cameraFixedEulerAngles;
     public Vector3 CameraOffset => cameraOffset;
     public Vector3 LookAtOffset => lookAtOffset;
     public float RunSpeedMultiplier => Mathf.Max(0.1f, runSpeedMultiplier);
