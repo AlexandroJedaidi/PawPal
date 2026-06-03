@@ -192,6 +192,7 @@ public class HomeScreenView : AppScreenViewBase
         voiceController.ToggleMic();
         bool interactionMicEnabled = voiceController.IsMicEnabled && shell != null && shell.IsDogInteractionModeActive;
         voiceController.SetInteractionTrainingCommandsEnabled(interactionMicEnabled);
+        Debug.Log("[VoiceDebug] ToggleVoiceMicForInteraction micEnabled=" + voiceController.IsMicEnabled + " interactionMicEnabled=" + interactionMicEnabled, this);
         RefreshAddonSelection();
     }
 
@@ -258,6 +259,11 @@ public class HomeScreenView : AppScreenViewBase
             {
                 voiceController.SetInteractionTrainingCommandsEnabled(false);
             }
+
+            Debug.Log(
+                "[VoiceDebug] ToggleMicrophoneMode micEnabled=" + voiceController.IsMicEnabled
+                + " interactionActive=" + (shell != null && shell.IsDogInteractionModeActive),
+                this);
         }
 
         RefreshAddonSelection();
@@ -394,6 +400,18 @@ public class HomeScreenView : AppScreenViewBase
 
     private void HandleVoiceControllerStateChanged()
     {
+        if (voiceController != null)
+        {
+            bool interactionMicEnabled = voiceController.IsMicEnabled
+                && shell != null
+                && shell.IsDogInteractionModeActive;
+            voiceController.SetInteractionTrainingCommandsEnabled(interactionMicEnabled);
+            Debug.Log(
+                "[VoiceDebug] HandleVoiceControllerStateChanged micEnabled=" + voiceController.IsMicEnabled
+                + " interactionMicEnabled=" + interactionMicEnabled,
+                this);
+        }
+
         if (shell != null)
         {
             shell.SetDogInteractionMicListening(voiceController != null && voiceController.IsMicEnabled);
@@ -408,6 +426,13 @@ public class HomeScreenView : AppScreenViewBase
         {
             return PawPalVoiceCommandExecutionResult.Unhandled();
         }
+
+        Debug.Log(
+            "[VoiceDebug] HandleVoiceCommandExecutionRequested type=" + command.Type
+            + " dogId=" + command.DogId
+            + " trickId=" + command.TrickId
+            + " interactionActive=" + shell.IsDogInteractionModeActive,
+            this);
 
         if (command.Type == PawPalResolvedVoiceCommandType.CallDog)
         {
@@ -695,6 +720,7 @@ public class HomeScreenView : AppScreenViewBase
         }
 
         RefreshAddonSelection();
+        RefreshRuntimeState();
     }
 
     private void BuildNeedPopup()

@@ -408,12 +408,7 @@ public sealed class IntroPetSelectionController : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
-        {
-            return;
-        }
-
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        PawPalEventSystemUtility.EnsureSingleEventSystem(false);
     }
 
     private void InitializePreviewSystems()
@@ -625,6 +620,8 @@ public sealed class IntroPetInteractionOverlayController : MonoBehaviour
             previewVocalDirector.SetInteractionSuspended(true);
         }
 
+        DogSocialDirector.SetIntroPreviewInteractionSuspended(true);
+
         SetIntroPreviewInteractionPresentation(true);
         if (!interactionController.TryEnterDogInteractionMode(pet, false, PawPalDogInteractionModeOptions.PreviewOnlyDefault))
         {
@@ -632,6 +629,8 @@ public sealed class IntroPetInteractionOverlayController : MonoBehaviour
             {
                 previewVocalDirector.SetInteractionSuspended(false);
             }
+
+            DogSocialDirector.SetIntroPreviewInteractionSuspended(false);
 
             SetIntroPreviewInteractionPresentation(false);
         }
@@ -653,6 +652,8 @@ public sealed class IntroPetInteractionOverlayController : MonoBehaviour
         {
             previewVocalDirector.SetInteractionSuspended(false);
         }
+
+        DogSocialDirector.SetIntroPreviewInteractionSuspended(false);
 
         SetIntroPreviewInteractionPresentation(false);
     }

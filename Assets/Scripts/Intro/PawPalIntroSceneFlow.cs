@@ -29,7 +29,7 @@ public static class PawPalIntroSceneFlow
             HomeScenePath,
             new PawPalSceneTransitionRequest
             {
-                DisplayText = "Preparing your pup...",
+                DisplayText = "Preparing your space",
                 WaitForExplicitReady = true,
                 MinimumPostLoadFrames = 2,
                 OnObscured = delegate
@@ -46,7 +46,7 @@ public static class PawPalIntroSceneFlow
             IntroScenePath,
             new PawPalSceneTransitionRequest
             {
-                DisplayText = "Loading...",
+                DisplayText = "Setting things up",
                 MinimumPostLoadFrames = 2,
                 OnObscured = delegate
                 {

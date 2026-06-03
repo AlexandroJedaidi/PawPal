@@ -12,8 +12,8 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 {
     private const string EditorFoodBowlAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Dog_Object/Prefabs/Bowl_1_food_1.prefab";
     private const string EditorWaterBowlAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Dog_Object/Prefabs/Bowl_2_water.prefab";
-    private const string EditorEatingAudioAssetPath = "Assets/Audio/dog_eating.mp3";
-    private const string EditorDrinkingAudioAssetPath = "Assets/Audio/dog_drinking.mp3";
+    private const string EditorEatingAudioAssetPath = "Assets/Resources/Audio/dog_eating.mp3";
+    private const string EditorDrinkingAudioAssetPath = "Assets/Resources/Audio/dog_drinking.mp3";
     private const float MinRuntimeBowlApproachDistance = 0.14f;
     private const float MaxRuntimeBowlApproachDistance = 0.5f;
     private const string StarBurstResourcePath = "UI/Interaction/star";

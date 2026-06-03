@@ -1680,7 +1680,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public void SelectNextDog()
     {
-        if (dogs.Count <= 1)
+        if (dogs.Count <= 1 || IsTemporaryIntroSelectionLocked())
         {
             return;
         }
@@ -1691,7 +1691,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public void SelectPreviousDog()
     {
-        if (dogs.Count <= 1)
+        if (dogs.Count <= 1 || IsTemporaryIntroSelectionLocked())
         {
             return;
         }
@@ -1708,6 +1708,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     public bool SelectDogIndex(int dogIndex, bool saveProfile)
     {
         if (dogs.Count == 0 || dogIndex < 0 || dogIndex >= dogs.Count)
+        {
+            return false;
+        }
+
+        if (IsTemporaryIntroSelectionLocked() && activeDogIndex != dogIndex)
         {
             return false;
         }
@@ -1741,6 +1746,12 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         return false;
+    }
+
+    private bool IsTemporaryIntroSelectionLocked()
+    {
+        PawPalDogState activeDog = ActiveDog;
+        return activeDog != null && IsTemporaryIntroDogId(activeDog.Id);
     }
 
     public bool IsTemporaryIntroDog(string dogId)

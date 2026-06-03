@@ -11,7 +11,7 @@ using UnityEditor;
 public sealed class PawPalPlayerToyThrowController : MonoBehaviour
 {
 #if UNITY_EDITOR
-    private const string EditorToyPickupAudioAssetPath = "Assets/Audio/toy_pickup.mp3";
+    private const string EditorToyPickupAudioAssetPath = "Assets/Resources/Audio/toy_pickup.mp3";
 #endif
 
     private enum PointerMode

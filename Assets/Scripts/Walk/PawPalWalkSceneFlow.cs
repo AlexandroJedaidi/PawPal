@@ -30,7 +30,7 @@ public static class PawPalWalkSceneFlow
             WalkScenePath,
             new PawPalSceneTransitionRequest
             {
-                DisplayText = "Heading outside...",
+                DisplayText = "Getting everything ready",
                 MinimumPostLoadFrames = 2,
                 OnObscured = delegate
                 {
@@ -60,7 +60,7 @@ public static class PawPalWalkSceneFlow
             null,
             new PawPalSceneTransitionRequest
             {
-                DisplayText = "Heading home...",
+                DisplayText = "Preparing your space",
                 MinimumPostLoadFrames = 2,
                 FallbackSceneName = HomeSceneName,
                 FallbackScenePath = HomeScenePath,

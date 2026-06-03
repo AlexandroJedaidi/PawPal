@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 [DisallowMultipleComponent]
 public sealed class PawPalPetFollowCamera : MonoBehaviour
@@ -54,6 +55,11 @@ public sealed class PawPalPetFollowCamera : MonoBehaviour
             return false;
         }
 
+        if (ShouldUseHomeSceneFixedCamera(mainCamera))
+        {
+            return false;
+        }
+
         PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
         if (followCamera == null)
         {
@@ -75,5 +81,16 @@ public sealed class PawPalPetFollowCamera : MonoBehaviour
         followCamera.enabled = true;
         followCamera.Focus(pet.FocusTransform, pet.HomeCameraOffset, false);
         return true;
+    }
+
+    private static bool ShouldUseHomeSceneFixedCamera(Camera mainCamera)
+    {
+        if (mainCamera == null || mainCamera.GetComponent<DogCycleCamera>() == null)
+        {
+            return false;
+        }
+
+        Scene activeScene = SceneManager.GetActiveScene();
+        return PawPalIntroSceneFlow.IsHomeScene(activeScene);
     }
 }

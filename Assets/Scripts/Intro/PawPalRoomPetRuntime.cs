@@ -122,6 +122,19 @@ public sealed class PawPalRoomPetHandle
         get { return DogAgent != null ? DogAgent.HasHeldToy : CatAgent != null && CatAgent.HasHeldToy; }
     }
 
+    public bool CanJoinSocialInteraction
+    {
+        get
+        {
+            if (DogAgent != null)
+            {
+                return DogAgent.CanJoinSocialInteraction;
+            }
+
+            return CatAgent != null && CatAgent.CanJoinSocialInteraction;
+        }
+    }
+
     public bool WasLastTravelSuccessful
     {
         get { return DogAgent != null ? DogAgent.WasLastTravelSuccessful : CatAgent != null && CatAgent.WasLastTravelSuccessful; }
@@ -249,6 +262,16 @@ public sealed class PawPalRoomPetHandle
         return CatAgent != null ? CatAgent.PlayBark(duration) : EmptyRoutine();
     }
 
+    public IEnumerator PlaySocialVocal(float duration)
+    {
+        if (DogAgent != null)
+        {
+            return DogAgent.PlaySocialInteractionVocal(duration);
+        }
+
+        return CatAgent != null ? CatAgent.PlayBark(duration) : EmptyRoutine();
+    }
+
     public bool CanPlayPhotoPose(PawPalPhotoPoseId poseId)
     {
         if (DogAgent != null)
@@ -286,7 +309,7 @@ public sealed class PawPalRoomPetHandle
             return DogAgent.PlayInteractionTrainingTrick(definition, useFallback);
         }
 
-        return CatAgent != null ? CatAgent.PlayTrainingTrick(definition, camera) : EmptyRoutine();
+        return CatAgent != null ? CatAgent.PlayInteractionTrainingTrick(definition, camera) : EmptyRoutine();
     }
 
     public bool TryPlayPettingReaction()
@@ -306,7 +329,7 @@ public sealed class PawPalRoomPetHandle
             return DogAgent.TryPlayPreviewVocal();
         }
 
-        return false;
+        return CatAgent != null && CatAgent.TryPlayPreviewVocal();
     }
 
     public void StartHeldToyTugAnimation()
@@ -387,7 +410,7 @@ public sealed class PawPalRoomPetHandle
     {
         if (DogAgent != null)
         {
-            return DogAgent.isActiveAndEnabled && !DogAgent.IsBusy && !DogAgent.IsPlayingOneShotAnimation;
+            return DogAgent.CanPerformTrainingAnimation();
         }
 
         return CatAgent != null && CatAgent.CanPerformTrainingAnimation();

@@ -7,7 +7,7 @@ using UnityEditor;
 public sealed class PawPalBallBounceAudio : MonoBehaviour
 {
 #if UNITY_EDITOR
-    private const string EditorBallBounceAudioAssetPath = "Assets/Audio/ball_bounce.mp3";
+    private const string EditorBallBounceAudioAssetPath = "Assets/Resources/Audio/ball_bounce.mp3";
 #endif
 
     [SerializeField] private AudioClip bounceClip;

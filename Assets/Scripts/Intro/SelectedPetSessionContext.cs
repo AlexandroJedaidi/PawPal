@@ -102,6 +102,13 @@ public enum PawPalPetSizeClass
     Large
 }
 
+internal enum PawPalAutoTravelContext
+{
+    AmbientRoam,
+    SelfDirectedPlay,
+    ForcedChase
+}
+
 public struct PawPalPetMovementProfile
 {
     public PawPalPetSizeClass SizeClass;
@@ -139,14 +146,42 @@ public struct PawPalPetMovementProfile
     }
 }
 
+internal struct PawPalPetAutoTravelThresholdProfile
+{
+    public PawPalPetSizeClass SizeClass;
+    public float WalkDistanceMax;
+    public float TrotDistanceMax;
+
+    public DogMovementPace ResolveBasePace(float travelDistance, PawPalAutoTravelContext context)
+    {
+        if (context == PawPalAutoTravelContext.ForcedChase)
+        {
+            return DogMovementPace.Run;
+        }
+
+        DogMovementPace resolvedPace = travelDistance <= WalkDistanceMax
+            ? DogMovementPace.Walk
+            : (travelDistance <= TrotDistanceMax ? DogMovementPace.Trot : DogMovementPace.Run);
+
+        if (context == PawPalAutoTravelContext.SelfDirectedPlay && resolvedPace == DogMovementPace.Walk)
+        {
+            return DogMovementPace.Trot;
+        }
+
+        return resolvedPace;
+    }
+}
+
 public static class PawPalPetMovementProfiles
 {
-    private const float MediumWalkSpeed = 0.65f;
+    private const float MediumWalkSpeed = 0.52f;
     private const float MediumTrotSpeed = 0.98f;
     private const float MediumRunSpeed = 1.30f;
-    private const float LargeWalkSpeed = 0.80f;
+    private const float LargeWalkSpeed = 0.66f;
     private const float LargeTrotSpeed = 1.18f;
-    private const float LargeRunSpeed = 2.45f;
+    private const float LargeRunSpeed = 3.35f;
+    private const float LegacyMediumWalkSpeedForAnimator = 0.65f;
+    private const float LegacyLargeWalkSpeedForAnimator = 0.80f;
     private const float LegacyLargeRunSpeedForAnimator = 1.55f;
     private const float MediumWalkAnimatorBaseline = 0.5f;
     private const float MediumTrotAnimatorBaseline = 0.78f;
@@ -160,13 +195,20 @@ public static class PawPalPetMovementProfiles
         0.42f,
         ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, 0.78f, MediumTrotSpeed),
         ScaleAnimatorBaseline(MediumRunAnimatorBaseline, 1.05f, MediumRunSpeed));
-    private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(PawPalPetSizeClass.Medium, MediumWalkSpeed, MediumTrotSpeed, MediumRunSpeed);
+    private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(
+        PawPalPetSizeClass.Medium,
+        MediumWalkSpeed,
+        MediumTrotSpeed,
+        MediumRunSpeed,
+        MediumWalkAnimatorBaseline,
+        MediumTrotAnimatorBaseline,
+        MediumRunAnimatorBaseline);
     private static readonly PawPalPetMovementProfile LargeProfile = BuildProfile(
         PawPalPetSizeClass.Large,
         LargeWalkSpeed,
         LargeTrotSpeed,
         LargeRunSpeed,
-        ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, LargeWalkSpeed, MediumWalkSpeed),
+        ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, LegacyLargeWalkSpeedForAnimator, LegacyMediumWalkSpeedForAnimator),
         ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, LargeTrotSpeed, MediumTrotSpeed),
         ScaleAnimatorBaseline(MediumRunAnimatorBaseline, LegacyLargeRunSpeedForAnimator, MediumRunSpeed));
 
@@ -264,4 +306,41 @@ public static class PawPalPetMovementProfiles
         return baseline * (targetSpeed / mediumSpeed);
     }
 
+}
+
+internal static class PawPalPetAutoTravelProfiles
+{
+    private static readonly PawPalPetAutoTravelThresholdProfile SmallProfile = new PawPalPetAutoTravelThresholdProfile
+    {
+        SizeClass = PawPalPetSizeClass.Small,
+        WalkDistanceMax = 1.4f,
+        TrotDistanceMax = 3.0f
+    };
+
+    private static readonly PawPalPetAutoTravelThresholdProfile MediumProfile = new PawPalPetAutoTravelThresholdProfile
+    {
+        SizeClass = PawPalPetSizeClass.Medium,
+        WalkDistanceMax = 1.8f,
+        TrotDistanceMax = 4.2f
+    };
+
+    private static readonly PawPalPetAutoTravelThresholdProfile LargeProfile = new PawPalPetAutoTravelThresholdProfile
+    {
+        SizeClass = PawPalPetSizeClass.Large,
+        WalkDistanceMax = 2.4f,
+        TrotDistanceMax = 5.8f
+    };
+
+    public static PawPalPetAutoTravelThresholdProfile Resolve(PawPalPetSizeClass sizeClass)
+    {
+        switch (sizeClass)
+        {
+            case PawPalPetSizeClass.Small:
+                return SmallProfile;
+            case PawPalPetSizeClass.Large:
+                return LargeProfile;
+            default:
+                return MediumProfile;
+        }
+    }
 }

@@ -203,6 +203,24 @@ public sealed class PawPalVoiceCommandCatalog
             return command;
         }
 
+        command = ResolveContainedCommand(normalized, dogAndTrickCommands);
+        if (command != null)
+        {
+            return command;
+        }
+
+        command = ResolveContainedCommand(normalized, dogOnlyCommands);
+        if (command != null)
+        {
+            return command;
+        }
+
+        command = ResolveContainedCommand(normalized, activeDogTrickCommands);
+        if (command != null)
+        {
+            return command;
+        }
+
         return PawPalResolvedVoiceCommand.None();
     }
 
@@ -251,6 +269,33 @@ public sealed class PawPalVoiceCommandCatalog
         {
             phrases.Add(normalizedPhrase);
         }
+    }
+
+    private static PawPalResolvedVoiceCommand ResolveContainedCommand(string normalizedTranscript, Dictionary<string, PawPalResolvedVoiceCommand> commands)
+    {
+        if (string.IsNullOrEmpty(normalizedTranscript) || commands == null || commands.Count == 0)
+        {
+            return null;
+        }
+
+        PawPalResolvedVoiceCommand bestMatch = null;
+        int bestLength = -1;
+        foreach (KeyValuePair<string, PawPalResolvedVoiceCommand> pair in commands)
+        {
+            string phrase = pair.Key;
+            if (string.IsNullOrEmpty(phrase) || phrase.Length <= bestLength)
+            {
+                continue;
+            }
+
+            if (normalizedTranscript.IndexOf(phrase, StringComparison.Ordinal) >= 0)
+            {
+                bestMatch = pair.Value;
+                bestLength = phrase.Length;
+            }
+        }
+
+        return bestMatch;
     }
 }
 
@@ -531,10 +576,12 @@ internal static class PawPalVoiceCommandServiceFactory
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
 internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceCommandService
 {
+    private const string VoiceDebugPrefix = "[VoiceDebug]";
     private readonly List<string> phrases = new List<string>();
-    private KeywordRecognizer recognizer;
+    private DictationRecognizer recognizer;
     private Action<PawPalVoiceRecognizedPhrase> recognizedHandler;
     private Action<PawPalVoiceCommandFailureReason, string> failureHandler;
+    private bool shouldListen;
 
     public bool IsAvailable
     {
@@ -548,7 +595,7 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
 
     public bool IsListening
     {
-        get { return recognizer != null && recognizer.IsRunning; }
+        get { return recognizer != null && recognizer.Status == SpeechSystemStatus.Running; }
     }
 
     public PawPalVoiceCommandFailureReason LastFailureReason { get; private set; }
@@ -582,12 +629,15 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
         {
             RestartRecognizer();
         }
+
+        Debug.Log(VoiceDebugPrefix + " Windows ConfigurePhrases count=" + phrases.Count + " phrases=[" + string.Join(", ", phrases) + "]");
     }
 
     public bool StartListening(Action<PawPalVoiceRecognizedPhrase> onRecognized, Action<PawPalVoiceCommandFailureReason, string> onFailure)
     {
         recognizedHandler = onRecognized;
         failureHandler = onFailure;
+        shouldListen = true;
 
         if (phrases.Count == 0)
         {
@@ -598,7 +648,12 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
         try
         {
             RestartRecognizer();
-            return recognizer != null && recognizer.IsRunning;
+            bool started = recognizer != null;
+            Debug.Log(
+                VoiceDebugPrefix
+                + " Windows StartListening started=" + started
+                + " status=" + (recognizer != null ? recognizer.Status.ToString() : "null"));
+            return started;
         }
         catch (Exception exception)
         {
@@ -609,6 +664,7 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
 
     public void StopListening()
     {
+        shouldListen = false;
         DisposeRecognizer();
     }
 
@@ -619,14 +675,17 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
     private void RestartRecognizer()
     {
         DisposeRecognizer();
-        if (phrases.Count == 0)
+        if (!shouldListen)
         {
             return;
         }
 
-        recognizer = new KeywordRecognizer(phrases.ToArray(), ConfidenceLevel.Medium);
-        recognizer.OnPhraseRecognized += HandlePhraseRecognized;
+        recognizer = new DictationRecognizer(ConfidenceLevel.Low);
+        recognizer.DictationResult += HandleDictationResult;
+        recognizer.DictationComplete += HandleDictationComplete;
+        recognizer.DictationError += HandleDictationError;
         recognizer.Start();
+        Debug.Log(VoiceDebugPrefix + " Windows RestartRecognizer phraseCount=" + phrases.Count + " mode=Dictation");
     }
 
     private void DisposeRecognizer()
@@ -636,8 +695,10 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
             return;
         }
 
-        recognizer.OnPhraseRecognized -= HandlePhraseRecognized;
-        if (recognizer.IsRunning)
+        recognizer.DictationResult -= HandleDictationResult;
+        recognizer.DictationComplete -= HandleDictationComplete;
+        recognizer.DictationError -= HandleDictationError;
+        if (recognizer.Status == SpeechSystemStatus.Running)
         {
             recognizer.Stop();
         }
@@ -646,18 +707,54 @@ internal sealed class PawPalWindowsKeywordVoiceCommandService : IPawPalVoiceComm
         recognizer = null;
     }
 
-    private void HandlePhraseRecognized(PhraseRecognizedEventArgs args)
+    private void HandleDictationResult(string text, ConfidenceLevel confidence)
     {
         if (recognizedHandler == null)
         {
             return;
         }
 
+        Debug.Log(VoiceDebugPrefix + " Windows DictationResult text='" + text + "' confidence=" + confidence);
+
         recognizedHandler(new PawPalVoiceRecognizedPhrase
         {
-            Transcript = args.text,
-            Confidence01 = MapConfidence(args.confidence)
+            Transcript = text,
+            Confidence01 = MapConfidence(confidence)
         });
+    }
+
+    private void HandleDictationComplete(DictationCompletionCause cause)
+    {
+        Debug.Log(VoiceDebugPrefix + " Windows DictationComplete cause=" + cause);
+
+        if (!shouldListen)
+        {
+            return;
+        }
+
+        switch (cause)
+        {
+            case DictationCompletionCause.Complete:
+            case DictationCompletionCause.TimeoutExceeded:
+            case DictationCompletionCause.PauseLimitExceeded:
+            case DictationCompletionCause.Canceled:
+                RestartRecognizer();
+                break;
+            default:
+                ReportFailure(PawPalVoiceCommandFailureReason.Unsupported, "Windows speech recognition stopped: " + cause);
+                break;
+        }
+    }
+
+    private void HandleDictationError(string error, int hresult)
+    {
+        Debug.LogWarning(VoiceDebugPrefix + " Windows DictationError error='" + error + "' hresult=" + hresult);
+        if (!shouldListen)
+        {
+            return;
+        }
+
+        ReportFailure(PawPalVoiceCommandFailureReason.Unsupported, "Windows speech recognition failed: " + error);
     }
 
     private void ReportFailure(PawPalVoiceCommandFailureReason reason, string message)

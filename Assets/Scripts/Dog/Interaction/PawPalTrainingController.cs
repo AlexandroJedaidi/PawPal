@@ -384,13 +384,7 @@ public sealed class PawPalTrainingController : MonoBehaviour
 
     private static bool CanStartDogAnimation(DogRoomAgent dog)
     {
-        return dog != null
-            && dog.isActiveAndEnabled
-            && !dog.IsBusy
-            && !dog.IsPlayingOneShotAnimation
-            && !dog.IsResting
-            && !dog.IsSleeping
-            && !dog.HasHeldToy;
+        return dog != null && dog.CanPerformTrainingAnimation();
     }
 
     private static DogRoomAgent ResolveActiveDogAgent()

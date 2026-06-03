@@ -28,13 +28,13 @@ public class DogSocialDirector : MonoBehaviour
 
     private const string DavidTestSceneName = "David_Test";
     private const string IntroPetSelectionSceneName = "IntroPetSelection";
-    private const string HomeThemeAssetPath = "Assets/Audio/pawfriends_home.mp3";
+    private const string HomeThemeAssetPath = "Assets/Resources/Audio/pawfriends_home.mp3";
     private const string NightAmbienceEditorAssetPath = "Assets/Resources/Audio/night-ambience.mp3";
     private const string NightAmbienceResourcePath = "Audio/night-ambience";
-    private const string LabradorBarkAssetPath = "Assets/Audio/bark_light.mp3";
-    private const string CorgiBarkAssetPath = "Assets/Audio/bark_dark.mp3";
-    private const string AmbientCarAssetPath = "Assets/Audio/ambient_car.mp3";
-    private const string AmbientBirdsAssetPath = "Assets/Audio/birds_chirping.mp3";
+    private const string LabradorBarkAssetPath = "Assets/Resources/Audio/bark_light.mp3";
+    private const string CorgiBarkAssetPath = "Assets/Resources/Audio/bark_dark.mp3";
+    private const string AmbientCarAssetPath = "Assets/Resources/Audio/ambient_car.mp3";
+    private const string AmbientBirdsAssetPath = "Assets/Resources/Audio/birds_chirping.mp3";
     private const string NightBackgroundLayerSourceName = "NightBackgroundLayerAudio";
     private const string NightBackgroundLayerSourceSecondaryName = "NightBackgroundLayerAudio_Secondary";
     private const float AmbientCarVolumeMultiplier = 1.5f;
@@ -42,6 +42,9 @@ public class DogSocialDirector : MonoBehaviour
     private const float DefaultSunsetHour = 20f;
     private const float DefaultTransitionHours = 1f;
     private const float CozySocialMeetDistance = 0.46f;
+    private const float LargeBreedMeetPadding = 0.12f;
+    private const float MediumBreedMeetPadding = 0.06f;
+    private const float SmallBreedMeetPadding = 0.02f;
     private const float MaximumProximityInteractionStartDistance = 1.35f;
     private const float SocialApproachReachedDistance = 0.1f;
     private const float MinimumSocialInteractionDelay = 120f;
@@ -51,6 +54,7 @@ public class DogSocialDirector : MonoBehaviour
     private static readonly List<DogRoomAgent> RegisteredAgents = new List<DogRoomAgent>();
     private static DogSocialDirector runtimeDirector;
     private static DogRoomAgent preferredInteractionDog;
+    private static int introPreviewInteractionSuspendDepth;
 
     [SerializeField] private DogRoomAgent dogA;
     [SerializeField] private DogRoomAgent dogB;
@@ -104,6 +108,7 @@ public class DogSocialDirector : MonoBehaviour
     [SerializeField] private float barkSpacing = 0.18f;
 
     private Coroutine socialRoutine;
+    private Coroutine mixedSpeciesSocialRoutine;
     private Coroutine backgroundMusicRoutine;
     private Coroutine ambientCarRoutine;
     private Coroutine ambientBirdsRoutine;
@@ -122,8 +127,16 @@ public class DogSocialDirector : MonoBehaviour
     private LivingRoomGraphicsEnhancer livingRoomGraphicsEnhancer;
     private readonly Queue<DogSocialInteractionType> recentInteractionTypes = new Queue<DogSocialInteractionType>();
     private readonly Dictionary<string, float> pairCooldownUntilByKey = new Dictionary<string, float>();
+    private readonly Queue<DogSocialInteractionType> recentIntroInteractionTypes = new Queue<DogSocialInteractionType>();
+    private readonly Dictionary<string, float> introPairCooldownUntilByKey = new Dictionary<string, float>();
+    private readonly Queue<DogSocialInteractionType> recentMixedSpeciesInteractionTypes = new Queue<DogSocialInteractionType>();
+    private readonly Dictionary<string, float> mixedSpeciesPairCooldownUntilByKey = new Dictionary<string, float>();
     private DogRoomAgent lastInteractingDogA;
     private DogRoomAgent lastInteractingDogB;
+    private string lastIntroInteractingPetKeyA = string.Empty;
+    private string lastIntroInteractingPetKeyB = string.Empty;
+    private string lastMixedSpeciesPetKeyA = string.Empty;
+    private string lastMixedSpeciesPetKeyB = string.Empty;
 #if UNITY_EDITOR
     private Mesh editorPreviewNavMeshMesh;
     private double nextEditorPreviewRefreshTime;
@@ -149,6 +162,15 @@ public class DogSocialDirector : MonoBehaviour
     public static void SetPreferredInteractionDog(DogRoomAgent agent)
     {
         preferredInteractionDog = agent;
+    }
+
+    public static void SetIntroPreviewInteractionSuspended(bool suspended)
+    {
+        introPreviewInteractionSuspendDepth = Mathf.Max(0, introPreviewInteractionSuspendDepth + (suspended ? 1 : -1));
+        if (runtimeDirector != null && runtimeDirector.IsIntroSelectionScene())
+        {
+            runtimeDirector.RefreshAgents();
+        }
     }
 
     public static void Register(DogRoomAgent agent)
@@ -275,6 +297,12 @@ public class DogSocialDirector : MonoBehaviour
             socialRoutine = null;
         }
 
+        if (mixedSpeciesSocialRoutine != null)
+        {
+            StopCoroutine(mixedSpeciesSocialRoutine);
+            mixedSpeciesSocialRoutine = null;
+        }
+
         if (backgroundMusicRoutine != null)
         {
             StopCoroutine(backgroundMusicRoutine);
@@ -350,9 +378,29 @@ public class DogSocialDirector : MonoBehaviour
             dogB = RegisteredAgents[1];
         }
 
-        if (isActiveAndEnabled && socialRoutine == null && RegisteredAgents.Count >= 2)
+        if (!isActiveAndEnabled || socialRoutine != null)
+        {
+            return;
+        }
+
+        if (IsIntroSelectionScene())
+        {
+            if (CountAvailableIntroPets() >= 2)
+            {
+                socialRoutine = StartCoroutine(IntroPreviewSocialRoutine());
+            }
+
+            return;
+        }
+
+        if (RegisteredAgents.Count >= 2)
         {
             socialRoutine = StartCoroutine(SocialRoutine());
+        }
+
+        if (IsDavidTestScene() && mixedSpeciesSocialRoutine == null && CountAvailableMixedSpeciesPets() >= 2)
+        {
+            mixedSpeciesSocialRoutine = StartCoroutine(MixedSpeciesSocialRoutine());
         }
     }
 
@@ -399,6 +447,104 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         socialRoutine = null;
+    }
+
+    private IEnumerator IntroPreviewSocialRoutine()
+    {
+        EnsureNavMeshAvailable();
+        yield return new WaitForSeconds(GetIntroInitialInteractionDelay());
+
+        while (isActiveAndEnabled && IsIntroSelectionScene())
+        {
+            if (IsIntroPreviewInteractionSuspended())
+            {
+                yield return null;
+                continue;
+            }
+
+            PawPalRoomPetHandle firstPet = null;
+            PawPalRoomPetHandle secondPet = null;
+            while (isActiveAndEnabled
+                && IsIntroSelectionScene()
+                && !IsIntroPreviewInteractionSuspended()
+                && !TrySelectIntroInteractionPair(out firstPet, out secondPet))
+            {
+                yield return null;
+            }
+
+            if (!isActiveAndEnabled || !IsIntroSelectionScene())
+            {
+                break;
+            }
+
+            if (IsIntroPreviewInteractionSuspended())
+            {
+                yield return null;
+                continue;
+            }
+
+            DogSocialInteractionType interactionType = SelectIntroInteractionType(firstPet, secondPet);
+            yield return RunIntroInteraction(interactionType, firstPet, secondPet);
+            RememberIntroInteraction(firstPet, secondPet, interactionType);
+
+            if (firstPet != null)
+            {
+                firstPet.StartRoaming();
+            }
+
+            if (secondPet != null)
+            {
+                secondPet.StartRoaming();
+            }
+
+            yield return new WaitForSeconds(GetIntroNextInteractionDelay());
+        }
+
+        socialRoutine = null;
+    }
+
+    private IEnumerator MixedSpeciesSocialRoutine()
+    {
+        EnsureNavMeshAvailable();
+        yield return new WaitForSeconds(Random.Range(12f, 22f));
+
+        while (isActiveAndEnabled && IsDavidTestScene())
+        {
+            PawPalRoomPetHandle dogPet = null;
+            PawPalRoomPetHandle catPet = null;
+            while (isActiveAndEnabled && IsDavidTestScene() && !TrySelectMixedSpeciesInteractionPair(out dogPet, out catPet))
+            {
+                yield return null;
+            }
+
+            if (!isActiveAndEnabled || !IsDavidTestScene())
+            {
+                break;
+            }
+
+            DogSocialInteractionType interactionType = SelectMixedSpeciesInteractionType();
+            yield return RunMixedSpeciesInteraction(interactionType, dogPet, catPet);
+            RememberMixedSpeciesInteraction(dogPet, catPet, interactionType);
+
+            if (dogPet != null)
+            {
+                dogPet.StartRoaming();
+            }
+
+            if (catPet != null)
+            {
+                catPet.StartRoaming();
+            }
+
+            yield return new WaitForSeconds(Random.Range(22f, 36f));
+        }
+
+        mixedSpeciesSocialRoutine = null;
+    }
+
+    private static bool IsIntroPreviewInteractionSuspended()
+    {
+        return introPreviewInteractionSuspendDepth > 0;
     }
 
     private bool TrySelectInteractionPair(out DogRoomAgent firstDog, out DogRoomAgent secondDog)
@@ -474,12 +620,271 @@ public class DogSocialDirector : MonoBehaviour
         return firstDog != null && secondDog != null && firstDog != secondDog;
     }
 
+    private int CountAvailableIntroPets()
+    {
+        return GetAvailableIntroPets().Count;
+    }
+
+    private int CountAvailableMixedSpeciesPets()
+    {
+        int dogCount = 0;
+        int catCount = 0;
+
+        for (int i = 0; i < RegisteredAgents.Count; i++)
+        {
+            DogRoomAgent dog = RegisteredAgents[i];
+            if (dog != null && new PawPalRoomPetHandle(dog).CanJoinSocialInteraction)
+            {
+                dogCount++;
+            }
+        }
+
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < cats.Length; i++)
+        {
+            PawPalCatRoomAgent cat = cats[i];
+            if (cat != null && new PawPalRoomPetHandle(cat).CanJoinSocialInteraction)
+            {
+                catCount++;
+            }
+        }
+
+        return dogCount > 0 && catCount > 0 ? dogCount + catCount : 0;
+    }
+
+    private List<PawPalRoomPetHandle> GetAvailableIntroPets()
+    {
+        List<PawPalRoomPetHandle> availablePets = new List<PawPalRoomPetHandle>();
+        for (int i = 0; i < RegisteredAgents.Count; i++)
+        {
+            DogRoomAgent dog = RegisteredAgents[i];
+            if (dog == null)
+            {
+                continue;
+            }
+
+            PawPalRoomPetHandle handle = new PawPalRoomPetHandle(dog);
+            if (handle.CanJoinSocialInteraction)
+            {
+                availablePets.Add(handle);
+            }
+        }
+
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < cats.Length; i++)
+        {
+            PawPalCatRoomAgent cat = cats[i];
+            if (cat == null)
+            {
+                continue;
+            }
+
+            PawPalRoomPetHandle handle = new PawPalRoomPetHandle(cat);
+            if (handle.CanJoinSocialInteraction)
+            {
+                availablePets.Add(handle);
+            }
+        }
+
+        return availablePets;
+    }
+
+    private bool TrySelectIntroInteractionPair(out PawPalRoomPetHandle firstPet, out PawPalRoomPetHandle secondPet)
+    {
+        firstPet = null;
+        secondPet = null;
+
+        List<PawPalRoomPetHandle> availablePets = GetAvailableIntroPets();
+        if (availablePets.Count < 2)
+        {
+            return false;
+        }
+
+        List<float> weights = new List<float>(availablePets.Count * availablePets.Count);
+        List<PawPalRoomPetHandle> firstCandidates = new List<PawPalRoomPetHandle>(availablePets.Count * availablePets.Count);
+        List<PawPalRoomPetHandle> secondCandidates = new List<PawPalRoomPetHandle>(availablePets.Count * availablePets.Count);
+        float maxDistance = Mathf.Max(GetEffectiveProximityInteractionStartDistance() * 1.45f, 1.8f);
+
+        for (int firstIndex = 0; firstIndex < availablePets.Count - 1; firstIndex++)
+        {
+            for (int secondIndex = firstIndex + 1; secondIndex < availablePets.Count; secondIndex++)
+            {
+                PawPalRoomPetHandle firstCandidate = availablePets[firstIndex];
+                PawPalRoomPetHandle secondCandidate = availablePets[secondIndex];
+                if (!firstCandidate.IsValid || !secondCandidate.IsValid)
+                {
+                    continue;
+                }
+
+                if (IsIntroPairOnCooldown(firstCandidate, secondCandidate))
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(firstCandidate.RootTransform.position, secondCandidate.RootTransform.position);
+                if (distance > maxDistance)
+                {
+                    continue;
+                }
+
+                float weight = Mathf.Max(0.2f, 1.75f - (distance / maxDistance));
+                if (UsesRecentIntroPets(firstCandidate, secondCandidate))
+                {
+                    weight *= 0.45f;
+                }
+
+                if (firstCandidate.Species == IntroPetSpecies.Cat || secondCandidate.Species == IntroPetSpecies.Cat)
+                {
+                    weight *= 0.95f;
+                }
+
+                firstCandidates.Add(firstCandidate);
+                secondCandidates.Add(secondCandidate);
+                weights.Add(weight);
+            }
+        }
+
+        if (weights.Count == 0)
+        {
+            return false;
+        }
+
+        int selectedIndex = SelectWeightedIndex(weights);
+        firstPet = firstCandidates[selectedIndex];
+        secondPet = secondCandidates[selectedIndex];
+        return firstPet != null && secondPet != null;
+    }
+
+    private bool TrySelectMixedSpeciesInteractionPair(out PawPalRoomPetHandle dogPet, out PawPalRoomPetHandle catPet)
+    {
+        dogPet = null;
+        catPet = null;
+
+        List<PawPalRoomPetHandle> dogs = new List<PawPalRoomPetHandle>();
+        for (int i = 0; i < RegisteredAgents.Count; i++)
+        {
+            DogRoomAgent dog = RegisteredAgents[i];
+            if (dog == null)
+            {
+                continue;
+            }
+
+            PawPalRoomPetHandle handle = new PawPalRoomPetHandle(dog);
+            if (handle.CanJoinSocialInteraction)
+            {
+                dogs.Add(handle);
+            }
+        }
+
+        List<PawPalRoomPetHandle> cats = new List<PawPalRoomPetHandle>();
+        PawPalCatRoomAgent[] catAgents = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.InstanceID);
+        for (int i = 0; i < catAgents.Length; i++)
+        {
+            PawPalCatRoomAgent cat = catAgents[i];
+            if (cat == null)
+            {
+                continue;
+            }
+
+            PawPalRoomPetHandle handle = new PawPalRoomPetHandle(cat);
+            if (handle.CanJoinSocialInteraction)
+            {
+                cats.Add(handle);
+            }
+        }
+
+        if (dogs.Count == 0 || cats.Count == 0)
+        {
+            return false;
+        }
+
+        List<float> weights = new List<float>(dogs.Count * cats.Count);
+        List<PawPalRoomPetHandle> dogCandidates = new List<PawPalRoomPetHandle>(dogs.Count * cats.Count);
+        List<PawPalRoomPetHandle> catCandidates = new List<PawPalRoomPetHandle>(dogs.Count * cats.Count);
+        float maxDistance = Mathf.Max(GetEffectiveProximityInteractionStartDistance() * 1.5f, 2f);
+
+        for (int dogIndex = 0; dogIndex < dogs.Count; dogIndex++)
+        {
+            for (int catIndex = 0; catIndex < cats.Count; catIndex++)
+            {
+                PawPalRoomPetHandle dogCandidate = dogs[dogIndex];
+                PawPalRoomPetHandle catCandidate = cats[catIndex];
+                if (IsMixedSpeciesPairOnCooldown(dogCandidate, catCandidate))
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(dogCandidate.RootTransform.position, catCandidate.RootTransform.position);
+                if (distance > maxDistance)
+                {
+                    continue;
+                }
+
+                float weight = Mathf.Max(0.2f, 1.6f - (distance / maxDistance));
+                if (UsesRecentMixedSpeciesPets(dogCandidate, catCandidate))
+                {
+                    weight *= 0.45f;
+                }
+
+                dogCandidates.Add(dogCandidate);
+                catCandidates.Add(catCandidate);
+                weights.Add(weight);
+            }
+        }
+
+        if (weights.Count == 0)
+        {
+            return false;
+        }
+
+        int selectedIndex = SelectWeightedIndex(weights);
+        dogPet = dogCandidates[selectedIndex];
+        catPet = catCandidates[selectedIndex];
+        return dogPet != null && catPet != null;
+    }
+
     private float GetEffectiveProximityInteractionStartDistance()
     {
         float requestedDistance = maxProximityInteractionStartDistance > 0f
             ? maxProximityInteractionStartDistance
             : MaximumProximityInteractionStartDistance;
         return Mathf.Clamp(requestedDistance, GetEffectiveMeetDistance(), 2.5f);
+    }
+
+    private static int SelectWeightedIndex(List<float> weights)
+    {
+        float totalWeight = 0f;
+        for (int i = 0; i < weights.Count; i++)
+        {
+            totalWeight += Mathf.Max(0.01f, weights[i]);
+        }
+
+        float roll = Random.value * totalWeight;
+        for (int i = 0; i < weights.Count; i++)
+        {
+            roll -= Mathf.Max(0.01f, weights[i]);
+            if (roll <= 0f)
+            {
+                return i;
+            }
+        }
+
+        return weights.Count - 1;
+    }
+
+    private float GetIntroInitialInteractionDelay()
+    {
+        return Random.Range(4f, 8f);
+    }
+
+    private float GetIntroNextInteractionDelay()
+    {
+        return Random.Range(12f, 22f);
+    }
+
+    private float GetIntroPairCooldownSeconds()
+    {
+        return 9f;
     }
 
     private List<DogRoomAgent> GetAvailableDogs()
@@ -526,6 +931,105 @@ public class DogSocialDirector : MonoBehaviour
             || firstDog == lastInteractingDogB
             || secondDog == lastInteractingDogA
             || secondDog == lastInteractingDogB;
+    }
+
+    private bool UsesRecentIntroPets(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        string firstKey = GetIntroParticipantKey(firstPet);
+        string secondKey = GetIntroParticipantKey(secondPet);
+        return string.Equals(firstKey, lastIntroInteractingPetKeyA, System.StringComparison.Ordinal)
+            || string.Equals(firstKey, lastIntroInteractingPetKeyB, System.StringComparison.Ordinal)
+            || string.Equals(secondKey, lastIntroInteractingPetKeyA, System.StringComparison.Ordinal)
+            || string.Equals(secondKey, lastIntroInteractingPetKeyB, System.StringComparison.Ordinal);
+    }
+
+    private bool UsesRecentMixedSpeciesPets(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        string firstKey = GetIntroParticipantKey(firstPet);
+        string secondKey = GetIntroParticipantKey(secondPet);
+        return string.Equals(firstKey, lastMixedSpeciesPetKeyA, System.StringComparison.Ordinal)
+            || string.Equals(firstKey, lastMixedSpeciesPetKeyB, System.StringComparison.Ordinal)
+            || string.Equals(secondKey, lastMixedSpeciesPetKeyA, System.StringComparison.Ordinal)
+            || string.Equals(secondKey, lastMixedSpeciesPetKeyB, System.StringComparison.Ordinal);
+    }
+
+    private bool IsIntroPairOnCooldown(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        float cooldownUntil;
+        return introPairCooldownUntilByKey.TryGetValue(GetIntroPairKey(firstPet, secondPet), out cooldownUntil)
+            && Time.time < cooldownUntil;
+    }
+
+    private void RememberIntroInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet, DogSocialInteractionType interactionType)
+    {
+        lastIntroInteractingPetKeyA = GetIntroParticipantKey(firstPet);
+        lastIntroInteractingPetKeyB = GetIntroParticipantKey(secondPet);
+        introPairCooldownUntilByKey[GetIntroPairKey(firstPet, secondPet)] = Time.time + GetIntroPairCooldownSeconds();
+
+        if (interactionRepeatBlockCount <= 0)
+        {
+            return;
+        }
+
+        recentIntroInteractionTypes.Enqueue(interactionType);
+        while (recentIntroInteractionTypes.Count > interactionRepeatBlockCount)
+        {
+            recentIntroInteractionTypes.Dequeue();
+        }
+    }
+
+    private bool IsMixedSpeciesPairOnCooldown(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        float cooldownUntil;
+        return mixedSpeciesPairCooldownUntilByKey.TryGetValue(GetIntroPairKey(firstPet, secondPet), out cooldownUntil)
+            && Time.time < cooldownUntil;
+    }
+
+    private void RememberMixedSpeciesInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet, DogSocialInteractionType interactionType)
+    {
+        lastMixedSpeciesPetKeyA = GetIntroParticipantKey(firstPet);
+        lastMixedSpeciesPetKeyB = GetIntroParticipantKey(secondPet);
+        mixedSpeciesPairCooldownUntilByKey[GetIntroPairKey(firstPet, secondPet)] = Time.time + 20f;
+
+        if (interactionRepeatBlockCount <= 0)
+        {
+            return;
+        }
+
+        recentMixedSpeciesInteractionTypes.Enqueue(interactionType);
+        while (recentMixedSpeciesInteractionTypes.Count > interactionRepeatBlockCount)
+        {
+            recentMixedSpeciesInteractionTypes.Dequeue();
+        }
+    }
+
+    private static string GetIntroParticipantKey(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pet.RuntimePetId))
+        {
+            return pet.RuntimePetId;
+        }
+
+        return pet.RootTransform != null ? pet.RootTransform.GetInstanceID().ToString() : string.Empty;
+    }
+
+    private string GetIntroPairKey(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        string firstKey = GetIntroParticipantKey(firstPet);
+        string secondKey = GetIntroParticipantKey(secondPet);
+        if (string.CompareOrdinal(firstKey, secondKey) > 0)
+        {
+            string swap = firstKey;
+            firstKey = secondKey;
+            secondKey = swap;
+        }
+
+        return firstKey + "|" + secondKey;
     }
 
     private bool MatchesPreferredPair(DogRoomAgent firstDog, DogRoomAgent secondDog)
@@ -614,6 +1118,56 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         return DogSocialInteractionType.PlayfulGreeting;
+    }
+
+    private DogSocialInteractionType SelectIntroInteractionType(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        List<DogSocialInteractionType> interactionTypes = new List<DogSocialInteractionType>();
+        List<float> weights = new List<float>();
+
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.PlayfulGreeting, 1.1f);
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.BouncePast, 1.35f);
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.ChaseInvite, 1.5f);
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.CompanionRest, 0.45f);
+        if (CanBuildIntroGroupChase(firstPet, secondPet))
+        {
+            AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.GroupChase, 2.6f);
+        }
+
+        for (int i = interactionTypes.Count - 1; i >= 0; i--)
+        {
+            if (recentIntroInteractionTypes.Contains(interactionTypes[i]))
+            {
+                weights[i] *= 0.35f;
+            }
+        }
+
+        return interactionTypes[SelectWeightedIndex(weights)];
+    }
+
+    private DogSocialInteractionType SelectMixedSpeciesInteractionType()
+    {
+        List<DogSocialInteractionType> interactionTypes = new List<DogSocialInteractionType>();
+        List<float> weights = new List<float>();
+
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.PlayfulGreeting, 1.35f);
+        AddIntroInteractionWeight(interactionTypes, weights, DogSocialInteractionType.CompanionRest, 0.55f);
+
+        for (int i = interactionTypes.Count - 1; i >= 0; i--)
+        {
+            if (recentMixedSpeciesInteractionTypes.Contains(interactionTypes[i]))
+            {
+                weights[i] *= 0.4f;
+            }
+        }
+
+        return interactionTypes[SelectWeightedIndex(weights)];
+    }
+
+    private static void AddIntroInteractionWeight(List<DogSocialInteractionType> interactionTypes, List<float> weights, DogSocialInteractionType type, float weight)
+    {
+        interactionTypes.Add(type);
+        weights.Add(weight);
     }
 
     private bool TrySelectWeightedInteraction(List<DogSocialInteractionType> blockedInteractions, DogRoomAgent firstDog, DogRoomAgent secondDog, out DogSocialInteractionType interactionType)
@@ -774,6 +1328,218 @@ public class DogSocialDirector : MonoBehaviour
                 resolvedDogCamera.EndFocus(cameraFocusId);
             }
         }
+    }
+
+    private IEnumerator RunIntroInteraction(DogSocialInteractionType interactionType, PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        if (firstPet == null || secondPet == null || !firstPet.IsValid || !secondPet.IsValid)
+        {
+            yield break;
+        }
+
+        firstPet.PauseForSocial(true);
+        secondPet.PauseForSocial(true);
+
+        switch (interactionType)
+        {
+            case DogSocialInteractionType.BouncePast:
+                yield return RunIntroBouncePastInteraction(firstPet, secondPet);
+                break;
+            case DogSocialInteractionType.ChaseInvite:
+                yield return RunIntroChaseInviteInteraction(firstPet, secondPet);
+                break;
+            case DogSocialInteractionType.CompanionRest:
+                yield return RunIntroCompanionRestInteraction(firstPet, secondPet);
+                break;
+            case DogSocialInteractionType.GroupChase:
+                yield return RunIntroGroupChaseInteraction(firstPet, secondPet);
+                break;
+            default:
+                yield return RunIntroPlayfulGreetingInteraction(firstPet, secondPet);
+                break;
+        }
+    }
+
+    private IEnumerator RunMixedSpeciesInteraction(DogSocialInteractionType interactionType, PawPalRoomPetHandle dogPet, PawPalRoomPetHandle catPet)
+    {
+        if (dogPet == null || catPet == null || !dogPet.IsValid || !catPet.IsValid)
+        {
+            yield break;
+        }
+
+        dogPet.PauseForSocial(true);
+        catPet.PauseForSocial(true);
+
+        switch (interactionType)
+        {
+            case DogSocialInteractionType.CompanionRest:
+                yield return RunIntroCompanionRestInteraction(dogPet, catPet);
+                break;
+            default:
+                yield return RunIntroPlayfulGreetingInteraction(dogPet, catPet);
+                break;
+        }
+    }
+
+    private IEnumerator RunIntroPlayfulGreetingInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        Vector3 firstPoint;
+        Vector3 secondPoint;
+        if (!TryGetIntroMeetingPoints(firstPet, secondPet, out firstPoint, out secondPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(firstPet, firstPoint, DogMovementPace.Walk, secondPet, secondPoint, DogMovementPace.Walk);
+        if (!WereIntroSocialMovesSuccessful(firstPet, secondPet))
+        {
+            yield break;
+        }
+
+        yield return FaceIntroPets(firstPet, secondPet);
+        yield return PlayIntroGreetingVocals(firstPet, secondPet);
+        yield return new WaitForSeconds(0.35f);
+    }
+
+    private IEnumerator RunIntroBouncePastInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        Vector3 firstPoint;
+        Vector3 secondPoint;
+        if (!TryGetIntroMeetingPoints(firstPet, secondPet, out firstPoint, out secondPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(firstPet, firstPoint, DogMovementPace.Walk, secondPet, secondPoint, DogMovementPace.Walk);
+        if (!WereIntroSocialMovesSuccessful(firstPet, secondPet))
+        {
+            yield break;
+        }
+
+        yield return FaceIntroPets(firstPet, secondPet);
+        yield return PlayIntroGreetingVocals(firstPet, secondPet);
+
+        PawPalRoomPetHandle leadingPet = Random.value < 0.5f ? firstPet : secondPet;
+        PawPalRoomPetHandle followingPet = leadingPet == firstPet ? secondPet : firstPet;
+        Vector3 leadingPoint;
+        Vector3 followingPoint;
+        if (!TryGetIntroPlayfulPairPoints(leadingPet, followingPet, out leadingPoint, out followingPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(leadingPet, leadingPoint, DogMovementPace.Run, followingPet, followingPoint, DogMovementPace.Trot);
+        if (!WereIntroSocialMovesSuccessful(leadingPet, followingPet))
+        {
+            yield break;
+        }
+
+        yield return FaceIntroPets(leadingPet, followingPet);
+    }
+
+    private IEnumerator RunIntroChaseInviteInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        Vector3 firstPoint;
+        Vector3 secondPoint;
+        if (!TryGetIntroMeetingPoints(firstPet, secondPet, out firstPoint, out secondPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(firstPet, firstPoint, DogMovementPace.Walk, secondPet, secondPoint, DogMovementPace.Walk);
+        if (!WereIntroSocialMovesSuccessful(firstPet, secondPet))
+        {
+            yield break;
+        }
+
+        PawPalRoomPetHandle invitingPet = Random.value < 0.5f ? firstPet : secondPet;
+        PawPalRoomPetHandle respondingPet = invitingPet == firstPet ? secondPet : firstPet;
+        yield return FaceIntroPets(invitingPet, respondingPet);
+        yield return PlayIntroGreetingVocals(invitingPet, respondingPet);
+
+        Vector3 invitingPoint;
+        Vector3 respondingPoint;
+        if (!TryGetIntroPlayfulPairPoints(invitingPet, respondingPet, out invitingPoint, out respondingPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(invitingPet, invitingPoint, DogMovementPace.Run, respondingPet, respondingPoint, DogMovementPace.Run);
+    }
+
+    private IEnumerator RunIntroCompanionRestInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        Vector3 firstPoint;
+        Vector3 secondPoint;
+        if (!TryGetIntroMeetingPoints(firstPet, secondPet, out firstPoint, out secondPoint))
+        {
+            yield break;
+        }
+
+        yield return MoveIntroPetsToPoints(firstPet, firstPoint, DogMovementPace.Walk, secondPet, secondPoint, DogMovementPace.Walk);
+        if (!WereIntroSocialMovesSuccessful(firstPet, secondPet))
+        {
+            yield break;
+        }
+
+        yield return FaceIntroPets(firstPet, secondPet);
+        yield return PlayIntroGreetingVocals(firstPet, secondPet);
+
+        Coroutine firstRest = StartCoroutine(firstPet.PlayPhotoPose(PawPalPhotoPoseId.LieLoop1, socialRestDuration));
+        Coroutine secondRest = StartCoroutine(secondPet.PlayPhotoPose(PawPalPhotoPoseId.LieLoop1, socialRestDuration));
+        yield return firstRest;
+        yield return secondRest;
+    }
+
+    private IEnumerator RunIntroGroupChaseInteraction(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        List<PawPalRoomPetHandle> followers;
+        List<Vector3> followerPoints;
+        Vector3 leaderPoint;
+        PawPalRoomPetHandle leader;
+        if (!TryBuildIntroGroupChasePlan(firstPet, secondPet, out leader, out followers, out followerPoints, out leaderPoint))
+        {
+            yield return RunIntroChaseInviteInteraction(firstPet, secondPet);
+            yield break;
+        }
+
+        for (int i = 0; i < followers.Count; i++)
+        {
+            followers[i].PauseForSocial(true);
+        }
+
+        yield return FaceIntroPets(leader, followers[0]);
+        yield return PlayIntroGreetingVocals(leader, followers[0]);
+
+        Coroutine leaderMove = StartCoroutine(leader.MoveNearPrecise(leaderPoint, approachTimeout, DogMovementPace.Run, SocialApproachReachedDistance));
+        List<Coroutine> followerMoves = new List<Coroutine>(followers.Count);
+        for (int i = 0; i < followers.Count; i++)
+        {
+            DogMovementPace pace = i == 0 ? DogMovementPace.Run : DogMovementPace.Trot;
+            followerMoves.Add(StartCoroutine(followers[i].MoveNearPrecise(followerPoints[i], approachTimeout, pace, SocialApproachReachedDistance)));
+        }
+
+        yield return leaderMove;
+        for (int i = 0; i < followerMoves.Count; i++)
+        {
+            yield return followerMoves[i];
+        }
+
+        if (!WasIntroSocialMoveSuccessful(leader))
+        {
+            yield break;
+        }
+
+        for (int i = 0; i < followers.Count; i++)
+        {
+            if (!WasIntroSocialMoveSuccessful(followers[i]))
+            {
+                yield break;
+            }
+        }
+
+        yield return FaceIntroPets(leader, followers[0]);
+        yield return PlayIntroGreetingVocals(leader, followers[0]);
     }
 
     private IEnumerator RunPlayfulGreetingInteraction(DogRoomAgent firstDog, DogRoomAgent secondDog)
@@ -954,6 +1720,246 @@ public class DogSocialDirector : MonoBehaviour
         }
     }
 
+    private bool TryGetIntroMeetingPoints(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet, out Vector3 firstPoint, out Vector3 secondPoint)
+    {
+        firstPoint = firstPet != null && firstPet.RootTransform != null ? firstPet.RootTransform.position : Vector3.zero;
+        secondPoint = secondPet != null && secondPet.RootTransform != null ? secondPet.RootTransform.position : Vector3.zero;
+        if (firstPet == null || secondPet == null || firstPet.RootTransform == null || secondPet.RootTransform == null)
+        {
+            return false;
+        }
+
+        Vector3 direction = firstPet.RootTransform.position - secondPet.RootTransform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.001f)
+        {
+            Vector2 fallback = Random.insideUnitCircle.normalized;
+            direction = new Vector3(fallback.x, 0f, fallback.y);
+        }
+
+        Vector3 midpoint = (firstPet.RootTransform.position + secondPet.RootTransform.position) * 0.5f;
+        float halfDistance = Mathf.Max(0.16f, GetPetPairMeetDistance(firstPet, secondPet) * 0.5f);
+        Vector3 firstCandidate = midpoint + direction.normalized * halfDistance;
+        Vector3 secondCandidate = midpoint - direction.normalized * halfDistance;
+
+        bool foundFirst = firstPet.TryGetRoomSafePoint(firstCandidate, 0.35f, out firstPoint);
+        bool foundSecond = secondPet.TryGetRoomSafePoint(secondCandidate, 0.35f, out secondPoint);
+        if (!foundFirst || !foundSecond)
+        {
+            return false;
+        }
+
+        TryRebalanceIntroMeetingPoints(firstPet, secondPet, halfDistance * 2f, ref firstPoint, ref secondPoint);
+        return true;
+    }
+
+    private bool TryGetIntroPlayfulPairPoints(PawPalRoomPetHandle leadingPet, PawPalRoomPetHandle followingPet, out Vector3 leadingPoint, out Vector3 followingPoint)
+    {
+        leadingPoint = leadingPet != null && leadingPet.RootTransform != null ? leadingPet.RootTransform.position : Vector3.zero;
+        followingPoint = followingPet != null && followingPet.RootTransform != null ? followingPet.RootTransform.position : Vector3.zero;
+        if (leadingPet == null || followingPet == null || leadingPet.RootTransform == null || followingPet.RootTransform == null)
+        {
+            return false;
+        }
+
+        Vector3 direction = leadingPet.RootTransform.position - followingPet.RootTransform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.001f)
+        {
+            Vector2 fallback = Random.insideUnitCircle.normalized;
+            direction = new Vector3(fallback.x, 0f, fallback.y);
+        }
+
+        direction.Normalize();
+        Vector3 lateral = Vector3.Cross(Vector3.up, direction);
+        float runDistance = Random.Range(1.35f, 2.35f);
+        Vector3 leadingCandidate = leadingPet.RootTransform.position + direction * runDistance + lateral * Random.Range(-0.35f, 0.35f);
+        Vector3 followingCandidate = leadingCandidate - direction * Random.Range(0.35f, 0.7f) + lateral * Random.Range(-0.18f, 0.18f);
+
+        bool foundLeader = leadingPet.TryGetRoomSafePoint(leadingCandidate, 0.4f, out leadingPoint);
+        bool foundFollower = followingPet.TryGetRoomSafePoint(followingCandidate, 0.4f, out followingPoint);
+        return foundLeader && foundFollower;
+    }
+
+    private bool CanBuildIntroGroupChase(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        if (!IsIntroSelectionScene() || firstPet == null || secondPet == null)
+        {
+            return false;
+        }
+
+        List<PawPalRoomPetHandle> availablePets = GetAvailableIntroPets();
+        if (availablePets.Count < 3)
+        {
+            return false;
+        }
+
+        string firstKey = GetIntroParticipantKey(firstPet);
+        string secondKey = GetIntroParticipantKey(secondPet);
+
+        for (int i = 0; i < availablePets.Count; i++)
+        {
+            PawPalRoomPetHandle candidate = availablePets[i];
+            string candidateKey = GetIntroParticipantKey(candidate);
+            if (candidate == null || string.IsNullOrEmpty(candidateKey) || candidateKey == firstKey || candidateKey == secondKey || candidate.RootTransform == null)
+            {
+                continue;
+            }
+
+            if (Vector3.Distance(candidate.RootTransform.position, firstPet.RootTransform.position) <= GetEffectiveProximityInteractionStartDistance() * 1.8f
+                || Vector3.Distance(candidate.RootTransform.position, secondPet.RootTransform.position) <= GetEffectiveProximityInteractionStartDistance() * 1.8f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryBuildIntroGroupChasePlan(
+        PawPalRoomPetHandle firstPet,
+        PawPalRoomPetHandle secondPet,
+        out PawPalRoomPetHandle leader,
+        out List<PawPalRoomPetHandle> followers,
+        out List<Vector3> followerPoints,
+        out Vector3 leaderPoint)
+    {
+        leader = null;
+        followers = null;
+        followerPoints = null;
+        leaderPoint = Vector3.zero;
+
+        if (!CanBuildIntroGroupChase(firstPet, secondPet))
+        {
+            return false;
+        }
+
+        leader = Random.value < 0.5f ? firstPet : secondPet;
+        PawPalRoomPetHandle firstFollower = leader == firstPet ? secondPet : firstPet;
+        string leaderKey = GetIntroParticipantKey(leader);
+        string firstFollowerKey = GetIntroParticipantKey(firstFollower);
+
+        List<PawPalRoomPetHandle> availablePets = GetAvailableIntroPets();
+        followers = new List<PawPalRoomPetHandle> { firstFollower };
+        for (int i = 0; i < availablePets.Count; i++)
+        {
+            PawPalRoomPetHandle candidate = availablePets[i];
+            string candidateKey = GetIntroParticipantKey(candidate);
+            if (candidate == null || string.IsNullOrEmpty(candidateKey) || candidateKey == leaderKey || candidateKey == firstFollowerKey || candidate.RootTransform == null)
+            {
+                continue;
+            }
+
+            if (Vector3.Distance(candidate.RootTransform.position, leader.RootTransform.position) > GetEffectiveProximityInteractionStartDistance() * 1.75f)
+            {
+                continue;
+            }
+
+            followers.Add(candidate);
+            if (followers.Count >= 2)
+            {
+                break;
+            }
+        }
+
+        if (followers.Count == 0)
+        {
+            return false;
+        }
+
+        Vector3 baseDirection = leader.RootTransform.position - firstFollower.RootTransform.position;
+        baseDirection.y = 0f;
+        if (baseDirection.sqrMagnitude < 0.001f)
+        {
+            Vector2 fallback = Random.insideUnitCircle.normalized;
+            baseDirection = new Vector3(fallback.x, 0f, fallback.y);
+        }
+
+        baseDirection.Normalize();
+        Vector3 lateral = Vector3.Cross(Vector3.up, baseDirection);
+        Vector3 leaderCandidate = leader.RootTransform.position + baseDirection * Random.Range(2.1f, 3.25f) + lateral * Random.Range(-0.45f, 0.45f);
+        if (!leader.TryGetRoomSafePoint(leaderCandidate, 0.45f, out leaderPoint))
+        {
+            return false;
+        }
+
+        followerPoints = new List<Vector3>(followers.Count);
+        for (int i = 0; i < followers.Count; i++)
+        {
+            float behindDistance = 0.4f + (i * 0.32f);
+            float lateralOffset = (i == 0 ? -0.18f : 0.18f);
+            Vector3 followerCandidate = leaderPoint - baseDirection * behindDistance + lateral * lateralOffset;
+            Vector3 followerPoint;
+            if (!followers[i].TryGetRoomSafePoint(followerCandidate, 0.35f, out followerPoint))
+            {
+                return false;
+            }
+
+            followerPoints.Add(followerPoint);
+        }
+
+        return true;
+    }
+
+    private IEnumerator MoveIntroPetsToPoints(
+        PawPalRoomPetHandle firstPet,
+        Vector3 firstPoint,
+        DogMovementPace firstPace,
+        PawPalRoomPetHandle secondPet,
+        Vector3 secondPoint,
+        DogMovementPace secondPace)
+    {
+        Coroutine moveFirst = StartCoroutine(firstPet.MoveNearPrecise(firstPoint, approachTimeout, firstPace, SocialApproachReachedDistance));
+        Coroutine moveSecond = StartCoroutine(secondPet.MoveNearPrecise(secondPoint, approachTimeout, secondPace, SocialApproachReachedDistance));
+        yield return moveFirst;
+        yield return moveSecond;
+    }
+
+    private bool WereIntroSocialMovesSuccessful(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        return WasIntroSocialMoveSuccessful(firstPet) && WasIntroSocialMoveSuccessful(secondPet);
+    }
+
+    private static bool WasIntroSocialMoveSuccessful(PawPalRoomPetHandle pet)
+    {
+        return pet != null && pet.IsValid && pet.WasLastTravelSuccessful;
+    }
+
+    private IEnumerator FaceIntroPets(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        if (firstPet == null || secondPet == null)
+        {
+            yield break;
+        }
+
+        Transform firstTarget = secondPet.FocusTransform != null ? secondPet.FocusTransform : secondPet.RootTransform;
+        Transform secondTarget = firstPet.FocusTransform != null ? firstPet.FocusTransform : firstPet.RootTransform;
+        Coroutine faceFirst = StartCoroutine(firstPet.FaceTarget(firstTarget, faceDuration));
+        Coroutine faceSecond = StartCoroutine(secondPet.FaceTarget(secondTarget, faceDuration));
+        yield return faceFirst;
+        yield return faceSecond;
+    }
+
+    private IEnumerator PlayIntroGreetingVocals(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        bool playedFirst = false;
+        if (firstPet != null)
+        {
+            yield return StartCoroutine(firstPet.PlaySocialVocal(0f));
+            playedFirst = true;
+        }
+
+        if (playedFirst && barkSpacing > 0f)
+        {
+            yield return new WaitForSeconds(barkSpacing);
+        }
+
+        if (secondPet != null)
+        {
+            yield return StartCoroutine(secondPet.PlaySocialVocal(0f));
+        }
+    }
+
     private IEnumerator MoveDogsToPoints(DogRoomAgent firstDog, Vector3 firstPoint, DogRoomAgent secondDog, Vector3 secondPoint)
     {
         yield return MoveDogsToPoints(firstDog, firstPoint, DogMovementPace.Walk, secondDog, secondPoint, DogMovementPace.Walk);
@@ -1120,7 +2126,7 @@ public class DogSocialDirector : MonoBehaviour
         }
 
         between.Normalize();
-        float effectiveMeetDistance = GetEffectiveMeetDistance();
+        float effectiveMeetDistance = GetPairMeetDistance(firstDog, secondDog);
         pointA = midpoint - between * (effectiveMeetDistance * 0.5f);
         pointB = midpoint + between * (effectiveMeetDistance * 0.5f);
 
@@ -1140,13 +2146,96 @@ public class DogSocialDirector : MonoBehaviour
     private float GetEffectiveMeetDistance()
     {
         float requestedDistance = meetDistance > 0f ? meetDistance : CozySocialMeetDistance;
-        if (minimumDogSpacing > 0f)
+        return Mathf.Clamp(requestedDistance, 0.22f, 1.25f);
+    }
+
+    private float GetPairMeetDistance(DogRoomAgent firstDog, DogRoomAgent secondDog)
+    {
+        float firstRadius = firstDog != null ? firstDog.GetInteractionNavigationFootprintRadius() : 0.18f;
+        float secondRadius = secondDog != null ? secondDog.GetInteractionNavigationFootprintRadius() : 0.18f;
+        return GetSizedMeetDistance(firstRadius, secondRadius);
+    }
+
+    private float GetPetPairMeetDistance(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet)
+    {
+        float firstRadius = GetPetSocialFootprintRadius(firstPet);
+        float secondRadius = GetPetSocialFootprintRadius(secondPet);
+        return GetSizedMeetDistance(firstRadius, secondRadius);
+    }
+
+    private float GetSizedMeetDistance(float firstRadius, float secondRadius)
+    {
+        float baseDistance = GetEffectiveMeetDistance();
+        float configuredMinimum = minimumDogSpacing > 0f ? minimumDogSpacing : CozySocialMeetDistance;
+        float combinedRadiusDistance = firstRadius + secondRadius + GetPairMeetPadding(firstRadius, secondRadius);
+        float minimumDistance = Mathf.Max(0.22f, Mathf.Min(configuredMinimum, baseDistance));
+        float targetDistance = Mathf.Max(minimumDistance, combinedRadiusDistance);
+        return Mathf.Clamp(targetDistance, 0.22f, 1.45f);
+    }
+
+    private static float GetPairMeetPadding(float firstRadius, float secondRadius)
+    {
+        float largestRadius = Mathf.Max(firstRadius, secondRadius);
+        if (largestRadius >= 0.26f)
         {
-            requestedDistance = Mathf.Min(requestedDistance, minimumDogSpacing);
+            return LargeBreedMeetPadding;
         }
 
-        requestedDistance = Mathf.Min(requestedDistance, CozySocialMeetDistance);
-        return Mathf.Clamp(requestedDistance, 0.22f, 1.25f);
+        if (largestRadius >= 0.2f)
+        {
+            return MediumBreedMeetPadding;
+        }
+
+        return SmallBreedMeetPadding;
+    }
+
+    private float GetPetSocialFootprintRadius(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid)
+        {
+            return 0.18f;
+        }
+
+        if (pet.DogAgent != null)
+        {
+            return pet.DogAgent.GetInteractionNavigationFootprintRadius();
+        }
+
+        Transform root = pet.RootTransform;
+        if (root == null)
+        {
+            return 0.18f;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        Bounds bounds = default(Bounds);
+        bool hasBounds = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (!hasBounds)
+        {
+            return 0.18f;
+        }
+
+        float visualRadius = Mathf.Max(bounds.extents.x, bounds.extents.z);
+        return Mathf.Clamp(visualRadius + 0.02f, 0.12f, 0.32f);
     }
 
     private void TryRebalanceMeetingPoints(DogRoomAgent firstDog, DogRoomAgent secondDog, float targetDistance, ref Vector3 pointA, ref Vector3 pointB)
@@ -1173,7 +2262,44 @@ public class DogSocialDirector : MonoBehaviour
         Vector3 rebalancedB;
         bool foundA = firstDog.TryGetRoomSafePoint(candidateA, 0.65f, out rebalancedA);
         bool foundB = secondDog.TryGetRoomSafePoint(candidateB, 0.65f, out rebalancedB);
-        if (foundA && foundB && Vector3.Distance(rebalancedA, rebalancedB) <= targetDistance + 0.25f)
+        if (foundA && foundB && Vector3.Distance(rebalancedA, rebalancedB) <= targetDistance + 0.35f)
+        {
+            pointA = rebalancedA;
+            pointB = rebalancedB;
+        }
+    }
+
+    private void TryRebalanceIntroMeetingPoints(PawPalRoomPetHandle firstPet, PawPalRoomPetHandle secondPet, float targetDistance, ref Vector3 pointA, ref Vector3 pointB)
+    {
+        if (firstPet == null || secondPet == null || firstPet.RootTransform == null || secondPet.RootTransform == null)
+        {
+            return;
+        }
+
+        Vector3 midpoint = Vector3.Lerp(pointA, pointB, 0.5f);
+        Vector3 between = pointB - pointA;
+        between.y = 0f;
+        if (between.sqrMagnitude < 0.001f)
+        {
+            between = secondPet.RootTransform.position - firstPet.RootTransform.position;
+            between.y = 0f;
+        }
+
+        if (between.sqrMagnitude < 0.001f)
+        {
+            Vector2 fallback = Random.insideUnitCircle.normalized;
+            between = new Vector3(fallback.x, 0f, fallback.y);
+        }
+
+        between.Normalize();
+        Vector3 candidateA = midpoint - between * (targetDistance * 0.5f);
+        Vector3 candidateB = midpoint + between * (targetDistance * 0.5f);
+
+        Vector3 rebalancedA;
+        Vector3 rebalancedB;
+        bool foundA = firstPet.TryGetRoomSafePoint(candidateA, 0.65f, out rebalancedA);
+        bool foundB = secondPet.TryGetRoomSafePoint(candidateB, 0.65f, out rebalancedB);
+        if (foundA && foundB && Vector3.Distance(rebalancedA, rebalancedB) <= targetDistance + 0.35f)
         {
             pointA = rebalancedA;
             pointB = rebalancedB;
@@ -1618,19 +2744,14 @@ public class DogSocialDirector : MonoBehaviour
                 continue;
             }
 
-            Transform root = renderer.transform.root;
-            if (root == null || !visitedRoots.Add(root) || carvedTransforms.Contains(root))
-            {
-                continue;
-            }
-
-            if (!ShouldUseNamedFoliageObstacleRoot(root))
+            Transform obstacleRoot = FindNamedFoliageObstacleRoot(renderer.transform);
+            if (obstacleRoot == null || !visitedRoots.Add(obstacleRoot) || carvedTransforms.Contains(obstacleRoot))
             {
                 continue;
             }
 
             Bounds obstacleBounds;
-            if (!TryGetHierarchyRendererBounds(root, out obstacleBounds) || !obstacleBounds.Intersects(navMeshBounds))
+            if (!TryGetHierarchyRendererBounds(obstacleRoot, out obstacleBounds) || !obstacleBounds.Intersects(navMeshBounds))
             {
                 continue;
             }
@@ -1654,18 +2775,55 @@ public class DogSocialDirector : MonoBehaviour
                 Mathf.Max(0.05f, obstacleRadius * 2f));
             obstacleSource.area = 1;
             sources.Add(obstacleSource);
+            carvedTransforms.Add(obstacleRoot);
         }
     }
 
-    private static bool ShouldUseNamedFoliageObstacleRoot(Transform root)
+    private static Transform FindNamedFoliageObstacleRoot(Transform start)
     {
-        if (root == null)
+        Transform current = start;
+        while (current != null)
+        {
+            if (MatchesNamedFoliageObstacle(current.name))
+            {
+                return current;
+            }
+
+            current = current.parent;
+        }
+
+        return null;
+    }
+
+    private static bool MatchesNamedFoliageObstacle(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
         {
             return false;
         }
 
-        string normalizedName = root.name.Replace(" ", string.Empty).ToLowerInvariant();
-        return normalizedName.Contains("furniture_foliageplant_");
+        string normalizedName = NormalizeObstacleName(name);
+        return normalizedName.Contains("furniturefoliageplant");
+    }
+
+    private static string NormalizeObstacleName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char character = value[i];
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool TryGetHierarchyRendererBounds(Transform root, out Bounds bounds)
@@ -1776,7 +2934,7 @@ public class DogSocialDirector : MonoBehaviour
             yield break;
         }
 
-        yield return StartCoroutine(agent.PlayBark(0f));
+        yield return StartCoroutine(agent.PlayBark(0f, true, false));
     }
 
     public IEnumerator PlayAmbientBarkForAgent(DogRoomAgent agent)

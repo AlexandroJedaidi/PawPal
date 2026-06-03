@@ -1,13 +1,17 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+using Random = UnityEngine.Random;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class PawPalCatRoomAgent : MonoBehaviour
 {
     private const float DefaultArrivalDistance = 0.18f;
+    private const float SitStartDuration = 0.28f;
+    private const float SitEndDuration = 0.24f;
 
     [Header("Room Roaming")]
     [SerializeField] private float roamRadius = 2.8f;
@@ -60,6 +64,13 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private bool wasLastTravelSuccessful = true;
     private Transform interactionLookTarget;
     private float interactionLookUntil;
+    private int barkStateHash;
+    private int idle2StateHash;
+    private int sitStartStateHash;
+    private int sitLoopStateHash;
+    private int sitEndStateHash;
+    private int lieStateHash;
+    private int scratchingStateHash;
 
     public string RuntimePetId
     {
@@ -106,6 +117,20 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         get { return isPlayingOneShotAnimation; }
     }
 
+    public bool CanJoinSocialInteraction
+    {
+        get
+        {
+            return isActiveAndEnabled
+                && !IsBusy
+                && !socialPaused
+                && !isResting
+                && !isSleeping
+                && !isPlayingOneShotAnimation
+                && !HasHeldToy;
+        }
+    }
+
     public bool HasHeldToy
     {
         get { return activeToyTarget != null; }
@@ -114,6 +139,17 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     public bool WasLastTravelSuccessful
     {
         get { return wasLastTravelSuccessful; }
+    }
+
+    public bool IsMoving
+    {
+        get
+        {
+            return agent != null
+                && agent.isOnNavMesh
+                && (agent.velocity.sqrMagnitude > 0.001f
+                    || (agent.hasPath && !agent.pathPending && agent.remainingDistance > Mathf.Max(destinationReachedDistance, 0.08f)));
+        }
     }
 
     public void Initialize(SelectedPetSessionData data)
@@ -156,7 +192,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     public bool PrepareForPlayerInteraction(bool preserveHeldToy)
     {
         WakeForPlayerInteraction();
+        CancelAmbientAction();
         PauseForSocial(!preserveHeldToy);
+        trainingBusy = false;
+        isPlayingOneShotAnimation = false;
+        socialPartner = null;
         if (!preserveHeldToy)
         {
             activeToyTarget = null;
@@ -253,6 +293,17 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         yield return RunOneShotRoutine(duration, "Vocal");
     }
 
+    public bool TryPlayPreviewVocal()
+    {
+        if (!CanJoinSocialInteraction)
+        {
+            return false;
+        }
+
+        StartCoroutine(PlayBark(0.7f));
+        return true;
+    }
+
     public void RequestInteractionCameraLook(Transform target, float duration)
     {
         if (target == null)
@@ -268,22 +319,35 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     public bool TryPlayPettingReaction()
     {
-        if (IsBusy)
+        if (!isActiveAndEnabled || trainingBusy || isPlayingOneShotAnimation)
         {
             return false;
         }
 
-        StartCoroutine(RunOneShotRoutine(0.9f, "Petting"));
+        CancelAmbientAction();
+        PauseForSocial(true);
+        StartCoroutine(SitPoseRoutine(0.9f, false));
         return true;
     }
 
     public bool CanPerformTrainingAnimation()
     {
-        return isActiveAndEnabled && !IsBusy;
+        return isActiveAndEnabled && !IsBusy && !IsMoving;
     }
 
     public IEnumerator PlayTrainingTrick(PawPalTrickDefinition definition, Camera camera)
     {
+        yield return PlayTrainingTrick(definition, camera, true);
+    }
+
+    public IEnumerator PlayInteractionTrainingTrick(PawPalTrickDefinition definition, Camera camera)
+    {
+        yield return PlayTrainingTrick(definition, camera, false);
+    }
+
+    private IEnumerator PlayTrainingTrick(PawPalTrickDefinition definition, Camera camera, bool resumeRoamingAfter)
+    {
+        CancelAmbientAction();
         PauseForSocial(true);
         trainingBusy = true;
 
@@ -301,6 +365,9 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         {
             switch (definition.Id)
             {
+                case PawPalTrickId.Sit:
+                    yield return SitPoseRoutine(1.15f, !resumeRoamingAfter);
+                    break;
                 case PawPalTrickId.Spin:
                     yield return SpinRoutine();
                     break;
@@ -308,19 +375,30 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
                     yield return HopRoutine();
                     break;
                 case PawPalTrickId.Lie:
-                    yield return RestPoseRoutine(1.55f, true);
+                    yield return RestPoseRoutine(1.55f, false);
                     break;
                 case PawPalTrickId.Shake:
-                    yield return RunOneShotRoutine(1.0f, "Paw");
+                    yield return SitPoseRoutine(0.95f, !resumeRoamingAfter);
                     break;
                 default:
-                    yield return RunOneShotRoutine(1.15f, "Training");
+                    yield return SitPoseRoutine(1.0f, !resumeRoamingAfter);
                     break;
             }
         }
 
         trainingBusy = false;
-        StartRoaming();
+        if (resumeRoamingAfter)
+        {
+            StartRoaming();
+        }
+        else
+        {
+            socialPaused = true;
+            if (agent != null)
+            {
+                agent.ResetPath();
+            }
+        }
     }
 
     public bool CanPlayPhotoPose(PawPalPhotoPoseId poseId)
@@ -475,9 +553,22 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             animationSet.ApplyTo(animator, sessionData != null ? sessionData.Definition : null);
         }
 
+        CacheAnimationStateHashes();
+
         headTransform = PawPalRoomPetRuntime.ResolveHeadTransform(transform);
         PetVariantApplier.EnsureTapCollider(gameObject);
         homePosition = transform.position;
+    }
+
+    private void CancelAmbientAction()
+    {
+        if (activeActionRoutine != null)
+        {
+            StopCoroutine(activeActionRoutine);
+            activeActionRoutine = null;
+        }
+
+        socialPartner = null;
     }
 
     private void SnapToNavMesh()
@@ -605,9 +696,17 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             agent.ResetPath();
         }
 
-        if (animationSet != null)
+        float waitDuration = Mathf.Max(0.1f, duration);
+        bool playedExplicitState = TryPlayExplicitStateForLabel(label);
+        if (!playedExplicitState && animationSet != null)
         {
             animationSet.TryPlaySelectedReaction(animator);
+        }
+
+        if (playedExplicitState || animationSet != null)
+        {
+            yield return null;
+            waitDuration = ResolveActiveOneShotDuration(waitDuration);
         }
 
         if (label == "Scratch")
@@ -615,10 +714,63 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             isResting = true;
         }
 
-        yield return new WaitForSeconds(Mathf.Max(0.1f, duration));
+        yield return new WaitForSeconds(waitDuration);
+        if (label == "Vocal")
+        {
+            TryCrossFadeState(idle2StateHash);
+        }
+
         isResting = false;
         isSleeping = false;
         isPlayingOneShotAnimation = false;
+    }
+
+    private bool TryPlayExplicitStateForLabel(string label)
+    {
+        if (string.IsNullOrEmpty(label))
+        {
+            return false;
+        }
+
+        switch (label)
+        {
+            case "Vocal":
+                return TryCrossFadeState(barkStateHash) || TryCrossFadeState(idle2StateHash);
+            case "Scratch":
+                return TryCrossFadeState(scratchingStateHash);
+            case "Rest":
+            case "Sleep":
+                return TryCrossFadeState(lieStateHash);
+            case "Idle":
+            case "Social":
+            case "Training":
+            case "Paw":
+            case "Toy":
+                return TryCrossFadeState(idle2StateHash);
+            case "Petting":
+                return TryCrossFadeState(sitLoopStateHash) || TryCrossFadeState(idle2StateHash);
+            case "Eat":
+            case "Drink":
+                return TryCrossFadeState(idle2StateHash);
+            default:
+                return false;
+        }
+    }
+
+    private float ResolveActiveOneShotDuration(float fallbackDuration)
+    {
+        if (animator == null)
+        {
+            return Mathf.Max(0.1f, fallbackDuration);
+        }
+
+        AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
+        if (state.loop || state.length <= 0.01f)
+        {
+            return Mathf.Max(0.1f, fallbackDuration);
+        }
+
+        return Mathf.Max(0.1f, Mathf.Min(fallbackDuration, state.length + 0.02f));
     }
 
     private IEnumerator RestPoseRoutine(float duration, bool sleeping)
@@ -642,6 +794,51 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             elapsed += Time.deltaTime;
             transform.rotation = Quaternion.Slerp(startRotation, endRotation, Mathf.Clamp01(elapsed / duration));
             yield return null;
+        }
+
+        isPlayingOneShotAnimation = false;
+    }
+
+    private IEnumerator SitPoseRoutine(float duration, bool holdPoseAfter)
+    {
+        isPlayingOneShotAnimation = true;
+        if (agent != null)
+        {
+            agent.ResetPath();
+        }
+
+        bool started = TryCrossFadeState(sitStartStateHash)
+            || TryCrossFadeState(sitLoopStateHash)
+            || TryCrossFadeState(idle2StateHash);
+
+        if (!started && animationSet != null)
+        {
+            animationSet.TryPlaySelectedReaction(animator);
+        }
+
+        yield return null;
+
+        float totalDuration = Mathf.Max(0.3f, duration);
+        float startDuration = started && sitStartStateHash != 0 ? Mathf.Min(SitStartDuration, totalDuration * 0.35f) : 0f;
+        if (startDuration > 0f)
+        {
+            yield return new WaitForSeconds(startDuration);
+        }
+
+        if (TryCrossFadeState(sitLoopStateHash))
+        {
+            float loopDuration = Mathf.Max(0.1f, totalDuration - startDuration - (sitEndStateHash != 0 ? SitEndDuration : 0f));
+            yield return new WaitForSeconds(loopDuration);
+        }
+        else
+        {
+            yield return new WaitForSeconds(Mathf.Max(0.1f, ResolveActiveOneShotDuration(totalDuration)));
+        }
+
+        if (!holdPoseAfter && sitEndStateHash != 0)
+        {
+            TryCrossFadeState(sitEndStateHash);
+            yield return new WaitForSeconds(SitEndDuration);
         }
 
         isPlayingOneShotAnimation = false;
@@ -689,6 +886,76 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
         SetMovePace(Random.value < 0.35f ? DogMovementPace.Trot : DogMovementPace.Walk);
         waitUntil = immediate ? 0f : Time.time + Random.Range(minRoamWait, maxRoamWait);
+    }
+
+    private void CacheAnimationStateHashes()
+    {
+        barkStateHash = ResolveStateHash("Bark", "ProxBark");
+        idle2StateHash = ResolveStateHash("CatSimple_Idle_2", "Arm_Cat|Idle_2", "Idle_2", "Idle2");
+        sitStartStateHash = ResolveStateHash("CatSimple_Sit_start", "Arm_Cat|Sit_start", "Sit_start", "Sit start");
+        sitLoopStateHash = ResolveStateHash("CatSimple_Sit_loop_1", "Arm_Cat|Sit_loop_1", "Sit_loop_1", "Sit loop", "Sit");
+        sitEndStateHash = ResolveStateHash("CatSimple_Sit_end", "Arm_Cat|Sit_end", "Sit_end", "Sit end");
+        lieStateHash = ResolveStateHash("CatSimple_Lie_belly_loop_1", "Arm_Cat|Lie_belly_loop_1", "Lie_belly_loop_1", "Lie");
+        scratchingStateHash = ResolveStateHash("CatSimple_Scratching", "Arm_Cat|Scratching", "Scratching");
+    }
+
+    private bool TryCrossFadeState(int stateHash)
+    {
+        if (animator == null || stateHash == 0)
+        {
+            return false;
+        }
+
+        animator.speed = 1f;
+        animator.CrossFadeInFixedTime(stateHash, 0.08f, 0, 0f);
+        return true;
+    }
+
+    private int ResolveStateHash(params string[] stateNames)
+    {
+        if (animator == null || stateNames == null)
+        {
+            return 0;
+        }
+
+        for (int i = 0; i < stateNames.Length; i++)
+        {
+            string stateName = stateNames[i];
+            if (string.IsNullOrEmpty(stateName))
+            {
+                continue;
+            }
+
+            int hash = Animator.StringToHash(stateName);
+            if (animator.HasState(0, hash))
+            {
+                return hash;
+            }
+
+            string layerName = animator.GetLayerName(0);
+            string[] candidates =
+            {
+                layerName + "." + stateName,
+                "Base Layer." + stateName,
+                layerName + ".SitSM." + stateName,
+                "Base Layer.SitSM." + stateName,
+                layerName + ".IdleSM." + stateName,
+                "Base Layer.IdleSM." + stateName,
+                layerName + ".IdleSM.SitSM." + stateName,
+                "Base Layer.IdleSM.SitSM." + stateName
+            };
+
+            for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+            {
+                hash = Animator.StringToHash(candidates[candidateIndex]);
+                if (animator.HasState(0, hash))
+                {
+                    return hash;
+                }
+            }
+        }
+
+        return 0;
     }
 
     private void SetMovePace(DogMovementPace pace)
@@ -828,6 +1095,16 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void SetMoving(bool moving)
     {
+        if (!moving && (trainingBusy || isPlayingOneShotAnimation))
+        {
+            if (animator != null)
+            {
+                animator.speed = 1f;
+            }
+
+            return;
+        }
+
         if (animationSet != null && animationSet.TrySetMoving(animator, moving, currentMoveSpeed > 0f ? currentMoveSpeed : walkSpeed))
         {
             return;

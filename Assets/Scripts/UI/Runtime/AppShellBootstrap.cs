@@ -204,13 +204,7 @@ public class AppShellBootstrap : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
-        {
-            return;
-        }
-
-        GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-        Object.DontDestroyOnLoad(eventSystemObject);
+        PawPalEventSystemUtility.EnsureSingleEventSystem(true);
     }
 
     private static void CreateAppShellCanvas()

@@ -1224,12 +1224,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
-        {
-            return;
-        }
-
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        PawPalEventSystemUtility.EnsureSingleEventSystem(false);
     }
 
     private static RectTransform CreateNode(string name, RectTransform parent, float x, float y, float width, float height)

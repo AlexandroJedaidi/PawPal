@@ -182,6 +182,13 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         }
 
         lightingController.Configure(backdropRingController, ResolveDirectionalLight());
+        IntroTimeOfDayPracticalLightsController practicalLightsController = root.GetComponent<IntroTimeOfDayPracticalLightsController>();
+        if (practicalLightsController == null)
+        {
+            practicalLightsController = root.AddComponent<IntroTimeOfDayPracticalLightsController>();
+        }
+
+        practicalLightsController.Configure(backdropRingController);
         EnsureRuntimeNavMesh(root, fieldBounds);
         CleanupIntroSceneToys(root.transform);
 
@@ -441,6 +448,19 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         {
             lightingController.Configure(editorPreviewController, light);
         }
+
+        IntroTimeOfDayPracticalLightsController practicalLightsController = previewRoot != null
+            ? previewRoot.GetComponent<IntroTimeOfDayPracticalLightsController>()
+            : null;
+        if (previewRoot != null && practicalLightsController == null)
+        {
+            practicalLightsController = previewRoot.AddComponent<IntroTimeOfDayPracticalLightsController>();
+        }
+
+        if (practicalLightsController != null)
+        {
+            practicalLightsController.Configure(editorPreviewController);
+        }
     }
 
     private static void DestroyEditorPreview()
@@ -602,11 +622,6 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
 
     private static void EnsureEventSystem()
     {
-        if (Object.FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include) != null)
-        {
-            return;
-        }
-
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        PawPalEventSystemUtility.EnsureSingleEventSystem(false);
     }
 }

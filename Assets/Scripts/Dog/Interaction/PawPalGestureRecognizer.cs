@@ -196,7 +196,7 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
             return snapshot;
         }
 
-        if (IsPetStrokeGesture(startZone, endZone, duration, swipeThreshold, gesturePoints))
+        if (IsPetStrokeGesture(startZone, endZone, duration, swipeThreshold, gesturePoints, delta))
         {
             snapshot.Type = PawPalGestureType.PetStroke;
             snapshot.CandidateTrick = PawPalTrickId.Sit;
@@ -250,7 +250,8 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
         PawPalDogBodyZone gestureEndZone,
         float durationSeconds,
         float swipeThreshold,
-        IList<Vector2> points)
+        IList<Vector2> points,
+        Vector2 overallDelta)
     {
         if (!IsPettableDogBodyZone(gestureStartZone)
             || !IsPettableDogBodyZone(gestureEndZone)
@@ -270,6 +271,13 @@ public sealed class PawPalGestureRecognizer : MonoBehaviour
         if (pathLength < PetStrokeMinPixels
             || directDistance < PetStrokeMinPixels * 0.55f
             || directDistance >= swipeThreshold * 0.92f)
+        {
+            return false;
+        }
+
+        // Reserve clear vertical drags for trick gestures like sit/jump instead of swallowing them as petting.
+        if (Mathf.Abs(overallDelta.y) > Mathf.Abs(overallDelta.x) * 1.05f
+            && Mathf.Abs(overallDelta.y) >= PetStrokeMinPixels * 1.5f)
         {
             return false;
         }

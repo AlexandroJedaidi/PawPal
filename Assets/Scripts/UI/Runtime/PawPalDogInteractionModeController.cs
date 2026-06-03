@@ -502,7 +502,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (IsPettingGesture(snapshot)
             || IsPreviewPettingGesture(snapshot))
         {
-            if (snapshot.DurationSeconds >= PettingHoldMinDuration)
+            if (IsPettingAllowed() && snapshot.DurationSeconds >= PettingHoldMinDuration)
             {
                 ApplyPettingReward();
             }
@@ -539,6 +539,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (modeOptions != null && !modeOptions.AllowTrainingGestures)
         {
             message = "Training is disabled in preview mode.";
+            return InteractionTrickStartResult.Rejected;
+        }
+
+        if (!IsPetReadyForTrainingInput())
+        {
+            message = string.Empty;
             return InteractionTrickStartResult.Rejected;
         }
 
@@ -961,7 +967,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
     private void HandleContinuousPettingInput()
     {
-        if (activePet == null || !activePet.IsValid || Time.unscaledTime < ignoreGestureUntil)
+        if (activePet == null || !activePet.IsValid || Time.unscaledTime < ignoreGestureUntil || !IsPettingAllowed())
         {
             CancelContinuousPettingTracking();
             return;
@@ -1087,6 +1093,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return petRoot != null
             && TryGetScreenRect(petRoot, ResolveInteractionCamera(), PettingScreenPadding, out petRect)
             && petRect.Contains(screenPosition);
+    }
+
+    private bool IsPettingAllowed()
+    {
+        return interactionDirector == null || !interactionDirector.IsRunning;
     }
 
     private static bool TryGetScreenRect(Transform root, Camera camera, float padding, out Rect rect)
@@ -1294,6 +1305,23 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         gestureRecognizer.Configure(activePet != null ? activePet.RootTransform : null, ResolveInteractionCamera(), gestureLeniency, paddingMultiplier);
     }
 
+    private bool IsPetReadyForTrainingInput()
+    {
+        if (!active || activePet == null || !activePet.IsValid)
+        {
+            return false;
+        }
+
+        if (!activePet.CanPerformTrainingAnimation())
+        {
+            return false;
+        }
+
+        return activeDog == null
+            || interactionDirector == null
+            || !interactionDirector.IsRunning;
+    }
+
     private IEnumerator EnsurePetFacesInteractionCameraRoutine(PawPalRoomPetHandle pet, DogRoomAgent dog)
     {
         float startedAt = Time.unscaledTime;
@@ -1481,6 +1509,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private static bool ShouldShowInteractionStatus(string message)
     {
         return !string.IsNullOrWhiteSpace(message)
-            && !string.Equals(message, "Training is busy.", StringComparison.Ordinal);
+            && !string.Equals(message, "Training is busy.", StringComparison.Ordinal)
+            && !string.Equals(message, "Wait until your pet settles.", StringComparison.Ordinal);
     }
 }

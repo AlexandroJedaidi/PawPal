@@ -32,7 +32,7 @@ public sealed class IntroPetUIController : MonoBehaviour
     private TextMeshProUGUI nameLabel;
     private TextMeshProUGUI breedLabel;
     private TextMeshProUGUI descriptionLabel;
-    private TextMeshProUGUI personalityLabel;
+    private TextMeshProUGUI selectionPersonalityLabel;
     private TextMeshProUGUI customizeStageLabel;
     private TextMeshProUGUI customizeBreedLabel;
     private Image maleToggleFill;
@@ -138,9 +138,9 @@ public sealed class IntroPetUIController : MonoBehaviour
             descriptionLabel.text = definition != null ? definition.Description : string.Empty;
         }
 
-        if (personalityLabel != null)
+        if (selectionPersonalityLabel != null)
         {
-            personalityLabel.text = IntroPetFormatting.FormatPersonality(selection.Personality);
+            selectionPersonalityLabel.text = IntroPetFormatting.FormatPersonality(selection.Personality);
         }
 
         if (customizeStageLabel != null)
@@ -184,7 +184,7 @@ public sealed class IntroPetUIController : MonoBehaviour
 
     private void BuildSelectionCard()
     {
-        selectionCard = CreateCard(root, "SelectionCard", new Vector2(332f, 158f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
+        selectionCard = CreateCard(root, "SelectionCard", new Vector2(332f, 174f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
         selectionCardGroup = selectionCard.gameObject.GetComponent<CanvasGroup>();
         if (selectionCardGroup == null)
         {
@@ -219,9 +219,20 @@ public sealed class IntroPetUIController : MonoBehaviour
         descriptionLabel = CreateLabel(selectionCard, "DescriptionLabel", string.Empty, 12, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
         descriptionLabel.textWrappingMode = TextWrappingModes.Normal;
         descriptionLabel.overflowMode = TextOverflowModes.Ellipsis;
-        Place(descriptionLabel.rectTransform, 28f, 69f, 276f, 50f);
+        Place(descriptionLabel.rectTransform, 28f, 66f, 276f, 42f);
 
-        CreateContinueButton(selectionCard, "ContinueButton", "Continue", new Vector2(118f, 126f), new Vector2(96f, 24f), delegate
+        CreateLabel(selectionCard, "SelectionPersonalityCaption", "Personality", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
+        Place(selectionCard.Find("SelectionPersonalityCaption") as RectTransform, 24f, 116f, 90f, 18f);
+
+        Image selectionPersonalityChip = UiFactory.CreateImage("SelectionPersonalityChip", selectionCard, UiTheme.RoundedFiveSprite, ChipFill);
+        selectionPersonalityChip.type = Image.Type.Sliced;
+        selectionPersonalityChip.preserveAspect = false;
+        Place(selectionPersonalityChip.rectTransform, 116f, 113f, 96f, 24f);
+
+        selectionPersonalityLabel = CreateLabel(selectionPersonalityChip.rectTransform, "SelectionPersonalityLabel", "Loyal", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        UiFactory.Stretch(selectionPersonalityLabel.rectTransform, 8f, 2f, 8f, 2f);
+
+        CreateContinueButton(selectionCard, "ContinueButton", "Continue", new Vector2(118f, 142f), new Vector2(96f, 24f), delegate
         {
             Action handler = ContinueRequested;
             if (handler != null)
@@ -372,15 +383,6 @@ public sealed class IntroPetUIController : MonoBehaviour
         CreateLabel(customizeCard, "GenderCaption", "Gender:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
         Place(customizeCard.Find("GenderCaption") as RectTransform, 24f, 115f, 70f, 18f);
         BuildGenderToggle(customizeCard, 109f);
-
-        CreateLabel(customizeCard, "PersonalityCaption", "Personality", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(customizeCard.Find("PersonalityCaption") as RectTransform, 24f, 149f, 90f, 18f);
-
-        Image personalityChip = UiFactory.CreateImage("PersonalityChip", customizeCard, UiTheme.RoundedFiveSprite, ChipFill);
-        personalityChip.type = Image.Type.Sliced;
-        Place(personalityChip.rectTransform, 117f, 145f, 96f, 24f);
-        personalityLabel = CreateLabel(personalityChip.rectTransform, "PersonalityLabel", "Loyal", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(personalityLabel.rectTransform, 8f, 2f, 8f, 2f);
 
         CreateStyledActionButton(customizeCard, "BackButton", "Back", new Vector2(42f, 180f), new Vector2(92f, 26f), new Color32(209, 209, 209, 255), Color.white, new Color(0f, 0f, 0f, 0.14f), delegate
         {

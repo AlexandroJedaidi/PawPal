@@ -4,8 +4,8 @@ using UnityEngine;
 public sealed class PetSelectionCameraController : MonoBehaviour
 {
     internal const float HomeSceneCameraHeight = 0.834f;
-    internal static readonly Vector3 IntroSceneCameraPosition = new Vector3(-2.407f, 1.103f, -0.005f);
-    internal static readonly Vector3 IntroSceneCameraEulerAngles = new Vector3(5.072f, 0f, 0f);
+    internal static readonly Vector3 IntroSceneCameraPosition = new Vector3(-2.434f, 0.847f, 2.799f);
+    internal static readonly Vector3 IntroSceneCameraEulerAngles = new Vector3(5.475f, -12.758f, 0f);
 
     [SerializeField] private float positionSmooth = 4.2f;
     [SerializeField] private float rotationSmooth = 6.5f;

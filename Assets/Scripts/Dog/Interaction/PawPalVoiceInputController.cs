@@ -37,6 +37,7 @@ public delegate PawPalVoiceCommandExecutionResult PawPalVoiceCommandExecutionHan
 [DisallowMultipleComponent]
 public sealed class PawPalVoiceInputController : MonoBehaviour
 {
+    private const string VoiceDebugPrefix = "[VoiceDebug]";
     private readonly PawPalVoiceInputSnapshot snapshot = new PawPalVoiceInputSnapshot();
 
     private DogVoiceCommandDirector commandDirector;
@@ -92,6 +93,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
 
     public void SetMicEnabled(bool enabled)
     {
+        Debug.Log(VoiceDebugPrefix + " SetMicEnabled enabled=" + enabled + " current=" + snapshot.IsMicEnabled, this);
         if (enabled == snapshot.IsMicEnabled)
         {
             if (enabled)
@@ -127,6 +129,14 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         {
             voiceService.ConfigurePhrases(commandCatalog != null ? commandCatalog.Phrases : new string[0]);
         }
+
+        Debug.Log(
+            VoiceDebugPrefix
+            + " RefreshCommandCatalog activeDogId=" + activeDogId
+            + " includeUnlearnedActiveDogTricks=" + includeUnlearnedActiveDogTricks
+            + " phraseCount=" + (commandCatalog != null ? commandCatalog.Phrases.Count : 0)
+            + " phrases=[" + (commandCatalog != null ? string.Join(", ", commandCatalog.Phrases) : string.Empty) + "]",
+            this);
 
         RefreshSnapshotCounts();
         RaiseStateChanged();
@@ -204,6 +214,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
 
     private IEnumerator EnableMicRoutine()
     {
+        Debug.Log(VoiceDebugPrefix + " EnableMicRoutine begin", this);
         RefreshCommandCatalog();
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime == null || runtime.Dogs == null || runtime.Dogs.Count == 0)
@@ -273,6 +284,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
             yield break;
         }
 
+        Debug.Log(VoiceDebugPrefix + " Mic listening started service=" + (voiceService != null ? voiceService.GetType().Name : "null"), this);
         SetSnapshot(PawPalVoiceInputMode.ListeningName, "Listening for dog names and tricks.", false, snapshot.LastConfidence, true);
         stateRoutine = null;
     }
@@ -344,6 +356,15 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         RefreshCommandCatalog();
         float confidence = Mathf.Clamp01(recognizedPhrase.Confidence01);
         PawPalResolvedVoiceCommand resolvedCommand = commandCatalog != null ? commandCatalog.Resolve(recognizedPhrase.Transcript) : PawPalResolvedVoiceCommand.None();
+        Debug.Log(
+            VoiceDebugPrefix
+            + " Recognized transcript='" + recognizedPhrase.Transcript
+            + "' confidence=" + confidence.ToString("F2")
+            + " resolvedType=" + resolvedCommand.Type
+            + " dogId=" + resolvedCommand.DogId
+            + " trickId=" + resolvedCommand.TrickId
+            + " trickLabel='" + resolvedCommand.TrickLabel + "'",
+            this);
         if (resolvedCommand.Type == PawPalResolvedVoiceCommandType.None)
         {
             string feedback = commandCatalog != null ? commandCatalog.GetFeedbackForUnresolvedPhrase(recognizedPhrase.Transcript) : string.Empty;
@@ -379,6 +400,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
         if (customResult != null && customResult.Handled)
         {
             message = customResult.Message ?? string.Empty;
+            Debug.Log(VoiceDebugPrefix + " Custom command handled success=" + customResult.Success + " message='" + message + "'", this);
             return customResult.Success;
         }
 
@@ -390,6 +412,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
                 message = started
                     ? resolvedCommand.DogName + " is coming."
                     : resolvedCommand.DogName + " is busy right now.";
+                Debug.Log(VoiceDebugPrefix + " Execute CallDog started=" + started + " message='" + message + "'", this);
                 return started;
             }
             case PawPalResolvedVoiceCommandType.PerformTrick:
@@ -401,6 +424,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
                 message = started
                     ? resolvedCommand.DogName + " does " + trickLabel + "."
                     : resolvedCommand.DogName + " is busy right now.";
+                Debug.Log(VoiceDebugPrefix + " Execute PerformTrick started=" + started + " trick=" + resolvedCommand.TrickId + " message='" + message + "'", this);
                 return started;
             }
             default:
@@ -442,6 +466,7 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
             return;
         }
 
+        Debug.LogWarning(VoiceDebugPrefix + " ServiceFailure reason=" + reason + " message='" + message + "'", this);
         HandleTerminalFailure(reason, message);
     }
 
@@ -449,12 +474,14 @@ public sealed class PawPalVoiceInputController : MonoBehaviour
     {
         CancelActiveOperation(false);
         string resolvedMessage = string.IsNullOrWhiteSpace(message) ? "Voice commands are unavailable." : message;
+        Debug.LogWarning(VoiceDebugPrefix + " TerminalFailure reason=" + reason + " message='" + resolvedMessage + "'", this);
         SetSnapshot(PawPalVoiceInputMode.Unavailable, resolvedMessage, false, snapshot.LastConfidence, false);
         RaiseFeedback(resolvedMessage);
     }
 
     private void CancelActiveOperation(bool updateSnapshot)
     {
+        Debug.Log(VoiceDebugPrefix + " CancelActiveOperation updateSnapshot=" + updateSnapshot, this);
         if (stateRoutine != null)
         {
             StopCoroutine(stateRoutine);
