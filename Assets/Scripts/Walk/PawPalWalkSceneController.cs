@@ -17,6 +17,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
     private const float GroundProbeHeight = 8f;
     private const float GroundProbeDistance = 24f;
+    private const float WalkMusicVolume = 0.375f;
     private static readonly int MoveHash = Animator.StringToHash("Move");
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int DirectionHash = Animator.StringToHash("Direction");
@@ -34,6 +35,8 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private DogRoomAgent walkerRoomAgent;
     private Animator walkerAnimator;
     private Camera sceneCamera;
+    private AudioSource walkMusicSource;
+    private AudioClip walkMusicClip;
     private float[] cumulativeRouteDistances = new float[0];
     private PawPalPetMovementProfile walkMovementProfile = PawPalPetMovementProfiles.DefaultProfile;
     private float totalRouteDistance = 1f;
@@ -49,6 +52,17 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     public void Initialize(PawPalWalkSessionSaveData walkSession)
     {
         session = walkSession;
+    }
+
+    private void OnEnable()
+    {
+        PawPalAudioSettings.MusicVolumeChanged += HandleMusicVolumeChanged;
+    }
+
+    private void OnDisable()
+    {
+        PawPalAudioSettings.MusicVolumeChanged -= HandleMusicVolumeChanged;
+        StopWalkMusic();
     }
 
     private void Start()
@@ -97,12 +111,69 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
         PawPalWalkSceneFlow.SetAppShellVisible(false);
         ConfigureWalkerForWalk();
+        EnsureWalkMusic();
         progress = Mathf.Clamp01(session.LastProgress);
         currentDistance = Mathf.Clamp01(progress) * totalRouteDistance;
         MoveWalkerToDistance(currentDistance, true);
         ConfigureSceneCamera();
+        PawPalLeashRig.TryInstallSceneRig();
         state = WalkState.Running;
         PushProgressToRuntime();
+    }
+
+    private void EnsureWalkMusic()
+    {
+        if (walkMusicSource == null)
+        {
+            walkMusicSource = GetComponent<AudioSource>();
+            if (walkMusicSource == null)
+            {
+                walkMusicSource = gameObject.AddComponent<AudioSource>();
+            }
+
+            walkMusicSource.playOnAwake = false;
+            walkMusicSource.loop = true;
+            walkMusicSource.spatialBlend = 0f;
+            walkMusicSource.ignoreListenerPause = true;
+        }
+
+        if (walkMusicClip == null)
+        {
+            walkMusicClip = PawPalAudioResources.LoadClip(PawPalAudioResources.WalkingTheme);
+            if (walkMusicClip == null)
+            {
+                Debug.LogWarning("PawPalWalkSceneController could not load walk music clip '" + PawPalAudioResources.WalkingTheme + "'.");
+                return;
+            }
+        }
+
+        walkMusicSource.clip = walkMusicClip;
+        ApplyWalkMusicVolume();
+        if (!walkMusicSource.isPlaying)
+        {
+            walkMusicSource.Play();
+        }
+    }
+
+    private void StopWalkMusic()
+    {
+        if (walkMusicSource != null && walkMusicSource.isPlaying)
+        {
+            walkMusicSource.Stop();
+        }
+    }
+
+    private void HandleMusicVolumeChanged()
+    {
+        ApplyWalkMusicVolume();
+    }
+
+    private void ApplyWalkMusicVolume()
+    {
+        if (walkMusicSource != null)
+        {
+            walkMusicSource.volume = PawPalAudioSettings.ApplyMusicVolume(WalkMusicVolume);
+        }
     }
 
     private void Update()

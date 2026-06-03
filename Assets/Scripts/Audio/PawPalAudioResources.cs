@@ -3,6 +3,7 @@ using UnityEngine;
 public static class PawPalAudioResources
 {
     public const string PawFriendsHome = "Audio/pawfriends_home";
+    public const string WalkingTheme = "Audio/walking_theme";
     public const string NightAmbience = "Audio/night-ambience";
     public const string AmbientCar = "Audio/ambient_car";
     public const string AmbientBirds = "Audio/birds_chirping";

@@ -562,6 +562,42 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         currentInstance.SetActive(true);
     }
 
+    public bool TryGetLeashSocket(string dogId, out Transform socket)
+    {
+        socket = null;
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return false;
+        }
+
+        if (TryGetLeashSocketFromRuntimeCollarInstance(dogId, out socket))
+        {
+            return true;
+        }
+
+        DogRoomAgent agent = FindDogAgentForId(dogId);
+        if (agent == null)
+        {
+            return false;
+        }
+
+        PawPalLeashSocket leashSocket = agent.GetComponentInChildren<PawPalLeashSocket>(true);
+        if (leashSocket != null)
+        {
+            socket = leashSocket.Socket;
+            return socket != null;
+        }
+
+        Transform namedSocket = FindNamedTransform(agent.transform, "LeashSocket");
+        if (namedSocket != null)
+        {
+            socket = namedSocket;
+            return true;
+        }
+
+        return false;
+    }
+
     private GameObject CreateCollarInstance(DogRoomAgent agent, PawPalCatalogItemDefinition item, Transform collarAnchor)
     {
         GameObject prefab = Resources.Load<GameObject>(item.CollarPrefabResourcePath);
@@ -864,6 +900,113 @@ public sealed class PawPalDogSceneBridge : MonoBehaviour
         }
 
         return containsMatch;
+    }
+
+    private static Transform FindNamedTransform(Transform root, params string[] names)
+    {
+        if (root == null || names == null || names.Length == 0)
+        {
+            return null;
+        }
+
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        Transform containsMatch = null;
+
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform candidate = children[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            string candidateName = candidate.name;
+            for (int j = 0; j < names.Length; j++)
+            {
+                string expectedName = names[j];
+                if (string.Equals(candidateName, expectedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+
+                if (containsMatch == null && candidateName.IndexOf(expectedName, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    containsMatch = candidate;
+                }
+            }
+        }
+
+        return containsMatch;
+    }
+
+    private bool TryGetLeashSocketFromRuntimeCollarInstance(string dogId, out Transform socket)
+    {
+        socket = null;
+
+        GameObject instance;
+        if (!collarInstancesByDogId.TryGetValue(dogId, out instance) || instance == null)
+        {
+            return false;
+        }
+
+        PawPalLeashSocket leashSocket = instance.GetComponentInChildren<PawPalLeashSocket>(true);
+        if (leashSocket != null)
+        {
+            socket = leashSocket.Socket;
+            return socket != null;
+        }
+
+        Transform namedSocket = FindNamedTransform(instance.transform, "LeashSocket");
+        if (namedSocket != null)
+        {
+            socket = namedSocket;
+            return true;
+        }
+
+        WarnOnce(
+            "missing_leash_socket_" + dogId,
+            "Runtime collar instance for dog '" + dogId + "' has no PawPalLeashSocket. Falling back to the collar root transform.");
+        socket = instance.transform;
+        return true;
+    }
+
+    private DogRoomAgent FindDogAgentForId(string dogId)
+    {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return null;
+        }
+
+        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.InstanceID);
+        DogRoomAgent fallback = null;
+        for (int i = 0; i < agents.Length; i++)
+        {
+            DogRoomAgent agent = agents[i];
+            if (agent == null)
+            {
+                continue;
+            }
+
+            if (agent.HasExplicitDogId
+                && string.Equals(agent.DogId, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                return agent;
+            }
+
+            if (fallback == null)
+            {
+                fallback = agent;
+            }
+        }
+
+        if (runtime != null
+            && runtime.ActiveDog != null
+            && string.Equals(runtime.ActiveDog.Id, dogId, StringComparison.OrdinalIgnoreCase))
+        {
+            return fallback;
+        }
+
+        return null;
     }
 
     private float CalculateFallbackCollarScaleMultiplier(Transform neck, Transform head)
