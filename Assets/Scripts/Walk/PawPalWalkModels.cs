@@ -20,6 +20,20 @@ public enum PawPalWalkEventType
     PersonalityMoment
 }
 
+public enum PawPalWalkNodeType
+{
+    Spawn,
+    Corner,
+    Landmark
+}
+
+public enum PawPalWalkStopType
+{
+    Sniff,
+    Pissing,
+    Bark
+}
+
 [Serializable]
 public sealed class PawPalDogWalkData
 {
@@ -55,6 +69,30 @@ public sealed class PawPalWalkPointData
 }
 
 [Serializable]
+public sealed class PawPalWalkWorldPointData
+{
+    public float X;
+    public float Y;
+    public float Z;
+
+    public PawPalWalkWorldPointData()
+    {
+    }
+
+    public PawPalWalkWorldPointData(Vector3 point)
+    {
+        X = point.x;
+        Y = point.y;
+        Z = point.z;
+    }
+
+    public Vector3 ToVector3()
+    {
+        return new Vector3(X, Y, Z);
+    }
+}
+
+[Serializable]
 public sealed class PawPalWalkLocationData
 {
     public string LocationId;
@@ -64,10 +102,54 @@ public sealed class PawPalWalkLocationData
 }
 
 [Serializable]
+public sealed class PawPalWalkRouteEncounterData
+{
+    public string EncounterPointId;
+    public string SourceNodeId;
+    public float Progress;
+}
+
+[Serializable]
+public sealed class PawPalWalkGraphNodeData
+{
+    public string NodeId;
+    public PawPalWalkNodeType NodeType;
+    public PawPalWalkWorldPointData WorldPosition;
+    public PawPalWalkPointData MapPosition;
+}
+
+[Serializable]
+public sealed class PawPalWalkGraphEdgeData
+{
+    public string EdgeId;
+    public string StartNodeId;
+    public string EndNodeId;
+    public float Distance;
+    public List<PawPalWalkWorldPointData> WorldPath = new List<PawPalWalkWorldPointData>();
+}
+
+[Serializable]
+public sealed class PawPalWalkGraphSnapshot
+{
+    public string GraphId;
+    public string DefaultStartNodeId;
+    public string DefaultEndNodeId;
+    public List<PawPalWalkGraphNodeData> Nodes = new List<PawPalWalkGraphNodeData>();
+    public List<PawPalWalkGraphEdgeData> Edges = new List<PawPalWalkGraphEdgeData>();
+}
+
+[Serializable]
 public sealed class PawPalWalkRoutePlan
 {
     public List<PawPalWalkPointData> RoutePoints = new List<PawPalWalkPointData>();
     public List<PawPalWalkLocationData> PlannedStops = new List<PawPalWalkLocationData>();
+    public List<PawPalWalkWorldPointData> WorldPath = new List<PawPalWalkWorldPointData>();
+    public List<PawPalWalkRouteEncounterData> EncounterPoints = new List<PawPalWalkRouteEncounterData>();
+    public List<string> NodeIds = new List<string>();
+    public List<string> EdgeIds = new List<string>();
+    public string GraphId;
+    public string StartNodeId;
+    public string EndNodeId;
     public float RouteDistance;
     public float BaseStaminaCost;
     public float StaminaCost;
@@ -84,6 +166,10 @@ public sealed class PawPalWalkGeneratedEventState
     public string DisplayName;
     public string BodyText;
     public string RewardItemId;
+    public string SourceEncounterPointId;
+    public string SourceNodeId;
+    public string EventTemplateId;
+    public PawPalWalkStopType StopType;
     public float Progress;
     public bool Resolved;
     public bool RewardGranted;
@@ -103,7 +189,15 @@ public sealed class PawPalWalkSessionSaveData
     public bool Completed;
     public bool FinalRewardsApplied;
     public float LastProgress;
+    public bool DeferredGraphResolution;
+    public string GraphId;
+    public string StartNodeId;
+    public string EndNodeId;
     public List<PawPalWalkPointData> RoutePoints = new List<PawPalWalkPointData>();
+    public List<PawPalWalkWorldPointData> WorldPath = new List<PawPalWalkWorldPointData>();
+    public List<PawPalWalkRouteEncounterData> EncounterPoints = new List<PawPalWalkRouteEncounterData>();
+    public List<string> RouteNodeIds = new List<string>();
+    public List<string> RouteEdgeIds = new List<string>();
     public List<PawPalWalkLocationData> VisitedLocations = new List<PawPalWalkLocationData>();
     public List<PawPalWalkGeneratedEventState> GeneratedEvents = new List<PawPalWalkGeneratedEventState>();
 }

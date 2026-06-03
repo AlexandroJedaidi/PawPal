@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -153,6 +154,7 @@ public class MapScreenView : AppScreenViewBase
     private MapMode currentMode;
     private ResponsiveFigmaFrameLayout frameLayout;
     private MapWalkPlannerController walkPlanner;
+    private Coroutine quickWalkRoutine;
 
     protected override bool UseScreenContainer
     {
@@ -279,7 +281,7 @@ public class MapScreenView : AppScreenViewBase
 
         CreateWalkButton(parent, 11f, 699f, delegate
         {
-            SetMode(MapMode.Walk);
+            TryStartQuickWalk();
         });
 
         CreateSocialButton(parent, 326f, 708f, delegate
@@ -316,6 +318,82 @@ public class MapScreenView : AppScreenViewBase
         {
             Debug.LogWarning("Map kennel transition could not load the IntroPetSelection scene.");
         }
+    }
+
+    private void TryStartQuickWalk()
+    {
+        if (quickWalkRoutine != null)
+        {
+            return;
+        }
+
+        quickWalkRoutine = StartCoroutine(TryStartQuickWalkRoutine());
+    }
+
+    private IEnumerator TryStartQuickWalkRoutine()
+    {
+        const float transitionReadyNudgeSeconds = 1.5f;
+        const float transitionForceReleaseSeconds = 3f;
+        const float transitionWaitTimeoutSeconds = 6f;
+        float startedWaitingAt = Time.unscaledTime;
+        bool nudgedReady = false;
+        bool forcedRelease = false;
+        while (PawPalSceneTransitionController.IsTransitionActive && Time.unscaledTime < startedWaitingAt + transitionWaitTimeoutSeconds)
+        {
+            if (!nudgedReady && Time.unscaledTime >= startedWaitingAt + transitionReadyNudgeSeconds)
+            {
+                PawPalSceneTransitionController.MarkActiveTransitionReady("Map quick walk is waiting for a previous transition to finish.");
+                nudgedReady = true;
+            }
+
+            if (!forcedRelease && Time.unscaledTime >= startedWaitingAt + transitionForceReleaseSeconds)
+            {
+                PawPalSceneTransitionController.ForceCompleteActiveTransition("Map quick walk recovered from a stale previous transition.");
+                forcedRelease = true;
+            }
+
+            yield return null;
+        }
+
+        if (PawPalSceneTransitionController.IsTransitionActive)
+        {
+            Debug.LogWarning("Map quick walk timed out waiting for the previous scene transition to finish.");
+            quickWalkRoutine = null;
+            yield break;
+        }
+
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null)
+        {
+            Debug.LogWarning("Map quick walk could not start because the runtime is unavailable.");
+            quickWalkRoutine = null;
+            yield break;
+        }
+
+        if (runtime.ActiveDog == null)
+        {
+            Debug.LogWarning("Map quick walk could not start because no active dog is selected.");
+            quickWalkRoutine = null;
+            yield break;
+        }
+
+        runtime.CancelActiveWalkSession();
+
+        string failureMessage;
+        if (!runtime.TryStartDeferredWalkSession(PawPalWalkSceneFlow.HomeSceneName, out failureMessage))
+        {
+            Debug.LogWarning("Map quick walk could not start: " + failureMessage);
+            quickWalkRoutine = null;
+            yield break;
+        }
+
+        if (!PawPalWalkSceneFlow.LoadWalkScene())
+        {
+            runtime.CancelActiveWalkSession();
+            Debug.LogWarning("Map quick walk could not load the walking scene.");
+        }
+
+        quickWalkRoutine = null;
     }
 
     private void BuildCompetitionState(RectTransform parent)

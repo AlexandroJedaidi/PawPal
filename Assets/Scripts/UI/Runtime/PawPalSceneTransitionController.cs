@@ -103,6 +103,11 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             return false;
         }
 
+        if (!instance.gameObject.activeSelf)
+        {
+            instance.gameObject.SetActive(true);
+        }
+
         PawPalSceneTransitionRequest preparedRequest = PrepareRequest(request, scenePath);
         string loadError;
         AsyncOperation loadOperation = instance.TryStartSceneLoad(sceneName, scenePath, preparedRequest, out loadError);
@@ -129,6 +134,21 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         if (!string.IsNullOrEmpty(reason))
         {
             Debug.Log("PawPalSceneTransitionController marked the active transition ready: " + reason);
+        }
+    }
+
+    public static void ForceCompleteActiveTransition(string reason = null)
+    {
+        if (instance == null || !instance.transitionActive)
+        {
+            return;
+        }
+
+        instance.StopAllCoroutines();
+        instance.FinishTransition();
+        if (!string.IsNullOrEmpty(reason))
+        {
+            Debug.LogWarning("PawPalSceneTransitionController force-completed the active transition. " + reason);
         }
     }
 
@@ -537,6 +557,15 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             return operation;
         }
 
+#if UNITY_EDITOR
+        operation = TryStartEditorSceneLoad(scenePath, builder, "primary editor scene path");
+        if (operation != null)
+        {
+            error = string.Empty;
+            return operation;
+        }
+#endif
+
         operation = TryStartSceneLoadByIdentifier(scenePath, builder, "primary scene path");
         if (operation != null)
         {
@@ -559,13 +588,6 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         }
 
 #if UNITY_EDITOR
-        operation = TryStartEditorSceneLoad(scenePath, builder, "primary editor scene path");
-        if (operation != null)
-        {
-            error = string.Empty;
-            return operation;
-        }
-
         operation = TryStartEditorSceneLoad(request.FallbackScenePath, builder, "fallback editor scene path");
         if (operation != null)
         {

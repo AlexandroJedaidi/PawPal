@@ -4,7 +4,7 @@ using UnityEngine;
 
 public static class PawPalWalkEventGenerator
 {
-    private static readonly string[] EncounterNames =
+    private static readonly string[] FallbackEncounterNames =
     {
         "Bella",
         "Mochi",
@@ -31,91 +31,105 @@ public static class PawPalWalkEventGenerator
         session.GeneratedEvents.Clear();
         session.VisitedLocations.Clear();
 
-        for (int i = 0; i < plan.PlannedStops.Count; i++)
-        {
-            PawPalWalkLocationData stop = CloneLocation(plan.PlannedStops[i]);
-            session.VisitedLocations.Add(stop);
-            session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
-            {
-                EventId = "location_" + stop.LocationId + "_" + i,
-                EventType = PawPalWalkEventType.LocationVisit,
-                LocationId = stop.LocationId,
-                DisplayName = stop.DisplayName,
-                Progress = ClampEventProgress(stop.Progress)
-            });
-        }
-
         int seed = session.SessionId != null ? session.SessionId.GetHashCode() : Environment.TickCount;
         System.Random random = new System.Random(seed);
         PawPalDogState dog = PawPalDogPersonalityProfiles.FindRuntimeDog(session.SelectedDogId);
+
+        bool generatedFromAuthoredPools = false;
+        PawPalWalkingSceneBindings bindings = PawPalWalkingSceneBindings.FindInScene();
+        if (bindings != null && plan.EncounterPoints != null && plan.EncounterPoints.Count > 0)
+        {
+            generatedFromAuthoredPools = PopulateFromEncounterPools(session, plan, runtime, bindings, random);
+        }
+
+        if (!generatedFromAuthoredPools)
+        {
+            PopulateLegacyFallbackEvents(session, plan, runtime, dog, random);
+        }
+
+        SortAndSpaceEvents(session.GeneratedEvents);
+    }
+
+    private static bool PopulateFromEncounterPools(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalGameRuntime runtime, PawPalWalkingSceneBindings bindings, System.Random random)
+    {
+        Dictionary<string, List<PawPalWalkEncounterTemplate>> templatesByEncounterId = new Dictionary<string, List<PawPalWalkEncounterTemplate>>();
+        if (!PawPalWalkGraphService.TryGetEncounterTemplatesForPlan(bindings, plan, templatesByEncounterId))
+        {
+            return false;
+        }
+
+        bool addedAny = false;
+        for (int i = 0; i < plan.EncounterPoints.Count; i++)
+        {
+            PawPalWalkRouteEncounterData encounter = plan.EncounterPoints[i];
+            if (encounter == null
+                || string.IsNullOrEmpty(encounter.EncounterPointId)
+                || !templatesByEncounterId.TryGetValue(encounter.EncounterPointId, out List<PawPalWalkEncounterTemplate> templates)
+                || templates == null
+                || templates.Count == 0)
+            {
+                continue;
+            }
+
+            PawPalWalkEncounterTemplate selectedTemplate = SelectTemplate(templates, random);
+            if (selectedTemplate == null)
+            {
+                continue;
+            }
+
+            string displayName = ResolveDisplayName(selectedTemplate, random);
+            string rewardItemId = ResolveRewardItemId(selectedTemplate, runtime, random);
+            session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
+            {
+                EventId = "encounter_" + encounter.EncounterPointId + "_" + i,
+                EventType = selectedTemplate.EventType,
+                LocationId = encounter.SourceNodeId,
+                DisplayName = displayName,
+                BodyText = selectedTemplate.BodyText,
+                RewardItemId = rewardItemId,
+                SourceEncounterPointId = encounter.EncounterPointId,
+                SourceNodeId = encounter.SourceNodeId,
+                EventTemplateId = selectedTemplate.EventTemplateId,
+                StopType = selectedTemplate.StopType,
+                Progress = ClampEventProgress(encounter.Progress)
+            });
+
+            addedAny = true;
+        }
+
+        return addedAny;
+    }
+
+    private static void PopulateLegacyFallbackEvents(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalGameRuntime runtime, PawPalDogState dog, System.Random random)
+    {
         AddPresentEvents(session, plan, runtime, dog, random);
         AddDogEncounterEvent(session, plan, dog, random);
         AddPersonalityMomentEvent(session, plan, dog, random);
-        SortAndSpaceEvents(session.GeneratedEvents);
     }
 
     private static void AddPresentEvents(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalGameRuntime runtime, PawPalDogState dog, System.Random random)
     {
-        float chance = Mathf.Clamp01((0.22f + plan.RouteDistance * 0.006f) * PawPalDogPersonalityProfiles.GetWalkPresentChanceMultiplier(dog));
-        int presentCount = random.NextDouble() < chance ? 1 : 0;
-        float longRouteChance = 0.32f * PawPalDogPersonalityProfiles.GetWalkPresentChanceMultiplier(dog);
-        if (plan.RouteDistance > 36f && random.NextDouble() < Mathf.Clamp01(longRouteChance))
+        float chance = Mathf.Clamp01((0.18f + plan.RouteDistance * 0.005f) * PawPalDogPersonalityProfiles.GetWalkPresentChanceMultiplier(dog));
+        if (random.NextDouble() > chance)
         {
-            presentCount++;
+            return;
         }
 
-        presentCount = Mathf.Clamp(presentCount, 0, 2);
-        for (int i = 0; i < presentCount; i++)
+        string rewardItemId = PickRewardItemId(runtime, random);
+        session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
         {
-            float progress = Mathf.Lerp(0.2f, 0.82f, (float)random.NextDouble());
-            string rewardItemId = PickRewardItemId(runtime, random);
-            session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
-            {
-                EventId = "present_" + i,
-                EventType = PawPalWalkEventType.PresentFound,
-                DisplayName = "Present",
-                RewardItemId = rewardItemId,
-                Progress = ClampEventProgress(progress)
-            });
-        }
+            EventId = "present_legacy",
+            EventType = PawPalWalkEventType.PresentFound,
+            DisplayName = "Present",
+            RewardItemId = rewardItemId,
+            StopType = PawPalWalkStopType.Sniff,
+            Progress = ClampEventProgress(Mathf.Lerp(0.24f, 0.76f, (float)random.NextDouble()))
+        });
     }
 
     private static void AddDogEncounterEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalDogState dog, System.Random random)
     {
-        float chance = 0.28f + plan.RouteDistance * 0.004f;
-        for (int i = 0; i < plan.PlannedStops.Count; i++)
-        {
-            if (plan.PlannedStops[i].LocationType == PawPalMapLocationType.DogPark)
-            {
-                chance += 0.24f;
-                break;
-            }
-        }
-
-        chance *= PawPalDogPersonalityProfiles.GetWalkDogEncounterChanceMultiplier(dog);
-        if (random.NextDouble() > Mathf.Clamp01(chance))
-        {
-            return;
-        }
-
-        string dogName = EncounterNames[random.Next(0, EncounterNames.Length)];
-        session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
-        {
-            EventId = "dog_encounter",
-            EventType = PawPalWalkEventType.DogEncounter,
-            DisplayName = dogName,
-            Progress = ClampEventProgress(Mathf.Lerp(0.28f, 0.74f, (float)random.NextDouble()))
-        });
-    }
-
-    private static void AddPersonalityMomentEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalDogState dog, System.Random random)
-    {
-        if (dog == null || plan.RouteDistance < 8f)
-        {
-            return;
-        }
-
-        float chance = plan.PlannedStops.Count > 0 ? 0.72f : 0.52f;
+        float chance = Mathf.Clamp01((0.24f + plan.RouteDistance * 0.0035f) * PawPalDogPersonalityProfiles.GetWalkDogEncounterChanceMultiplier(dog));
         if (random.NextDouble() > chance)
         {
             return;
@@ -123,12 +137,117 @@ public static class PawPalWalkEventGenerator
 
         session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
         {
-            EventId = "personality_moment",
+            EventId = "dog_encounter_legacy",
+            EventType = PawPalWalkEventType.DogEncounter,
+            DisplayName = FallbackEncounterNames[random.Next(0, FallbackEncounterNames.Length)],
+            StopType = PawPalWalkStopType.Bark,
+            Progress = ClampEventProgress(Mathf.Lerp(0.28f, 0.72f, (float)random.NextDouble()))
+        });
+    }
+
+    private static void AddPersonalityMomentEvent(PawPalWalkSessionSaveData session, PawPalWalkRoutePlan plan, PawPalDogState dog, System.Random random)
+    {
+        if (dog == null || plan.RouteDistance < 8f || random.NextDouble() > 0.45d)
+        {
+            return;
+        }
+
+        session.GeneratedEvents.Add(new PawPalWalkGeneratedEventState
+        {
+            EventId = "personality_moment_legacy",
             EventType = PawPalWalkEventType.PersonalityMoment,
             DisplayName = PawPalDogPersonalityProfiles.GetWalkMomentTitle(dog),
             BodyText = PawPalDogPersonalityProfiles.GetWalkMomentBody(dog),
+            StopType = PawPalWalkStopType.Sniff,
             Progress = ClampEventProgress(Mathf.Lerp(0.22f, 0.78f, (float)random.NextDouble()))
         });
+    }
+
+    private static PawPalWalkEncounterTemplate SelectTemplate(IList<PawPalWalkEncounterTemplate> templates, System.Random random)
+    {
+        float totalWeight = 0f;
+        for (int i = 0; i < templates.Count; i++)
+        {
+            PawPalWalkEncounterTemplate template = templates[i];
+            if (template != null)
+            {
+                totalWeight += Mathf.Max(0f, template.Weight);
+            }
+        }
+
+        if (totalWeight <= 0.001f)
+        {
+            return null;
+        }
+
+        float roll = (float)random.NextDouble() * totalWeight;
+        float cumulative = 0f;
+        for (int i = 0; i < templates.Count; i++)
+        {
+            PawPalWalkEncounterTemplate template = templates[i];
+            if (template == null)
+            {
+                continue;
+            }
+
+            cumulative += Mathf.Max(0f, template.Weight);
+            if (roll <= cumulative)
+            {
+                return template;
+            }
+        }
+
+        return templates[templates.Count - 1];
+    }
+
+    private static string ResolveDisplayName(PawPalWalkEncounterTemplate template, System.Random random)
+    {
+        if (template == null)
+        {
+            return string.Empty;
+        }
+
+        if (template.EventType == PawPalWalkEventType.DogEncounter)
+        {
+            if (!string.IsNullOrWhiteSpace(template.EncounterDogName))
+            {
+                return template.EncounterDogName.Trim();
+            }
+
+            return FallbackEncounterNames[random.Next(0, FallbackEncounterNames.Length)];
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.DisplayName))
+        {
+            return template.DisplayName.Trim();
+        }
+
+        switch (template.EventType)
+        {
+            case PawPalWalkEventType.PresentFound:
+                return "Present";
+            case PawPalWalkEventType.LocationVisit:
+                return "Street Corner";
+            case PawPalWalkEventType.PersonalityMoment:
+                return "Moment";
+            default:
+                return "Encounter";
+        }
+    }
+
+    private static string ResolveRewardItemId(PawPalWalkEncounterTemplate template, PawPalGameRuntime runtime, System.Random random)
+    {
+        if (template == null || template.EventType != PawPalWalkEventType.PresentFound)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.RewardItemId) && runtime != null && runtime.GetCatalogItem(template.RewardItemId) != null)
+        {
+            return template.RewardItemId.Trim();
+        }
+
+        return PickRewardItemId(runtime, random);
     }
 
     private static string PickRewardItemId(PawPalGameRuntime runtime, System.Random random)
@@ -156,28 +275,17 @@ public static class PawPalWalkEventGenerator
             return first.Progress.CompareTo(second.Progress);
         });
 
-        float previous = 0.12f;
+        float previous = 0.08f;
         for (int i = 0; i < events.Count; i++)
         {
             PawPalWalkGeneratedEventState walkEvent = events[i];
-            walkEvent.Progress = Mathf.Clamp(walkEvent.Progress, previous + 0.08f, 0.92f);
+            walkEvent.Progress = Mathf.Clamp(walkEvent.Progress, previous + 0.06f, 0.94f);
             previous = walkEvent.Progress;
         }
     }
 
-    private static PawPalWalkLocationData CloneLocation(PawPalWalkLocationData source)
-    {
-        return new PawPalWalkLocationData
-        {
-            LocationId = source.LocationId,
-            DisplayName = source.DisplayName,
-            LocationType = source.LocationType,
-            Progress = source.Progress
-        };
-    }
-
     private static float ClampEventProgress(float progress)
     {
-        return Mathf.Clamp(progress, 0.12f, 0.92f);
+        return Mathf.Clamp(progress, 0.08f, 0.94f);
     }
 }

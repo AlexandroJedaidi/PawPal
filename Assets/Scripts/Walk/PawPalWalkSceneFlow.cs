@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 #if UNITY_EDITOR
@@ -10,10 +11,11 @@ public static class PawPalWalkSceneFlow
 {
     public const string HomeSceneName = "David_Test";
     public const string HomeScenePath = "Assets/Scenes/David_Test.unity";
-    public const string WalkSceneName = "David_Walk_Test";
-    public const string WalkScenePath = "Assets/Scenes/David_Walk_Test.unity";
+    public const string WalkSceneName = "Walking";
+    public const string WalkScenePath = "Assets/Scenes/Walking.unity";
 
     private static bool pendingShowHome;
+    private static GameObject pendingWalkDogInstance;
     internal static bool ManualWalkSceneLoadRequested;
 
     public static bool PendingShowHome
@@ -24,6 +26,7 @@ public static class PawPalWalkSceneFlow
     public static bool LoadWalkScene()
     {
         ManualWalkSceneLoadRequested = true;
+        PrepareActiveDogForWalkScene();
         ClearEditorSelectionBeforeSceneLoad();
         bool loadStarted = PawPalSceneTransitionController.LoadSceneWithTransition(
             WalkSceneName,
@@ -38,11 +41,13 @@ public static class PawPalWalkSceneFlow
                 },
                 OnLoadStartFailed = delegate
                 {
+                    ClearPreparedWalkDog();
                     ManualWalkSceneLoadRequested = false;
                 }
             });
         if (!loadStarted)
         {
+            ClearPreparedWalkDog();
             ManualWalkSceneLoadRequested = false;
         }
 
@@ -53,6 +58,7 @@ public static class PawPalWalkSceneFlow
     {
         pendingShowHome = true;
         ManualWalkSceneLoadRequested = false;
+        ClearPreparedWalkDog();
         ClearEditorSelectionBeforeSceneLoad();
         string targetScene = string.IsNullOrEmpty(sceneName) ? HomeSceneName : sceneName;
         bool loadStarted = PawPalSceneTransitionController.LoadSceneWithTransition(
@@ -92,6 +98,75 @@ public static class PawPalWalkSceneFlow
     public static void ConsumePendingShowHome()
     {
         pendingShowHome = false;
+    }
+
+    public static bool TryConsumePreparedWalkDog(out GameObject dogObject)
+    {
+        dogObject = pendingWalkDogInstance;
+        if (dogObject == null)
+        {
+            return false;
+        }
+
+        pendingWalkDogInstance = null;
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (activeScene.IsValid())
+        {
+            SceneManager.MoveGameObjectToScene(dogObject, activeScene);
+        }
+
+        DisablePreparedDogNavMeshAgents(dogObject);
+        dogObject.SetActive(true);
+        return true;
+    }
+
+    public static void ClearPreparedWalkDog()
+    {
+        if (pendingWalkDogInstance != null)
+        {
+            Object.Destroy(pendingWalkDogInstance);
+            pendingWalkDogInstance = null;
+        }
+    }
+
+    private static void PrepareActiveDogForWalkScene()
+    {
+        ClearPreparedWalkDog();
+
+        PawPalRoomPetHandle activePet = PawPalRoomPetRuntime.ResolveActivePet();
+        if (activePet == null || !activePet.IsValid || !activePet.IsDog || activePet.RootTransform == null)
+        {
+            return;
+        }
+
+        pendingWalkDogInstance = Object.Instantiate(activePet.RootTransform.gameObject);
+        if (pendingWalkDogInstance == null)
+        {
+            return;
+        }
+
+        pendingWalkDogInstance.name = "PreparedWalkDog_" + activePet.RootTransform.name;
+        DisablePreparedDogNavMeshAgents(pendingWalkDogInstance);
+        pendingWalkDogInstance.SetActive(false);
+        Object.DontDestroyOnLoad(pendingWalkDogInstance);
+    }
+
+    private static void DisablePreparedDogNavMeshAgents(GameObject dogObject)
+    {
+        if (dogObject == null)
+        {
+            return;
+        }
+
+        NavMeshAgent[] agents = dogObject.GetComponentsInChildren<NavMeshAgent>(true);
+        for (int i = 0; i < agents.Length; i++)
+        {
+            NavMeshAgent agent = agents[i];
+            if (agent != null && agent.enabled)
+            {
+                agent.enabled = false;
+            }
+        }
     }
 
     public static void SetAppShellVisible(bool visible)
@@ -163,32 +238,32 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
             runtime = PawPalGameRuntime.Instance;
         }
 
-        if (runtime != null && runtime.ActiveWalkSession != null && !runtime.ActiveWalkSession.Completed)
+        if (sceneName == PawPalWalkSceneFlow.WalkSceneName)
         {
-            if (sceneName == PawPalWalkSceneFlow.WalkSceneName)
+            PawPalWalkSceneFlow.ManualWalkSceneLoadRequested = false;
+            EnsureWalkSceneController();
+            if (runtime != null && runtime.ActiveWalkSession != null)
             {
-                if (!PawPalWalkSceneFlow.ManualWalkSceneLoadRequested)
-                {
-                    runtime.CancelActiveWalkSession();
-                    PawPalWalkSceneFlow.ReturnHome(PawPalWalkSceneFlow.HomeSceneName);
-                    yield break;
-                }
-
-                PawPalWalkSceneFlow.ManualWalkSceneLoadRequested = false;
-                PawPalWalkSceneFlow.SetAppShellVisible(false);
-                EnsureWalkSceneController(runtime.ActiveWalkSession);
-            }
-            else
-            {
-                PawPalWalkSceneFlow.ManualWalkSceneLoadRequested = false;
-                runtime.CancelActiveWalkSession();
-                PawPalWalkSceneFlow.SetAppShellVisible(true);
+                Debug.Log("PawPalWalkSceneBootstrap initialized the walking scene for active session '" + runtime.ActiveWalkSession.SessionId + "'.");
             }
 
             yield break;
         }
 
+        if (runtime != null && runtime.ActiveWalkSession != null && !runtime.ActiveWalkSession.Completed)
+        {
+            if (PawPalWalkSceneFlow.ManualWalkSceneLoadRequested)
+            {
+                yield break;
+            }
+
+            PawPalWalkSceneFlow.SetAppShellVisible(true);
+            PawPalWalkSceneFlow.ClearPreparedWalkDog();
+            yield break;
+        }
+
         PawPalWalkSceneFlow.SetAppShellVisible(true);
+        PawPalWalkSceneFlow.ClearPreparedWalkDog();
         if (PawPalWalkSceneFlow.PendingShowHome)
         {
             yield return null;
@@ -197,7 +272,7 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
         }
     }
 
-    private static void EnsureWalkSceneController(PawPalWalkSessionSaveData session)
+    private static void EnsureWalkSceneController()
     {
         if (Object.FindFirstObjectByType<PawPalWalkSceneController>(FindObjectsInactive.Include) != null)
         {
@@ -205,8 +280,7 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
         }
 
         GameObject controllerObject = new GameObject("PawFriendsWalkSceneController");
-        PawPalWalkSceneController controller = controllerObject.AddComponent<PawPalWalkSceneController>();
-        controller.Initialize(session);
+        controllerObject.AddComponent<PawPalWalkSceneController>();
     }
 
     private static void ShowHomeScreen()

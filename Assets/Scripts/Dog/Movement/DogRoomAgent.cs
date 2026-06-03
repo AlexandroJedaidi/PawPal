@@ -137,6 +137,19 @@ public class DogRoomAgent : MonoBehaviour
         "Petting",
         "petting"
     };
+    private static readonly string[] WalkSniffClipSuffixes =
+    {
+        "Sniffing",
+        "Sniff",
+        "Idle_7",
+        "Idle7"
+    };
+    private static readonly string[] WalkPissingClipSuffixes =
+    {
+        "Pissing",
+        "Pee",
+        "Peeing"
+    };
 
     private static readonly int MoveHash = Animator.StringToHash("Move");
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
@@ -227,6 +240,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private string scratchStateName = "Scratching";
     [SerializeField] private string tailWagStateName = "TailWag";
     [SerializeField] private string barkStateName = "Bark";
+    [SerializeField] private string walkSniffStateName = "Sniffing";
+    [SerializeField] private string walkPissingStateName = "Pissing";
     [SerializeField] private string pickupStateName = "Pickup";
     [SerializeField] private string putDownStateName = "PutDown";
     [SerializeField] private string attackLeftStateName = "Attack_L";
@@ -252,6 +267,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float minimumSecondsBetweenAmbientSleeps = 180f;
     [SerializeField] private float minimumSecondsBetweenAmbientLieDowns = 150f;
     [SerializeField] private Vector2 initialAmbientLieDownDelayRange = new Vector2(60f, 140f);
+    [SerializeField] private bool autoStartRoaming = true;
     [SerializeField] private float sitToLieDelay = 0.85f;
     [SerializeField] private float restCrossFadeDuration = 0.18f;
     [SerializeField] private float wakePauseDuration = 0.45f;
@@ -478,6 +494,9 @@ public class DogRoomAgent : MonoBehaviour
     private Vector3 selectedPetHomeCameraOffset = DefaultSelectedPetHomeCameraOffset;
     private PawPalPetMovementProfile movementProfile = PawPalPetMovementProfiles.DefaultProfile;
     private bool hasMovementProfile;
+    private bool externalWalkControl;
+    private DogMovementPace externalWalkPace = DogMovementPace.Run;
+    private readonly HashSet<string> walkStopWarnings = new HashSet<string>();
     private LivingRoomGraphicsEnhancer livingRoomGraphicsEnhancer;
 #if UNITY_EDITOR
     private Dictionary<string, AnimationClip> editorImportedClips;
@@ -586,6 +605,55 @@ public class DogRoomAgent : MonoBehaviour
         ApplySelectedPetRuntimeProfile(selection);
         RefreshMovementProfile(selection);
         RefreshSelectedPetRuntimeConfiguration();
+    }
+
+    public void SetExternalWalkControl(bool enabled)
+    {
+        externalWalkControl = enabled;
+        autoStartRoaming = !enabled;
+        if (!enabled)
+        {
+            return;
+        }
+
+        PauseForSocial(false);
+        ApplyPace(externalWalkPace);
+        ResetWorldMotionSampling();
+    }
+
+    public void SetExternalWalkPace(DogMovementPace pace)
+    {
+        externalWalkPace = pace;
+        ApplyPace(pace);
+    }
+
+    public IEnumerator PlayWalkStop(PawPalWalkStopType stopType, float duration)
+    {
+        float targetDuration = Mathf.Max(0.35f, duration);
+        switch (stopType)
+        {
+            case PawPalWalkStopType.Bark:
+                yield return PlayBark(targetDuration, true, false);
+                yield break;
+            case PawPalWalkStopType.Pissing:
+                yield return PlayImportedWalkStop(
+                    stopType,
+                    walkPissingStateName,
+                    WalkPissingClipSuffixes,
+                    targetDuration,
+                    sniffingClip,
+                    true);
+                yield break;
+            default:
+                yield return PlayImportedWalkStop(
+                    stopType,
+                    walkSniffStateName,
+                    WalkSniffClipSuffixes,
+                    targetDuration,
+                    sniffingClip,
+                    false);
+                yield break;
+        }
     }
 
     public void ApplySelectedPetPresentation(SelectedPetSessionData selection)
@@ -915,7 +983,22 @@ public class DogRoomAgent : MonoBehaviour
         PawPalToyRuntimeMetadata.AutoRegisterSceneLargeToys(true);
         RefreshDogDogPhysicsIgnores();
         ScheduleInitialAmbientLieDownWindow();
-        StartRoaming();
+        if (externalWalkControl)
+        {
+            PauseForSocial(false);
+            ApplyPace(externalWalkPace);
+            ResetWorldMotionSampling();
+            return;
+        }
+
+        if (autoStartRoaming)
+        {
+            StartRoaming();
+        }
+        else
+        {
+            PauseForSocial(false);
+        }
     }
 
     private void OnDisable()
@@ -2265,6 +2348,133 @@ public class DogRoomAgent : MonoBehaviour
         string stateName = idleIndex == scratchIdleIndex ? scratchStateName : tailWagStateName;
         AudioClip idleAudioClip = idleIndex == scratchIdleIndex ? ResolveScratchAudioClip() : null;
         yield return PlayOneShotAnimation(stateHash, stateName, idleIndex, duration, idleAudioClip);
+    }
+
+    private IEnumerator PlayImportedWalkStop(
+        PawPalWalkStopType stopType,
+        string preferredStateName,
+        string[] clipSuffixes,
+        float duration,
+        AudioClip startAudioClip,
+        bool fallbackToSniff)
+    {
+        int stateHash = ResolveAnimatorStateHash(BuildWalkStopStateCandidates(preferredStateName, clipSuffixes));
+        if (stateHash != 0)
+        {
+            yield return PlayOneShotAnimation(stateHash, preferredStateName, NeutralIdleIndex, duration, startAudioClip);
+            yield break;
+        }
+
+        AnimationClip clip;
+        if (TryGetFirstImportedWalkStopClip(clipSuffixes, out clip))
+        {
+            yield return PlayDirectOneShotClip(clip, duration, preferredStateName, startAudioClip);
+            yield break;
+        }
+
+        if (fallbackToSniff)
+        {
+            WarnMissingWalkStop(stopType, true);
+            yield return PlayImportedWalkStop(
+                PawPalWalkStopType.Sniff,
+                walkSniffStateName,
+                WalkSniffClipSuffixes,
+                duration,
+                sniffingClip,
+                false);
+            yield break;
+        }
+
+        WarnMissingWalkStop(stopType, false);
+        yield return PlaySocialIdle(tailWagIdleIndex, duration);
+    }
+
+    private IEnumerator PlayDirectOneShotClip(AnimationClip clip, float duration, string stateName, AudioClip startAudioClip)
+    {
+        if (clip == null)
+        {
+            yield break;
+        }
+
+        isPlayingOneShotAnimation = true;
+        StopAgent();
+        yield return WaitForLocomotionToSettle();
+
+        animator.SetBool(MoveHash, false);
+        SetNeutralIdle();
+        if (startAudioClip == null)
+        {
+            startAudioClip = ResolveOneShotStartAudioClip(stateName, NeutralIdleIndex);
+        }
+
+        PlayIdleActionStartAudio(startAudioClip);
+        yield return PlayDirectClip(clip, Mathf.Max(0.05f, duration), false);
+        SetNeutralIdle();
+        isPlayingOneShotAnimation = false;
+    }
+
+    private bool TryGetFirstImportedWalkStopClip(string[] clipSuffixes, out AnimationClip clip)
+    {
+        clip = null;
+        if (clipSuffixes == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < clipSuffixes.Length; i++)
+        {
+            if (TryGetImportedClip(clipSuffixes[i], out clip))
+            {
+                return clip != null;
+            }
+        }
+
+        return false;
+    }
+
+    private string[] BuildWalkStopStateCandidates(string preferredStateName, string[] clipSuffixes)
+    {
+        List<string> candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(preferredStateName))
+        {
+            candidates.Add(preferredStateName);
+        }
+
+        string prefix = GetImportedClipPrefix();
+        if (clipSuffixes != null)
+        {
+            for (int i = 0; i < clipSuffixes.Length; i++)
+            {
+                string suffix = clipSuffixes[i];
+                if (string.IsNullOrWhiteSpace(suffix))
+                {
+                    continue;
+                }
+
+                candidates.Add(BuildPrefixedStateName(prefix, suffix));
+                candidates.Add(suffix);
+                candidates.Add(suffix.Replace("_", string.Empty));
+            }
+        }
+
+        return candidates.ToArray();
+    }
+
+    private void WarnMissingWalkStop(PawPalWalkStopType stopType, bool fallingBackToSniff)
+    {
+        string warningKey = stopType.ToString() + "|" + GetImportedClipPrefix();
+        if (!walkStopWarnings.Add(warningKey))
+        {
+            return;
+        }
+
+        string message = name + " could not find a walk stop animation for " + stopType + ".";
+        if (fallingBackToSniff)
+        {
+            message += " Falling back to sniffing.";
+        }
+
+        Debug.LogWarning(message);
     }
 
     private Animator ResolveAnimator()

@@ -2245,7 +2245,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         EnsureWalkData(dog);
         RefreshWalkStamina(dog, DateTime.UtcNow, true);
         ApplyWalkPersonalityToPlan(dog, routePlan);
-        failureMessage = PawPalWalkRouteGraph.ValidatePlan(routePlan, dog.WalkData.CurrentWalkStamina);
+        failureMessage = PawPalWalkGraphService.ValidatePlan(routePlan, dog.WalkData.CurrentWalkStamina);
         if (!string.IsNullOrEmpty(failureMessage))
         {
             return false;
@@ -2261,6 +2261,84 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
 
         activeWalkSession = BuildWalkSession(dog, routePlan);
+        PawPalWalkEventGenerator.PopulateEvents(activeWalkSession, routePlan, this);
+        CommitState(true, false, false);
+        return true;
+    }
+
+    public bool TryStartDeferredWalkSession(string returnSceneName, out string failureMessage)
+    {
+        failureMessage = string.Empty;
+        PawPalDogState dog = ActiveDog;
+        if (dog == null)
+        {
+            failureMessage = "Choose a dog first.";
+            return false;
+        }
+
+        if (activeWalkSession != null && !activeWalkSession.Completed)
+        {
+            failureMessage = "Finish this walk first.";
+            return false;
+        }
+
+        DateTime nowUtc = DateTime.UtcNow;
+        activeWalkSession = new PawPalWalkSessionSaveData
+        {
+            SessionId = dog.Id + "_" + nowUtc.Ticks,
+            SelectedDogId = dog.Id,
+            SelectedDogName = dog.DisplayName,
+            ReturnSceneName = string.IsNullOrEmpty(returnSceneName) ? PawPalWalkSceneFlow.HomeSceneName : returnSceneName,
+            StartedAtUtcTicks = nowUtc.Ticks,
+            DeferredGraphResolution = true
+        };
+        CommitState(true, false, false);
+        return true;
+    }
+
+    public bool TryResolveActiveWalkSessionRoute(PawPalWalkRoutePlan routePlan, out string failureMessage)
+    {
+        failureMessage = string.Empty;
+        if (activeWalkSession == null || activeWalkSession.Completed)
+        {
+            failureMessage = "There is no active walk session to resolve.";
+            return false;
+        }
+
+        PawPalDogState dog = FindDogState(activeWalkSession.SelectedDogId);
+        if (dog == null)
+        {
+            dog = ActiveDog;
+        }
+
+        if (dog == null)
+        {
+            failureMessage = "Choose a dog first.";
+            return false;
+        }
+
+        EnsureWalkData(dog);
+        RefreshWalkStamina(dog, DateTime.UtcNow, true);
+        ApplyWalkPersonalityToPlan(dog, routePlan);
+        failureMessage = PawPalWalkGraphService.ValidatePlan(routePlan, dog.WalkData.CurrentWalkStamina);
+        if (!string.IsNullOrEmpty(failureMessage))
+        {
+            return false;
+        }
+
+        float currentStamina;
+        float maxStamina;
+        SpendDogStamina(dog, routePlan.StaminaCost, out currentStamina, out maxStamina);
+
+        if (string.IsNullOrEmpty(routePlan.ReturnSceneName))
+        {
+            routePlan.ReturnSceneName = string.IsNullOrEmpty(activeWalkSession.ReturnSceneName)
+                ? PawPalWalkSceneFlow.HomeSceneName
+                : activeWalkSession.ReturnSceneName;
+        }
+
+        CopyRoutePlanToSession(routePlan, activeWalkSession);
+        activeWalkSession.DeferredGraphResolution = false;
         PawPalWalkEventGenerator.PopulateEvents(activeWalkSession, routePlan, this);
         CommitState(true, false, false);
         return true;
@@ -3656,17 +3734,81 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             LastProgress = 0f
         };
 
-        for (int i = 0; i < routePlan.RoutePoints.Count; i++)
-        {
-            session.RoutePoints.Add(CloneWalkPoint(routePlan.RoutePoints[i]));
-        }
-
-        for (int i = 0; i < routePlan.PlannedStops.Count; i++)
-        {
-            session.VisitedLocations.Add(CloneWalkLocation(routePlan.PlannedStops[i]));
-        }
+        CopyRoutePlanToSession(routePlan, session);
 
         return session;
+    }
+
+    private static void CopyRoutePlanToSession(PawPalWalkRoutePlan routePlan, PawPalWalkSessionSaveData session)
+    {
+        if (routePlan == null || session == null)
+        {
+            return;
+        }
+
+        session.GraphId = routePlan.GraphId;
+        session.StartNodeId = routePlan.StartNodeId;
+        session.EndNodeId = routePlan.EndNodeId;
+        if (!string.IsNullOrEmpty(routePlan.ReturnSceneName))
+        {
+            session.ReturnSceneName = routePlan.ReturnSceneName;
+        }
+        session.RouteDistance = routePlan.RouteDistance;
+        session.StaminaCost = routePlan.StaminaCost;
+
+        session.RoutePoints.Clear();
+        if (routePlan.RoutePoints != null)
+        {
+            for (int i = 0; i < routePlan.RoutePoints.Count; i++)
+            {
+                session.RoutePoints.Add(CloneWalkPoint(routePlan.RoutePoints[i]));
+            }
+        }
+
+        session.WorldPath.Clear();
+        if (routePlan.WorldPath != null)
+        {
+            for (int i = 0; i < routePlan.WorldPath.Count; i++)
+            {
+                session.WorldPath.Add(CloneWalkWorldPoint(routePlan.WorldPath[i]));
+            }
+        }
+
+        session.RouteNodeIds.Clear();
+        if (routePlan.NodeIds != null)
+        {
+            for (int i = 0; i < routePlan.NodeIds.Count; i++)
+            {
+                session.RouteNodeIds.Add(routePlan.NodeIds[i]);
+            }
+        }
+
+        session.RouteEdgeIds.Clear();
+        if (routePlan.EdgeIds != null)
+        {
+            for (int i = 0; i < routePlan.EdgeIds.Count; i++)
+            {
+                session.RouteEdgeIds.Add(routePlan.EdgeIds[i]);
+            }
+        }
+
+        session.EncounterPoints.Clear();
+        if (routePlan.EncounterPoints != null)
+        {
+            for (int i = 0; i < routePlan.EncounterPoints.Count; i++)
+            {
+                session.EncounterPoints.Add(CloneRouteEncounter(routePlan.EncounterPoints[i]));
+            }
+        }
+
+        session.VisitedLocations.Clear();
+        if (routePlan.PlannedStops != null)
+        {
+            for (int i = 0; i < routePlan.PlannedStops.Count; i++)
+            {
+                session.VisitedLocations.Add(CloneWalkLocation(routePlan.PlannedStops[i]));
+            }
+        }
     }
 
     private void ApplyCompletedWalkToDog(PawPalDogState dog, PawPalWalkSessionSaveData session)
@@ -4797,6 +4939,36 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         };
     }
 
+    private static PawPalWalkWorldPointData CloneWalkWorldPoint(PawPalWalkWorldPointData source)
+    {
+        if (source == null)
+        {
+            return new PawPalWalkWorldPointData();
+        }
+
+        return new PawPalWalkWorldPointData
+        {
+            X = source.X,
+            Y = source.Y,
+            Z = source.Z
+        };
+    }
+
+    private static PawPalWalkRouteEncounterData CloneRouteEncounter(PawPalWalkRouteEncounterData source)
+    {
+        if (source == null)
+        {
+            return new PawPalWalkRouteEncounterData();
+        }
+
+        return new PawPalWalkRouteEncounterData
+        {
+            EncounterPointId = source.EncounterPointId,
+            SourceNodeId = source.SourceNodeId,
+            Progress = source.Progress
+        };
+    }
+
     private static PawPalWalkGeneratedEventState CloneWalkEvent(PawPalWalkGeneratedEventState source)
     {
         if (source == null)
@@ -4812,6 +4984,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             DisplayName = source.DisplayName,
             BodyText = source.BodyText,
             RewardItemId = source.RewardItemId,
+            SourceEncounterPointId = source.SourceEncounterPointId,
+            SourceNodeId = source.SourceNodeId,
+            EventTemplateId = source.EventTemplateId,
+            StopType = source.StopType,
             Progress = source.Progress,
             Resolved = source.Resolved,
             RewardGranted = source.RewardGranted
@@ -4837,7 +5013,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             CompletedAtUtcTicks = source.CompletedAtUtcTicks,
             Completed = source.Completed,
             FinalRewardsApplied = source.FinalRewardsApplied,
-            LastProgress = source.LastProgress
+            LastProgress = source.LastProgress,
+            DeferredGraphResolution = source.DeferredGraphResolution,
+            GraphId = source.GraphId,
+            StartNodeId = source.StartNodeId,
+            EndNodeId = source.EndNodeId
         };
 
         if (source.RoutePoints != null)
@@ -4845,6 +5025,38 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             for (int i = 0; i < source.RoutePoints.Count; i++)
             {
                 clone.RoutePoints.Add(CloneWalkPoint(source.RoutePoints[i]));
+            }
+        }
+
+        if (source.WorldPath != null)
+        {
+            for (int i = 0; i < source.WorldPath.Count; i++)
+            {
+                clone.WorldPath.Add(CloneWalkWorldPoint(source.WorldPath[i]));
+            }
+        }
+
+        if (source.EncounterPoints != null)
+        {
+            for (int i = 0; i < source.EncounterPoints.Count; i++)
+            {
+                clone.EncounterPoints.Add(CloneRouteEncounter(source.EncounterPoints[i]));
+            }
+        }
+
+        if (source.RouteNodeIds != null)
+        {
+            for (int i = 0; i < source.RouteNodeIds.Count; i++)
+            {
+                clone.RouteNodeIds.Add(source.RouteNodeIds[i]);
+            }
+        }
+
+        if (source.RouteEdgeIds != null)
+        {
+            for (int i = 0; i < source.RouteEdgeIds.Count; i++)
+            {
+                clone.RouteEdgeIds.Add(source.RouteEdgeIds[i]);
             }
         }
 
