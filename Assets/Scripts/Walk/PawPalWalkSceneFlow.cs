@@ -26,6 +26,7 @@ public static class PawPalWalkSceneFlow
     public static bool LoadWalkScene()
     {
         ManualWalkSceneLoadRequested = true;
+        EnsureActiveDogHasCollarEquipped();
         PrepareActiveDogForWalkScene();
         ClearEditorSelectionBeforeSceneLoad();
         bool loadStarted = PawPalSceneTransitionController.LoadSceneWithTransition(
@@ -52,6 +53,17 @@ public static class PawPalWalkSceneFlow
         }
 
         return loadStarted;
+    }
+
+    private static void EnsureActiveDogHasCollarEquipped()
+    {
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime == null || runtime.ActiveDog == null)
+        {
+            return;
+        }
+
+        runtime.TryAutoEquipOwnedCollar(runtime.ActiveDog.Id);
     }
 
     public static void ReturnHome(string sceneName)

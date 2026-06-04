@@ -12,6 +12,10 @@ public static class LivingRoomGraphicsEnhancerInstaller
 
     static LivingRoomGraphicsEnhancerInstaller()
     {
+        EditorSceneManager.sceneOpened -= OnSceneOpened;
+        EditorSceneManager.sceneOpened += OnSceneOpened;
+        EditorApplication.playModeStateChanged -= HandlePlayModeStateChanged;
+        EditorApplication.playModeStateChanged += HandlePlayModeStateChanged;
     }
 
     [MenuItem("PawFriends/Graphics/Install Living Room Graphics Enhancer")]
@@ -23,7 +27,8 @@ public static class LivingRoomGraphicsEnhancerInstaller
     [MenuItem("PawFriends/Graphics/Apply Living Room Graphics Enhancer")]
     public static void ApplyExistingEnhancer()
     {
-        LivingRoomGraphicsEnhancer enhancer = FindExistingEnhancer();
+        Scene activeScene = SceneManager.GetActiveScene();
+        LivingRoomGraphicsEnhancer enhancer = activeScene.IsValid() ? FindExistingEnhancer(activeScene) : null;
         if (enhancer == null)
         {
             Debug.LogWarning("No LivingRoomGraphicsEnhancer exists in the open scene. Use PawFriends/Graphics/Install Living Room Graphics Enhancer first.");
@@ -38,7 +43,17 @@ public static class LivingRoomGraphicsEnhancerInstaller
 
     private static void OnSceneOpened(Scene scene, OpenSceneMode mode)
     {
-        EditorApplication.delayCall += AutoInstallForDavidTest;
+        EditorApplication.delayCall += RefreshOpenDavidTestScenes;
+    }
+
+    private static void HandlePlayModeStateChanged(PlayModeStateChange state)
+    {
+        if (state != PlayModeStateChange.EnteredEditMode)
+        {
+            return;
+        }
+
+        EditorApplication.delayCall += RefreshOpenDavidTestScenes;
     }
 
     private static void AutoInstallForDavidTest()
@@ -63,9 +78,42 @@ public static class LivingRoomGraphicsEnhancerInstaller
         InstallOrApplyInOpenScene(false, false);
     }
 
+    private static void RefreshOpenDavidTestScenes()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
+        {
+            return;
+        }
+
+        int sceneCount = EditorSceneManager.sceneCount;
+        for (int i = 0; i < sceneCount; i++)
+        {
+            Scene scene = EditorSceneManager.GetSceneAt(i);
+            if (!scene.IsValid() || !scene.isLoaded || scene.name != AutoInstallSceneName)
+            {
+                continue;
+            }
+
+            InstallOrApplyInScene(scene, false, false);
+        }
+
+        SceneView.RepaintAll();
+    }
+
     private static void InstallOrApplyInOpenScene(bool selectEnhancer, bool useUndo)
     {
-        LivingRoomGraphicsEnhancer enhancer = FindExistingEnhancer();
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (!activeScene.IsValid())
+        {
+            return;
+        }
+
+        InstallOrApplyInScene(activeScene, selectEnhancer, useUndo);
+    }
+
+    private static void InstallOrApplyInScene(Scene scene, bool selectEnhancer, bool useUndo)
+    {
+        LivingRoomGraphicsEnhancer enhancer = FindExistingEnhancer(scene);
         if (enhancer == null)
         {
             GameObject enhancerObject = new GameObject(EnhancerObjectName);
@@ -74,7 +122,9 @@ public static class LivingRoomGraphicsEnhancerInstaller
                 Undo.RegisterCreatedObjectUndo(enhancerObject, "Create Living Room Graphics Enhancer");
             }
 
-            GameObject lightingRoot = FindRootObject(LightingRootName);
+            SceneManager.MoveGameObjectToScene(enhancerObject, scene);
+
+            GameObject lightingRoot = FindRootObject(scene, LightingRootName);
             if (lightingRoot != null)
             {
                 if (useUndo)
@@ -106,17 +156,16 @@ public static class LivingRoomGraphicsEnhancerInstaller
         }
     }
 
-    private static LivingRoomGraphicsEnhancer FindExistingEnhancer()
+    private static LivingRoomGraphicsEnhancer FindExistingEnhancer(Scene scene)
     {
 #if UNITY_2022_2_OR_NEWER
         LivingRoomGraphicsEnhancer[] enhancers = Object.FindObjectsByType<LivingRoomGraphicsEnhancer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 #else
         LivingRoomGraphicsEnhancer[] enhancers = Object.FindObjectsOfType<LivingRoomGraphicsEnhancer>(true);
 #endif
-        Scene activeScene = SceneManager.GetActiveScene();
         for (int i = 0; i < enhancers.Length; i++)
         {
-            if (enhancers[i] != null && enhancers[i].gameObject.scene == activeScene)
+            if (enhancers[i] != null && enhancers[i].gameObject.scene == scene)
             {
                 return enhancers[i];
             }
@@ -125,15 +174,14 @@ public static class LivingRoomGraphicsEnhancerInstaller
         return null;
     }
 
-    private static GameObject FindRootObject(string objectName)
+    private static GameObject FindRootObject(Scene scene, string objectName)
     {
-        Scene activeScene = SceneManager.GetActiveScene();
-        if (!activeScene.IsValid())
+        if (!scene.IsValid())
         {
             return null;
         }
 
-        GameObject[] roots = activeScene.GetRootGameObjects();
+        GameObject[] roots = scene.GetRootGameObjects();
         for (int i = 0; i < roots.Length; i++)
         {
             if (roots[i] != null && roots[i].name == objectName)

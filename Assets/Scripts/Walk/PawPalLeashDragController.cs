@@ -20,7 +20,7 @@ public sealed class PawPalLeashDragController : MonoBehaviour
     {
         leashRig = rig;
         handleGrabTarget = grabTarget;
-        dragTargetRoot = rig != null ? rig.DragRoot : grabTarget;
+        dragTargetRoot = rig != null ? rig.DragInteractionRoot : grabTarget;
     }
 
     private void Update()
@@ -28,6 +28,11 @@ public sealed class PawPalLeashDragController : MonoBehaviour
         if (leashRig == null || handleGrabTarget == null)
         {
             return;
+        }
+
+        if (leashRig != null && dragTargetRoot != leashRig.DragInteractionRoot)
+        {
+            dragTargetRoot = leashRig.DragInteractionRoot;
         }
 
         sceneCamera = sceneCamera != null ? sceneCamera : Camera.main;
@@ -156,18 +161,38 @@ public sealed class PawPalLeashDragController : MonoBehaviour
     private bool TryRaycastHandle(Vector2 screenPosition, out RaycastHit hit)
     {
         Ray ray = sceneCamera.ScreenPointToRay(screenPosition);
-        if (!Physics.Raycast(ray, out hit, maxRayDistance))
+        RaycastHit[] hits = Physics.RaycastAll(ray, maxRayDistance);
+        if (hits == null || hits.Length == 0)
         {
+            hit = default;
             return false;
         }
 
-        Transform hitTransform = hit.transform;
-        if (hitTransform == handleGrabTarget || (handleGrabTarget != null && hitTransform.IsChildOf(handleGrabTarget)))
+        System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        for (int i = 0; i < hits.Length; i++)
         {
-            return true;
+            RaycastHit candidateHit = hits[i];
+            Transform hitTransform = candidateHit.transform;
+            if (hitTransform == null)
+            {
+                continue;
+            }
+
+            if (hitTransform == handleGrabTarget || (handleGrabTarget != null && hitTransform.IsChildOf(handleGrabTarget)))
+            {
+                hit = candidateHit;
+                return true;
+            }
+
+            if (dragTargetRoot != null && (hitTransform == dragTargetRoot || hitTransform.IsChildOf(dragTargetRoot)))
+            {
+                hit = candidateHit;
+                return true;
+            }
         }
 
-        return dragTargetRoot != null && (hitTransform == dragTargetRoot || hitTransform.IsChildOf(dragTargetRoot));
+        hit = default;
+        return false;
     }
 
     private bool IsPointerOverUi(int pointerId)

@@ -2698,6 +2698,55 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return true;
     }
 
+    public bool TryAutoEquipOwnedCollar(string dogId)
+    {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return false;
+        }
+
+        string equippedItemId = GetEquippedCollarItemId(dogId);
+        PawPalCatalogItemDefinition equippedItem = GetCatalogItem(equippedItemId);
+        if (equippedItem != null
+            && equippedItem.Category == PawPalItemCategory.Collars
+            && IsItemOwned(equippedItem.Id))
+        {
+            return true;
+        }
+
+        PawPalCatalogItemDefinition preferredItem = null;
+        PawPalCatalogItemDefinition fallbackItem = null;
+        for (int i = 0; i < catalogItems.Count; i++)
+        {
+            PawPalCatalogItemDefinition item = catalogItems[i];
+            if (item == null
+                || item.Category != PawPalItemCategory.Collars
+                || !IsItemOwned(item.Id))
+            {
+                continue;
+            }
+
+            if (string.Equals(item.Id, StarterCollarItemId, StringComparison.Ordinal))
+            {
+                preferredItem = item;
+                break;
+            }
+
+            if (fallbackItem == null)
+            {
+                fallbackItem = item;
+            }
+        }
+
+        PawPalCatalogItemDefinition selectedItem = preferredItem ?? fallbackItem;
+        if (selectedItem == null)
+        {
+            return false;
+        }
+
+        return TryEquipCollar(dogId, selectedItem.Id) || string.Equals(GetEquippedCollarItemId(dogId), selectedItem.Id, StringComparison.Ordinal);
+    }
+
     public bool TryUnequipCollar(string dogId, string itemId)
     {
         if (string.IsNullOrEmpty(dogId) || string.IsNullOrEmpty(itemId))

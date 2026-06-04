@@ -18,6 +18,7 @@ public sealed class PawPalLeashRig : MonoBehaviour
 
     [SerializeField] private Transform leashRoot;
     [SerializeField] private Transform dragRoot;
+    [SerializeField] private Transform dragInteractionRoot;
     [SerializeField] private Transform handleGrabTarget;
     [SerializeField] private Transform leashStartAnchor;
     [SerializeField] private Transform leashEndAnchor;
@@ -27,7 +28,6 @@ public sealed class PawPalLeashRig : MonoBehaviour
     [SerializeField, Min(0.005f)] private float ropeWidth = 0.03f;
     [SerializeField, Min(2)] private int segmentCount = 18;
     [SerializeField, Min(0.01f)] private float segmentLength = 0.08f;
-    [SerializeField, Range(0f, 1f)] private float damping = 0.985f;
     [SerializeField] private Vector3 gravity = new Vector3(0f, -9.81f, 0f);
     [SerializeField, Min(1)] private int solverIterations = 8;
     [SerializeField] private string targetDogId = string.Empty;
@@ -39,13 +39,17 @@ public sealed class PawPalLeashRig : MonoBehaviour
     private string resolvedDogId = string.Empty;
     private LineRenderer ropeRenderer;
     private Material runtimeRopeMaterial;
-    private bool leashRootAlignedToSocket;
     private bool handleDragActive;
     private bool authoredBaseScaleInitialized;
+    private bool leashHierarchySanitized;
     private Vector3 authoredBaseRootLocalScale = Vector3.one;
     private Vector3 defaultDragRootOffset = new Vector3(-0.04f, 0.62f, 0.08f);
+    private bool startAnchorBindingInitialized;
+    private Vector3 dragRootToStartAnchorLocalPosition;
+    private Quaternion dragRootToStartAnchorLocalRotation = Quaternion.identity;
 
     public Transform DragRoot => dragRoot != null ? dragRoot : leashRoot;
+    public Transform DragInteractionRoot => dragInteractionRoot != null ? dragInteractionRoot : DragRoot;
     public Transform HandleGrabTarget => handleGrabTarget != null ? handleGrabTarget : leashRoot;
     public Transform LeashStartAnchor => leashStartAnchor;
     public Transform LeashEndAnchor => leashEndAnchor;
@@ -109,12 +113,14 @@ public sealed class PawPalLeashRig : MonoBehaviour
     {
         leashRoot = resolvedLeashRoot;
         dragRoot = resolvedDragRoot;
+        dragInteractionRoot = null;
         handleGrabTarget = resolvedHandleGrabTarget;
         leashStartAnchor = resolvedLeashStartAnchor;
         leashEndAnchor = resolvedLeashEndAnchor;
         staticStrapRenderers = resolvedStaticStrapRenderers ?? new Renderer[0];
-        leashRootAlignedToSocket = false;
         authoredBaseScaleInitialized = false;
+        leashHierarchySanitized = false;
+        startAnchorBindingInitialized = false;
     }
 
     public void SetDragRootPosition(Vector3 worldPosition)
@@ -186,10 +192,10 @@ public sealed class PawPalLeashRig : MonoBehaviour
 
         if (leashRoot == null)
         {
-            leashRoot = FindNamedTransformInActiveScene(LeashRootName);
+            leashRoot = FindNamedTransformInActiveScene(DogLeashRootName);
             if (leashRoot == null)
             {
-                leashRoot = FindNamedTransformInActiveScene(DogLeashRootName);
+                leashRoot = FindNamedTransformInActiveScene(LeashRootName);
             }
         }
 
@@ -214,10 +220,19 @@ public sealed class PawPalLeashRig : MonoBehaviour
 
         if (dragRoot == null)
         {
-            dragRoot = FindNamedTransformInScope(LeashBodyGroupName);
+            dragRoot = FindNamedTransformInScope(DogLeashRootName);
             if (dragRoot == null)
             {
                 dragRoot = leashRoot;
+            }
+        }
+
+        if (dragInteractionRoot == null)
+        {
+            dragInteractionRoot = FindNamedTransformInScope(LeashBodyGroupName);
+            if (dragInteractionRoot == null)
+            {
+                dragInteractionRoot = dragRoot;
             }
         }
 
@@ -248,15 +263,34 @@ public sealed class PawPalLeashRig : MonoBehaviour
 
     private void EnsureRuntimeSetup()
     {
+        SanitizeActiveLeashHierarchy();
         EnsureLeashScale();
         DisableLeashBodyRenderers();
         EnsureLineRenderer();
         EnsureDragColliders();
-        EnsureDragRootCollider();
+        EnsureDragInteractionRootCollider();
         EnsureBridge();
         ResolveLeashSocket();
+        CacheStartAnchorBindingIfNeeded();
         FollowSocketWithDragRootWhenIdle();
         SyncStartAnchorToDragRoot();
+    }
+
+    private void SanitizeActiveLeashHierarchy()
+    {
+        if (leashHierarchySanitized)
+        {
+            return;
+        }
+
+        Transform root = leashRoot != null ? leashRoot.root : null;
+        if (root == null)
+        {
+            return;
+        }
+
+        SanitizeInstantiatedLeashAsset(root.gameObject);
+        leashHierarchySanitized = true;
     }
 
     private void EnsureBridge()
@@ -277,7 +311,7 @@ public sealed class PawPalLeashRig : MonoBehaviour
     {
         if (dogSceneBridge == null)
         {
-            leashSocket = null;
+            TryResolveSceneLeashSocketFallback(out leashSocket);
             return;
         }
 
@@ -286,8 +320,9 @@ public sealed class PawPalLeashRig : MonoBehaviour
             : (runtime != null && runtime.ActiveDog != null ? runtime.ActiveDog.Id : string.Empty);
         if (string.IsNullOrWhiteSpace(nextDogId))
         {
-            leashSocket = null;
             resolvedDogId = string.Empty;
+            startAnchorBindingInitialized = false;
+            TryResolveSceneLeashSocketFallback(out leashSocket);
             return;
         }
 
@@ -297,11 +332,46 @@ public sealed class PawPalLeashRig : MonoBehaviour
         }
 
         resolvedDogId = nextDogId;
-        leashRootAlignedToSocket = false;
+        startAnchorBindingInitialized = false;
         if (!dogSceneBridge.TryGetLeashSocket(resolvedDogId, out leashSocket))
         {
-            leashSocket = null;
+            TryResolveSceneLeashSocketFallback(out leashSocket);
         }
+    }
+
+    private bool TryResolveSceneLeashSocketFallback(out Transform socket)
+    {
+        socket = null;
+
+        PawPalLeashSocket[] leashSockets = Object.FindObjectsByType<PawPalLeashSocket>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < leashSockets.Length; i++)
+        {
+            PawPalLeashSocket candidate = leashSockets[i];
+            if (candidate == null || candidate.transform == null)
+            {
+                continue;
+            }
+
+            if (leashRoot != null && candidate.transform.IsChildOf(leashRoot))
+            {
+                continue;
+            }
+
+            socket = candidate.Socket;
+            if (socket != null)
+            {
+                return true;
+            }
+        }
+
+        Transform namedSocket = FindNamedTransformInActiveScene("LeashSocket");
+        if (namedSocket != null && (leashRoot == null || !namedSocket.IsChildOf(leashRoot)))
+        {
+            socket = namedSocket;
+            return true;
+        }
+
+        return false;
     }
 
     private void SyncEndAnchorToSocket()
@@ -328,12 +398,11 @@ public sealed class PawPalLeashRig : MonoBehaviour
         }
 
         root.position = leashSocket.position + defaultDragRootOffset;
-        leashRootAlignedToSocket = true;
     }
 
-    private void SyncStartAnchorToDragRoot()
+    private void CacheStartAnchorBindingIfNeeded()
     {
-        if (leashStartAnchor == null)
+        if (startAnchorBindingInitialized || leashStartAnchor == null)
         {
             return;
         }
@@ -344,7 +413,27 @@ public sealed class PawPalLeashRig : MonoBehaviour
             return;
         }
 
-        leashStartAnchor.SetPositionAndRotation(root.position, root.rotation);
+        dragRootToStartAnchorLocalPosition = root.InverseTransformPoint(leashStartAnchor.position);
+        dragRootToStartAnchorLocalRotation = Quaternion.Inverse(root.rotation) * leashStartAnchor.rotation;
+        startAnchorBindingInitialized = true;
+    }
+
+    private void SyncStartAnchorToDragRoot()
+    {
+        if (leashStartAnchor == null || !startAnchorBindingInitialized)
+        {
+            return;
+        }
+
+        Transform root = DragRoot;
+        if (root == null)
+        {
+            return;
+        }
+
+        leashStartAnchor.SetPositionAndRotation(
+            root.TransformPoint(dragRootToStartAnchorLocalPosition),
+            root.rotation * dragRootToStartAnchorLocalRotation);
     }
 
     private void EnsureLeashScale()
@@ -365,7 +454,6 @@ public sealed class PawPalLeashRig : MonoBehaviour
         if (root.localScale != targetScale)
         {
             root.localScale = targetScale;
-            leashRootAlignedToSocket = false;
         }
     }
 
@@ -421,9 +509,9 @@ public sealed class PawPalLeashRig : MonoBehaviour
         }
     }
 
-    private void EnsureDragRootCollider()
+    private void EnsureDragInteractionRootCollider()
     {
-        Transform target = DragRoot;
+        Transform target = DragInteractionRoot;
         if (target == null)
         {
             return;
@@ -440,19 +528,20 @@ public sealed class PawPalLeashRig : MonoBehaviour
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer renderer = renderers[i];
-            if (renderer == null || !renderer.enabled)
+            if (renderer == null)
             {
                 continue;
             }
 
+            Bounds rendererLocalBounds = TransformBoundsToLocalSpace(target, renderer.bounds);
             if (!hasBounds)
             {
-                combinedBounds = renderer.bounds;
+                combinedBounds = rendererLocalBounds;
                 hasBounds = true;
             }
             else
             {
-                combinedBounds.Encapsulate(renderer.bounds);
+                combinedBounds.Encapsulate(rendererLocalBounds);
             }
         }
 
@@ -467,11 +556,39 @@ public sealed class PawPalLeashRig : MonoBehaviour
             collider = target.gameObject.AddComponent<BoxCollider>();
         }
 
-        collider.center = target.InverseTransformPoint(combinedBounds.center);
+        collider.isTrigger = false;
+        collider.center = combinedBounds.center;
         collider.size = new Vector3(
             Mathf.Max(0.05f, combinedBounds.size.x),
             Mathf.Max(0.05f, combinedBounds.size.y),
             Mathf.Max(0.05f, combinedBounds.size.z));
+    }
+
+    private static Bounds TransformBoundsToLocalSpace(Transform target, Bounds worldBounds)
+    {
+        Vector3 min = worldBounds.min;
+        Vector3 max = worldBounds.max;
+
+        Vector3[] worldCorners =
+        {
+            new Vector3(min.x, min.y, min.z),
+            new Vector3(max.x, min.y, min.z),
+            new Vector3(min.x, max.y, min.z),
+            new Vector3(max.x, max.y, min.z),
+            new Vector3(min.x, min.y, max.z),
+            new Vector3(max.x, min.y, max.z),
+            new Vector3(min.x, max.y, max.z),
+            new Vector3(max.x, max.y, max.z)
+        };
+
+        Vector3 firstPoint = target.InverseTransformPoint(worldCorners[0]);
+        Bounds localBounds = new Bounds(firstPoint, Vector3.zero);
+        for (int i = 1; i < worldCorners.Length; i++)
+        {
+            localBounds.Encapsulate(target.InverseTransformPoint(worldCorners[i]));
+        }
+
+        return localBounds;
     }
 
     private void EnsureLineRenderer()
@@ -596,10 +713,10 @@ public sealed class PawPalLeashRig : MonoBehaviour
             resolvedHandleGrabTarget = FindNamedTransformInActiveScene(HandleInnerGripName);
         }
 
-        resolvedLeashRoot = FindNamedTransformInActiveScene(LeashRootName);
+        resolvedLeashRoot = FindNamedTransformInActiveScene(DogLeashRootName);
         if (resolvedLeashRoot == null)
         {
-            resolvedLeashRoot = FindNamedTransformInActiveScene(DogLeashRootName);
+            resolvedLeashRoot = FindNamedTransformInActiveScene(LeashRootName);
         }
 
         if (resolvedLeashRoot == null)
@@ -612,7 +729,7 @@ public sealed class PawPalLeashRig : MonoBehaviour
             return false;
         }
 
-        resolvedDragRoot = FindNamedTransformInHierarchy(resolvedLeashRoot, LeashBodyGroupName);
+        resolvedDragRoot = FindNamedTransformInHierarchy(resolvedLeashRoot, DogLeashRootName);
         if (resolvedDragRoot == null)
         {
             resolvedDragRoot = resolvedLeashRoot;
@@ -662,6 +779,7 @@ public sealed class PawPalLeashRig : MonoBehaviour
         }
 
         instance.name = "WalkRuntimeLeash";
+        SanitizeInstantiatedLeashAsset(instance);
         Scene activeScene = SceneManager.GetActiveScene();
         if (activeScene.IsValid())
         {
@@ -672,6 +790,76 @@ public sealed class PawPalLeashRig : MonoBehaviour
 #else
         return false;
 #endif
+    }
+
+    private static void SanitizeInstantiatedLeashAsset(GameObject instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        DestroyChildByName(instance.transform, "Camera");
+        DestroyChildByName(instance.transform, "Light");
+        DestroyChildByName(instance.transform, "REF_Dog_Leash");
+
+        Camera[] cameras = instance.GetComponentsInChildren<Camera>(true);
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            if (cameras[i] != null)
+            {
+                DestroyRuntimeOrImmediate(cameras[i].gameObject);
+            }
+        }
+
+        Light[] lights = instance.GetComponentsInChildren<Light>(true);
+        for (int i = 0; i < lights.Length; i++)
+        {
+            if (lights[i] != null)
+            {
+                DestroyRuntimeOrImmediate(lights[i].gameObject);
+            }
+        }
+
+        AudioListener[] listeners = instance.GetComponentsInChildren<AudioListener>(true);
+        for (int i = 0; i < listeners.Length; i++)
+        {
+            if (listeners[i] != null)
+            {
+                DestroyRuntimeOrImmediate(listeners[i]);
+            }
+        }
+    }
+
+    private static void DestroyChildByName(Transform root, string childName)
+    {
+        if (root == null || string.IsNullOrWhiteSpace(childName))
+        {
+            return;
+        }
+
+        Transform child = FindNamedTransformInHierarchy(root, childName);
+        if (child != null)
+        {
+            DestroyRuntimeOrImmediate(child.gameObject);
+        }
+    }
+
+    private static void DestroyRuntimeOrImmediate(Object target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Object.Destroy(target);
+        }
+        else
+        {
+            Object.DestroyImmediate(target);
+        }
     }
 
     private Transform FindNamedTransformInScope(string name)

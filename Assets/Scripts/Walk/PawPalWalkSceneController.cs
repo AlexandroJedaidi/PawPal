@@ -293,6 +293,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private bool ResolveOrSpawnWalker()
     {
         runtimeDog = ResolveRuntimeDogState();
+        EnsureWalkerHasCollarEquipped();
         runtimeDogSelection = BuildSelectionForDog(runtimeDog);
         if (runtimeDog == null)
         {
@@ -312,6 +313,16 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         return TrySpawnRuntimeWalker();
+    }
+
+    private void EnsureWalkerHasCollarEquipped()
+    {
+        if (runtime == null || runtimeDog == null)
+        {
+            return;
+        }
+
+        runtime.TryAutoEquipOwnedCollar(runtimeDog.Id);
     }
 
     private bool TryUsePreparedWalkDog()
