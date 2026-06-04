@@ -16,6 +16,9 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
     private Coroutine captureRoutine;
     private bool active;
     private bool captureBusy;
+    private bool timeFrozen;
+    private bool hasSavedTimeScale;
+    private float savedTimeScale = 1f;
 
     public event Action PhotoModeExited;
 
@@ -59,6 +62,12 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         view.DetailDeleteRequested += HandleDetailDeleteRequested;
         view.DetailFavoriteToggled += HandleDetailFavoriteToggled;
         view.ZoomChanged += HandleZoomChanged;
+        view.FreezeTimeToggled += HandleFreezeTimeToggled;
+    }
+
+    private void OnDisable()
+    {
+        RestorePhotoTimeScale();
     }
 
     public bool TryEnterPhotoMode()
@@ -76,36 +85,26 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
             return false;
         }
 
-        if (activePet.IsDog)
+        DisablePetFollowCamera();
+        if (dogCamera != null)
         {
-            if (dogCamera == null || !dogCamera.EnterPhotoMode(activePet.DogAgent))
-            {
-                if (view != null)
-                {
-                    view.ShowToast("Photo mode could not start.");
-                }
-
-                return false;
-            }
+            dogCamera.enabled = true;
         }
-        else
-        {
-            PawPalPetFollowCamera followCamera = EnsurePetFollowCamera();
-            if (followCamera == null)
-            {
-                if (view != null)
-                {
-                    view.ShowToast("Photo mode needs a camera.");
-                }
 
-                return false;
+        if (dogCamera == null || !dogCamera.EnterPhotoMode(activePet))
+        {
+            if (view != null)
+            {
+                view.ShowToast("Photo mode could not start.");
             }
 
-            followCamera.Focus(activePet.FocusTransform, activePet.HomeCameraOffset, true);
+            return false;
         }
 
         active = true;
         captureBusy = false;
+        timeFrozen = false;
+        RestorePhotoTimeScale();
         albumStore.Load();
         DestroyPendingCapture();
 
@@ -113,6 +112,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         {
             view.ShowLiveMode();
             view.SetZoom01(dogCamera != null ? dogCamera.PhotoZoom01 : 0.35f);
+            view.SetFreezeTimeActive(false);
         }
 
         RequestDogAttention(1.75f);
@@ -134,6 +134,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
 
         captureBusy = false;
+        RestorePhotoTimeScale();
         DestroyPendingCapture();
         if (photoDogCommands != null)
         {
@@ -145,6 +146,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
             dogCamera.ExitPhotoMode();
         }
 
+        DisablePetFollowCamera();
         dogCamera = null;
         activePet = null;
         active = false;
@@ -223,7 +225,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
 
         activePet = ResolvePreferredPet(dogCamera);
-        if (dogCamera != null && activePet != null && activePet.IsDog)
+        if (dogCamera != null && activePet != null)
         {
             dogCamera.FocusPhotoModeOnActiveDog();
         }
@@ -479,6 +481,56 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         }
     }
 
+    private void HandleFreezeTimeToggled(bool frozen)
+    {
+        if (!active)
+        {
+            RestorePhotoTimeScale();
+            if (view != null)
+            {
+                view.SetFreezeTimeActive(false);
+            }
+
+            return;
+        }
+
+        ApplyPhotoTimeScale(frozen);
+        if (view != null)
+        {
+            view.SetFreezeTimeActive(timeFrozen);
+        }
+    }
+
+    private void ApplyPhotoTimeScale(bool freeze)
+    {
+        if (freeze)
+        {
+            if (!hasSavedTimeScale)
+            {
+                savedTimeScale = Time.timeScale;
+                hasSavedTimeScale = true;
+            }
+
+            Time.timeScale = 0f;
+            timeFrozen = true;
+            return;
+        }
+
+        RestorePhotoTimeScale();
+    }
+
+    private void RestorePhotoTimeScale()
+    {
+        if (hasSavedTimeScale)
+        {
+            Time.timeScale = savedTimeScale;
+        }
+
+        hasSavedTimeScale = false;
+        savedTimeScale = 1f;
+        timeFrozen = false;
+    }
+
     private void RequestDogAttention(float duration)
     {
         PawPalRoomPetHandle pet = activePet != null && activePet.IsValid ? activePet : ResolvePreferredPet(dogCamera);
@@ -528,7 +580,7 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
             return resolvedCamera;
         }
 
-        if (mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneDogs())
+        if (mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneCameraTargets())
         {
             return mainCamera.gameObject.AddComponent<DogCycleCamera>();
         }
@@ -538,16 +590,6 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
 
     private Camera ResolvePhotoCamera()
     {
-        PawPalPetFollowCamera followCamera = EnsurePetFollowCamera();
-        if (followCamera != null && activePet != null && !activePet.IsDog)
-        {
-            Camera follow = followCamera.GetComponent<Camera>();
-            if (follow != null)
-            {
-                return follow;
-            }
-        }
-
         if (dogCamera != null)
         {
             Camera camera = dogCamera.GetComponent<Camera>();
@@ -578,27 +620,31 @@ public sealed class PawPalPhotoModeController : MonoBehaviour
         return null;
     }
 
-    private bool HasSceneDogs()
+    private bool HasSceneCameraTargets()
     {
         DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
-        return agents != null && agents.Length > 0;
+        if (agents != null && agents.Length > 0)
+        {
+            return true;
+        }
+
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.None);
+        return cats != null && cats.Length > 0;
     }
 
-    private PawPalPetFollowCamera EnsurePetFollowCamera()
+    private static void DisablePetFollowCamera()
     {
         Camera mainCamera = Camera.main;
         if (mainCamera == null)
         {
-            return null;
+            return;
         }
 
         PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
-        if (followCamera == null)
+        if (followCamera != null)
         {
-            followCamera = mainCamera.gameObject.AddComponent<PawPalPetFollowCamera>();
+            followCamera.enabled = false;
         }
-
-        return followCamera;
     }
 
     private void DestroyPendingCapture()

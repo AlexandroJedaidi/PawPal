@@ -72,6 +72,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float InteractionFaceCameraDuration = 0.4f;
     private const float InteractionFaceCameraMaxWaitSeconds = 6f;
     private const float InteractionLookRefreshIntervalSeconds = 0.2f;
+    private const float CatCameraApproachDistance = 1.05f;
+    private const float CatCameraApproachNearDistance = 0.82f;
+    private const float CatCameraApproachFarDistance = 1.28f;
+    private const float CatCameraApproachSideOffset = 0.38f;
+    private const float CatCameraApproachWideSideOffset = 0.66f;
+    private const float CatCameraApproachSampleRadius = 1.6f;
+    private const float CatCameraApproachTimeout = 5.5f;
+    private const float CatCameraApproachReachedDistance = 0.16f;
+    private const float CatInteractionCameraRotationSmooth = 14f;
+    private static readonly Vector3 CatInteractionFocusOffset = new Vector3(0f, -0.02f, 0f);
     private const string InteractionDebugBuildMarker = "dog-interaction-guard-v1";
 
     private enum InteractionTrickStartResult
@@ -93,6 +103,9 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private PawPalTrickId selectedTrick = PawPalTrickId.Sit;
     private Coroutine attemptRoutine;
     private Coroutine faceCameraRoutine;
+    private Coroutine petInteractionRoutine;
+    private Camera catInteractionCamera;
+    private Vector3 catInteractionCameraFixedPosition;
     private float timeoutSeconds = 15f;
     private float lastActivityTime;
     private float nextPettingRewardTime;
@@ -109,6 +122,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private bool pettingPointerActive;
     private bool tugActive;
     private bool tugRoundCounted;
+    private bool catInteractionCameraFocusActive;
     private int pettingPointerId = -2;
     private int tugPointerId = -1;
     private int completedTugRounds;
@@ -179,6 +193,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
     }
 
+    private void LateUpdate()
+    {
+        UpdateCatInteractionCameraFocus(false);
+    }
+
     private void OnDisable()
     {
         pendingExitReason = "controller_disabled";
@@ -205,6 +224,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         activePet.PrepareForPlayerInteraction(true);
 
         dogCamera = ResolveDogCamera();
+        Vector3 catApproachPoint = Vector3.zero;
+        bool hasCatApproachPoint = false;
         if (activeDog != null)
         {
             if (dogCamera == null || !dogCamera.EnterDogInteractionMode(activeDog))
@@ -215,7 +236,14 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
         else
         {
-            FocusCatInteractionCamera();
+            PrepareCatInteractionCameraForApproach();
+            StartCatInteractionCameraFocus(activePet, true);
+            if (activePet.CatAgent != null)
+            {
+                activePet.CatAgent.BeginInteractionIdleLoop();
+            }
+
+            hasCatApproachPoint = TryResolvePetCameraApproachPoint(activePet, ResolveInteractionCamera(), out catApproachPoint);
         }
 
         micListening = modeOptions.AllowMic && keepMicListening;
@@ -273,6 +301,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             pendingExitReason = "director_start_failed";
             ExitDogInteractionMode();
             return false;
+        }
+        else if (activeDog == null)
+        {
+            if (petInteractionRoutine != null)
+            {
+                StopCoroutine(petInteractionRoutine);
+            }
+
+            petInteractionRoutine = StartCoroutine(CallPetToInteractionRoutine(activePet, hasCatApproachPoint, catApproachPoint));
         }
 
         if (faceCameraRoutine != null)
@@ -339,9 +376,17 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             PawPalRoomPetHandle resolvedPet = ResolvePet(command.DogId, runtime != null);
             if (resolvedPet != null && resolvedPet.IsValid)
             {
+                PawPalRoomPetHandle previousPet = activePet;
                 if (activeDog != resolvedPet.DogAgent)
                 {
                     ApplyInteractionVocalContext(activeDog, DogVocalContext.Ambient);
+                }
+
+                if (previousPet != null
+                    && previousPet.CatAgent != null
+                    && previousPet.CatAgent != resolvedPet.CatAgent)
+                {
+                    previousPet.CatAgent.EndInteractionIdleLoop();
                 }
 
                 activePet = resolvedPet;
@@ -353,7 +398,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
                 }
                 else if (activeDog == null)
                 {
-                    FocusCatInteractionCamera();
+                    StartCatInteractionCameraFocus(resolvedPet, true);
+                    if (activePet.CatAgent != null)
+                    {
+                        activePet.CatAgent.BeginInteractionIdleLoop();
+                    }
                 }
 
                 if (view != null)
@@ -399,14 +448,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         bool withinUnexpectedExitGuardWindow = active
             && (Time.unscaledTime - interactionModeEnteredAt) < UnexpectedExitGuardSeconds;
         bool directorRunning = interactionDirector != null && interactionDirector.IsRunning;
+        bool petInteractionRunning = petInteractionRoutine != null;
         if (unknownExitReason)
         {
             string unexpectedExitStack = new System.Diagnostics.StackTrace(1, true).ToString();
-            if (directorRunning || withinUnexpectedExitGuardWindow)
+            if (directorRunning || petInteractionRunning || withinUnexpectedExitGuardWindow)
             {
                 Debug.LogWarning(
                     "[DogInteractionMode] Ignoring unexpected exit."
                     + " directorRunning=" + directorRunning
+                    + " petInteractionRunning=" + petInteractionRunning
                     + " enteredAgo=" + (Time.unscaledTime - interactionModeEnteredAt).ToString("F2")
                     + "\n" + unexpectedExitStack,
                     this);
@@ -419,8 +470,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         Debug.Log("[DogInteractionMode] Exit reason=" + pendingExitReason
             + " active=" + active
             + " dog=" + (activeDog != null ? activeDog.name : "null")
-            + " directorRunning=" + directorRunning, this);
+            + " directorRunning=" + directorRunning
+            + " petInteractionRunning=" + petInteractionRunning, this);
 
+        bool exitingCatInteraction = activeDog == null;
         active = false;
         tugActive = false;
         tugRoundCounted = false;
@@ -440,6 +493,12 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             faceCameraRoutine = null;
         }
 
+        if (petInteractionRoutine != null)
+        {
+            StopCoroutine(petInteractionRoutine);
+            petInteractionRoutine = null;
+        }
+
         if (gestureRecognizer != null)
         {
             gestureRecognizer.SetActive(false);
@@ -456,9 +515,25 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             dogCamera = null;
         }
 
+        StopCatInteractionCameraFocus();
+
         if (activePet != null && activePet.IsValid)
         {
             activePet.StopHeldToyTugAnimation();
+            if (activeDog == null)
+            {
+                if (activePet.CatAgent != null)
+                {
+                    activePet.CatAgent.EndInteractionIdleLoop();
+                }
+
+                activePet.StartRoaming();
+            }
+        }
+
+        if (exitingCatInteraction)
+        {
+            RestoreRoomCameraAfterCatInteraction();
         }
 
         ApplyInteractionVocalContext(activeDog, DogVocalContext.Ambient);
@@ -1317,9 +1392,40 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return false;
         }
 
-        return activeDog == null
-            || interactionDirector == null
-            || !interactionDirector.IsRunning;
+        if (activeDog != null)
+        {
+            return interactionDirector == null || !interactionDirector.IsRunning;
+        }
+
+        return petInteractionRoutine == null;
+    }
+
+    private IEnumerator CallPetToInteractionRoutine(PawPalRoomPetHandle pet, bool hasApproachPoint, Vector3 approachPoint)
+    {
+        if (pet == null || !pet.IsValid)
+        {
+            petInteractionRoutine = null;
+            yield break;
+        }
+
+        pet.PauseForSocial(false);
+
+        if (hasApproachPoint)
+        {
+            yield return StartCoroutine(pet.MoveNearPlayerInteraction(
+                approachPoint,
+                CatCameraApproachTimeout,
+                DogMovementPace.Run,
+                CatCameraApproachReachedDistance));
+        }
+
+        if (!active || pet == null || pet != activePet || !pet.IsValid)
+        {
+            petInteractionRoutine = null;
+            yield break;
+        }
+
+        petInteractionRoutine = null;
     }
 
     private IEnumerator EnsurePetFacesInteractionCameraRoutine(PawPalRoomPetHandle pet, DogRoomAgent dog)
@@ -1329,9 +1435,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             && pet == activePet
             && pet != null
             && pet.IsValid
-            && dog != null
-            && interactionDirector != null
-            && interactionDirector.IsRunning
+            && IsWaitingForInteractionArrival(dog)
             && Time.unscaledTime - startedAt < InteractionFaceCameraMaxWaitSeconds)
         {
             yield return null;
@@ -1349,7 +1453,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             yield return StartCoroutine(pet.FaceTarget(interactionCamera.transform, InteractionFaceCameraDuration));
         }
 
-        if (dog != null)
+        if (dog == null)
+        {
+            pet.PauseForSocial(false);
+        }
+        else
         {
             DogCameraAttention attention = ResolveDogAttention(dog);
             if (attention != null)
@@ -1359,6 +1467,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         faceCameraRoutine = null;
+    }
+
+    private bool IsWaitingForInteractionArrival(DogRoomAgent dog)
+    {
+        if (dog != null)
+        {
+            return interactionDirector != null && interactionDirector.IsRunning;
+        }
+
+        return petInteractionRoutine != null;
     }
 
     private void RefreshInteractionCameraLookIfNeeded()
@@ -1402,11 +1520,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return;
         }
 
-        DogCycleCamera runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
-        if (runtimeDogCamera != null)
-        {
-            runtimeDogCamera.enabled = false;
-        }
+        DisableSelectorCameraControllers(mainCamera);
 
         PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
         if (followCamera == null)
@@ -1415,7 +1529,248 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         }
 
         followCamera.enabled = true;
-        followCamera.Focus(activePet.FocusTransform, activePet.HomeCameraOffset, true);
+        followCamera.Focus(activePet.FocusTransform != null ? activePet.FocusTransform : activePet.RootTransform, activePet.HomeCameraOffset, true);
+    }
+
+    private void StartCatInteractionCameraFocus(PawPalRoomPetHandle pet, bool immediate)
+    {
+        Camera camera = ResolveInteractionCamera();
+        if (camera == null || pet == null || !pet.IsValid || pet.RootTransform == null)
+        {
+            catInteractionCameraFocusActive = false;
+            catInteractionCamera = null;
+            return;
+        }
+
+        catInteractionCamera = camera;
+        catInteractionCameraFixedPosition = camera.transform.position;
+        catInteractionCameraFocusActive = true;
+        UpdateCatInteractionCameraFocus(immediate);
+    }
+
+    private void StopCatInteractionCameraFocus()
+    {
+        catInteractionCameraFocusActive = false;
+        catInteractionCamera = null;
+    }
+
+    private void RestoreRoomCameraAfterCatInteraction()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        DisableCatInteractionFollowCamera();
+
+        DogCycleCamera runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
+        if (runtimeDogCamera == null)
+        {
+            runtimeDogCamera = FindFirstObjectByType<DogCycleCamera>();
+        }
+
+        if (runtimeDogCamera == null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneCameraTargets())
+        {
+            runtimeDogCamera = mainCamera.gameObject.AddComponent<DogCycleCamera>();
+        }
+
+        if (runtimeDogCamera == null)
+        {
+            return;
+        }
+
+        runtimeDogCamera.enabled = true;
+        runtimeDogCamera.ExitDogInteractionMode();
+        DogCycleCamera.TryForceFocusRuntimeActiveDogFromSelection();
+    }
+
+    private void UpdateCatInteractionCameraFocus(bool immediate)
+    {
+        if (!catInteractionCameraFocusActive
+            || (!active && !immediate)
+            || activeDog != null
+            || activePet == null
+            || !activePet.IsValid
+            || activePet.RootTransform == null)
+        {
+            return;
+        }
+
+        if (catInteractionCamera == null)
+        {
+            catInteractionCamera = ResolveInteractionCamera();
+            if (catInteractionCamera == null)
+            {
+                return;
+            }
+        }
+
+        catInteractionCamera.transform.position = catInteractionCameraFixedPosition;
+
+        Vector3 focusPoint = GetPetInteractionFocusPoint(activePet);
+        Vector3 toFocus = focusPoint - catInteractionCamera.transform.position;
+        if (toFocus.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(toFocus.normalized, Vector3.up);
+        catInteractionCamera.transform.rotation = immediate
+            ? targetRotation
+            : Quaternion.Slerp(
+                catInteractionCamera.transform.rotation,
+                targetRotation,
+                Time.deltaTime * Mathf.Max(0.01f, CatInteractionCameraRotationSmooth));
+    }
+
+    private static Vector3 GetPetInteractionFocusPoint(PawPalRoomPetHandle pet)
+    {
+        if (pet == null || !pet.IsValid)
+        {
+            return Vector3.zero;
+        }
+
+        Transform focusTransform = pet.FocusTransform != null ? pet.FocusTransform : pet.RootTransform;
+        if (focusTransform != null)
+        {
+            return focusTransform.position + CatInteractionFocusOffset;
+        }
+
+        return pet.RootTransform != null ? pet.RootTransform.position + CatInteractionFocusOffset : Vector3.zero;
+    }
+
+    private void PrepareCatInteractionCameraForApproach()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        DisableSelectorCameraControllers(mainCamera);
+        DisableCatInteractionFollowCamera();
+    }
+
+    private static void DisableSelectorCameraControllers(Camera mainCamera)
+    {
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        DogCycleCamera runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
+        if (runtimeDogCamera != null)
+        {
+            runtimeDogCamera.enabled = false;
+        }
+
+        PetSelectionCameraController selectionCamera = mainCamera.GetComponent<PetSelectionCameraController>();
+        if (selectionCamera != null)
+        {
+            selectionCamera.enabled = false;
+        }
+    }
+
+    private static void DisableCatInteractionFollowCamera()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            return;
+        }
+
+        PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
+        if (followCamera != null)
+        {
+            followCamera.enabled = false;
+        }
+    }
+
+    private static bool TryResolvePetCameraApproachPoint(PawPalRoomPetHandle pet, Camera camera, out Vector3 approachPoint)
+    {
+        approachPoint = pet != null && pet.RootTransform != null ? pet.RootTransform.position : Vector3.zero;
+        if (pet == null || !pet.IsValid || pet.RootTransform == null || camera == null)
+        {
+            return false;
+        }
+
+        Vector3 forward = camera.transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = pet.RootTransform.position - camera.transform.position;
+            forward.y = 0f;
+        }
+
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            forward = -pet.RootTransform.forward;
+        }
+
+        forward.Normalize();
+
+        Vector3 right = camera.transform.right;
+        right.y = 0f;
+        if (right.sqrMagnitude < 0.001f)
+        {
+            right = Vector3.Cross(Vector3.up, forward);
+        }
+
+        if (right.sqrMagnitude < 0.001f)
+        {
+            right = pet.RootTransform.right;
+        }
+
+        right.Normalize();
+
+        float bestScore = float.MaxValue;
+        bool foundCandidate = false;
+        float[] distances =
+        {
+            CatCameraApproachDistance,
+            CatCameraApproachNearDistance,
+            CatCameraApproachFarDistance
+        };
+        float[] sideOffsets =
+        {
+            0f,
+            -CatCameraApproachSideOffset,
+            CatCameraApproachSideOffset,
+            -CatCameraApproachWideSideOffset,
+            CatCameraApproachWideSideOffset
+        };
+
+        for (int distanceIndex = 0; distanceIndex < distances.Length; distanceIndex++)
+        {
+            for (int sideIndex = 0; sideIndex < sideOffsets.Length; sideIndex++)
+            {
+                Vector3 candidate = camera.transform.position
+                    + forward * Mathf.Max(0.2f, distances[distanceIndex])
+                    + right * sideOffsets[sideIndex];
+                candidate.y = pet.RootTransform.position.y;
+
+                Vector3 safePoint;
+                if (!pet.TryGetRoomSafePoint(candidate, CatCameraApproachSampleRadius, out safePoint))
+                {
+                    continue;
+                }
+
+                float score = Vector3.Distance(candidate, safePoint)
+                    + Mathf.Abs(sideOffsets[sideIndex]) * 0.08f
+                    + Mathf.Abs(distances[distanceIndex] - CatCameraApproachDistance) * 0.04f;
+                if (score >= bestScore)
+                {
+                    continue;
+                }
+
+                bestScore = score;
+                approachPoint = safePoint;
+                foundCandidate = true;
+            }
+        }
+
+        return foundCandidate;
     }
 
     private Camera ResolveInteractionCamera()
@@ -1447,7 +1802,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             return resolvedCamera;
         }
 
-        if (mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneDogs())
+        if (mainCamera != null && mainCamera.GetComponent<CameraFollow>() == null && HasSceneCameraTargets())
         {
             return mainCamera.gameObject.AddComponent<DogCycleCamera>();
         }
@@ -1488,10 +1843,16 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         return PawPalRoomPetRuntime.ResolvePetById(dogId, preferredSpecies);
     }
 
-    private static bool HasSceneDogs()
+    private static bool HasSceneCameraTargets()
     {
         DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
-        return agents != null && agents.Length > 0;
+        if (agents != null && agents.Length > 0)
+        {
+            return true;
+        }
+
+        PawPalCatRoomAgent[] cats = FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.None);
+        return cats != null && cats.Length > 0;
     }
 
     private static bool IsPointerOverUi(int pointerId)

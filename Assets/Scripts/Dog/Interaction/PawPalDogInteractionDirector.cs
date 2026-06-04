@@ -190,9 +190,7 @@ public sealed class PawPalDogInteractionDirector : MonoBehaviour
 
             float timeout = GetCameraApproachTimeout(dog, approachPoint);
             Debug.Log("[DogMoveDebug] " + dog.name + " | " + activeDebugContext + " | DIRECTOR_APPROACH_ATTEMPT " + (attempt + 1) + " timeout=" + timeout.ToString("F2") + " point=" + approachPoint.ToString("F3"), dog);
-            IEnumerator approachRoutine = dog.HasHeldToy
-                ? dog.MoveNearCarryingHeldToy(approachPoint, timeout, DogMovementPace.Trot)
-                : dog.MoveNearInteraction(approachPoint, timeout, DogMovementPace.Trot, CameraApproachReachedDistance);
+            IEnumerator approachRoutine = dog.MoveNearInteraction(approachPoint, timeout, DogMovementPace.Run, CameraApproachReachedDistance);
             yield return StartCoroutine(approachRoutine);
             RestoreSuspendedLargeToyBlockers();
             if (dog.WasLastTravelSuccessful)

@@ -2,28 +2,38 @@ using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [RequireComponent(typeof(RectTransform))]
-public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
+public sealed class MapWalkPlannerController : MonoBehaviour
 {
+    private sealed class NodeButtonState
+    {
+        public PawPalWalkMapRouteNodeDefinition Node;
+        public Button Button;
+        public Image Fill;
+        public TextMeshProUGUI Label;
+        public GameObject BadgeRoot;
+        public TextMeshProUGUI Badge;
+    }
+
     private static readonly Color32 Cream = new Color32(252, 248, 232, 255);
     private static readonly Color32 Coral = new Color32(223, 120, 97, 255);
     private static readonly Color32 CoralDark = new Color32(138, 75, 60, 255);
     private static readonly Color32 InvalidRed = new Color32(210, 76, 72, 255);
     private static readonly Color32 White = new Color32(255, 255, 255, 255);
     private static readonly Color32 Muted = new Color32(163, 163, 163, 255);
+    private static readonly Color32 RoutePreview = new Color32(37, 199, 63, 255);
 
     private const float RouteLineWidth = 8f;
-    private const float MinimumPointSpacing = 9f;
 
-    private readonly List<Vector2> routePoints = new List<Vector2>();
+    private readonly List<string> selectedVisitNodeIds = new List<string>();
     private readonly List<Image> routeSegments = new List<Image>();
+    private readonly List<NodeButtonState> nodeButtons = new List<NodeButtonState>();
 
     private RectTransform root;
     private RectTransform routeLayer;
-    private RectTransform captureLayer;
+    private RectTransform nodeLayer;
     private RectTransform summaryPanel;
     private TextMeshProUGUI dogLabel;
     private TextMeshProUGUI staminaLabel;
@@ -36,16 +46,20 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
     private AppShellController shell;
     private UiSpriteLibrary sprites;
     private Action backRequested;
-    private bool drawing;
-    private bool built;
-    private int lastEdgeIndex = -1;
+    private PawPalWalkMapRouteDefinition routeDefinition;
+    private PawPalWalkGraphSnapshot routeSnapshot;
+    private string snapshotFailureMessage = string.Empty;
     private string validationMessage = string.Empty;
+    private bool built;
 
     public void Initialize(AppShellController appShell, UiSpriteLibrary spriteLibrary, Action onBackRequested)
     {
         shell = appShell;
         sprites = spriteLibrary;
         backRequested = onBackRequested;
+        routeDefinition = PawPalWalkMapRouteDefinitions.CreateDefault();
+        PrepareSnapshot();
+
         root = GetComponent<RectTransform>();
         if (!built)
         {
@@ -61,7 +75,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
     {
         ClearRoute();
         RefreshRuntimeState();
-        ShowFeedback("Draw from Home.");
+        ShowFeedback("Tap places in the order you want to visit.");
     }
 
     public void RefreshRuntimeState()
@@ -79,7 +93,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
         if (staminaLabel != null)
         {
-            staminaLabel.text = "Stamina";
+            staminaLabel.text = "Stamina " + stamina.CompactText;
         }
 
         if (staminaFill != null)
@@ -90,75 +104,96 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         RefreshPlanUi();
     }
 
-    public void OnPointerDown(PointerEventData eventData)
+    private void PrepareSnapshot()
     {
-        Vector2 mapPoint;
-        if (!TryGetMapPoint(eventData, out mapPoint))
+        routeSnapshot = null;
+        snapshotFailureMessage = string.Empty;
+        if (routeDefinition == null || !routeDefinition.TryBuildSnapshot(out routeSnapshot, out snapshotFailureMessage))
         {
-            return;
+            routeSnapshot = null;
+            if (string.IsNullOrEmpty(snapshotFailureMessage))
+            {
+                snapshotFailureMessage = "Map route definition is missing.";
+            }
         }
-
-        if (!PawPalWalkRouteGraph.IsNearHome(mapPoint))
-        {
-            drawing = false;
-            ShowFeedback("Route must start at Home.");
-            return;
-        }
-
-        drawing = true;
-        routePoints.Clear();
-        routePoints.Add(PawPalWalkRouteGraph.HomePosition);
-        lastEdgeIndex = -1;
-        ShowFeedback(string.Empty);
-        AppendPoint(mapPoint, true);
-        RefreshPlanUi();
-    }
-
-    public void OnDrag(PointerEventData eventData)
-    {
-        if (!drawing)
-        {
-            return;
-        }
-
-        Vector2 mapPoint;
-        if (!TryGetMapPoint(eventData, out mapPoint))
-        {
-            return;
-        }
-
-        AppendPoint(mapPoint, false);
-    }
-
-    public void OnPointerUp(PointerEventData eventData)
-    {
-        if (!drawing)
-        {
-            return;
-        }
-
-        drawing = false;
-        Vector2 mapPoint;
-        if (TryGetMapPoint(eventData, out mapPoint) && PawPalWalkRouteGraph.IsNearHome(mapPoint))
-        {
-            AppendPoint(mapPoint, true);
-        }
-
-        RefreshPlanUi();
     }
 
     private void BuildUi()
     {
         routeLayer = CreateNode("RouteLayer", root, 0f, 0f, PawPalWalkRouteGraph.MapWidth, PawPalWalkRouteGraph.MapHeight);
-
-        captureLayer = CreateNode("RouteInputLayer", root, 0f, 0f, PawPalWalkRouteGraph.MapWidth, 635f);
-        Image captureImage = captureLayer.gameObject.AddComponent<Image>();
-        captureImage.sprite = UiTheme.WhiteSprite;
-        captureImage.color = new Color(1f, 1f, 1f, 0.002f);
-        captureImage.raycastTarget = true;
-
+        nodeLayer = CreateNode("RouteNodeLayer", root, 0f, 0f, PawPalWalkRouteGraph.MapWidth, PawPalWalkRouteGraph.MapHeight);
+        BuildNodeButtons();
         BuildTopHud();
         BuildSummaryPanel();
+    }
+
+    private void BuildNodeButtons()
+    {
+        nodeButtons.Clear();
+        if (routeDefinition == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < routeDefinition.Nodes.Count; i++)
+        {
+            PawPalWalkMapRouteNodeDefinition node = routeDefinition.Nodes[i];
+            if (node == null || !node.Selectable)
+            {
+                continue;
+            }
+
+            RectTransform rect = CreateNode(
+                "VisitNode_" + node.NodeId,
+                nodeLayer,
+                node.MapPosition.x - node.BoxSize.x * 0.5f,
+                node.MapPosition.y - node.BoxSize.y * 0.5f,
+                node.BoxSize.x,
+                node.BoxSize.y);
+
+            Image fill = rect.gameObject.AddComponent<Image>();
+            fill.sprite = UiTheme.RoundedTenSprite;
+            fill.type = Image.Type.Sliced;
+            fill.color = new Color32(252, 248, 232, 218);
+            fill.raycastTarget = true;
+            CreateOutline(rect, Coral, 1f);
+
+            Button button = UiFactory.AddButton(rect.gameObject, delegate { });
+            string capturedNodeId = node.NodeId;
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(delegate { ToggleNode(capturedNodeId); });
+
+            TextMeshProUGUI label = CreateLabel(rect, "Label", node.DisplayName, 11, CoralDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+            UiFactory.Stretch(label.rectTransform, 5f, 4f, 5f, 4f);
+            label.textWrappingMode = TextWrappingModes.Normal;
+            label.overflowMode = TextOverflowModes.Ellipsis;
+
+            RectTransform badgeRoot = UiFactory.CreateRect("OrderBadge", rect);
+            badgeRoot.anchorMin = new Vector2(1f, 0f);
+            badgeRoot.anchorMax = new Vector2(1f, 0f);
+            badgeRoot.pivot = new Vector2(0.5f, 0.5f);
+            badgeRoot.sizeDelta = new Vector2(24f, 24f);
+            badgeRoot.anchoredPosition = new Vector2(-4f, 4f);
+
+            Image badgeFill = badgeRoot.gameObject.AddComponent<Image>();
+            badgeFill.sprite = UiTheme.CircleSprite;
+            badgeFill.color = Coral;
+            badgeFill.raycastTarget = false;
+            TextMeshProUGUI badge = CreateLabel(badgeRoot, "Label", string.Empty, 12, White, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+            UiFactory.Stretch(badge.rectTransform, 0f, 0f, 0f, 0f);
+            badgeRoot.SetAsLastSibling();
+            badgeRoot.gameObject.SetActive(false);
+
+            nodeButtons.Add(new NodeButtonState
+            {
+                Node = node,
+                Button = button,
+                Fill = fill,
+                Label = label,
+                BadgeRoot = badgeRoot.gameObject,
+                Badge = badge
+            });
+        }
     }
 
     private void BuildTopHud()
@@ -220,7 +255,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         distanceLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         distanceLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
         distanceLabel.rectTransform.pivot = new Vector2(0f, 1f);
-        distanceLabel.rectTransform.sizeDelta = new Vector2(150f, 20f);
+        distanceLabel.rectTransform.sizeDelta = new Vector2(240f, 20f);
         distanceLabel.rectTransform.anchoredPosition = new Vector2(14f, -10f);
 
         stopsLabel = CreateLabel(summaryPanel, "Stops", "Stops: none", 12, CoralDark, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
@@ -231,7 +266,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         stopsLabel.rectTransform.sizeDelta = new Vector2(340f, 34f);
         stopsLabel.rectTransform.anchoredPosition = new Vector2(14f, -32f);
 
-        feedbackLabel = CreateLabel(summaryPanel, "Feedback", "Draw from Home.", 12, InvalidRed, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
+        feedbackLabel = CreateLabel(summaryPanel, "Feedback", "Tap places in order.", 12, InvalidRed, UiTheme.NavRegularFont, TextAlignmentOptions.Left);
         feedbackLabel.textWrappingMode = TextWrappingModes.Normal;
         feedbackLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
         feedbackLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
@@ -239,10 +274,8 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         feedbackLabel.rectTransform.sizeDelta = new Vector2(340f, 28f);
         feedbackLabel.rectTransform.anchoredPosition = new Vector2(14f, -66f);
 
-        CreateSmallButton(summaryPanel, "ClearRoute", "Clear", 14f, 101f, 74f, delegate
-        {
-            ClearRoute();
-        });
+        CreateSmallButton(summaryPanel, "ClearRoute", "Clear", 14f, 101f, 74f, ClearRoute);
+        CreateSmallButton(summaryPanel, "UndoRoute", "Undo", 96f, 101f, 74f, UndoLastVisit);
 
         RectTransform startRect = CreateSmallButton(summaryPanel, "StartWalk", "Start Walk", 239f, 101f, 116f, TryStartWalk);
         startButton = startRect.GetComponent<Button>();
@@ -269,113 +302,52 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         return rect;
     }
 
-    private bool AppendPoint(Vector2 mapPoint, bool allowDuplicateHome)
+    private void ToggleNode(string nodeId)
     {
-        Vector2 snapped;
-        int edgeIndex;
-        if (!PawPalWalkRouteGraph.TrySnapToWalkablePath(mapPoint, out snapped, out edgeIndex))
+        int existingIndex = selectedVisitNodeIds.IndexOf(nodeId);
+        if (existingIndex >= 0)
         {
-            ShowFeedback("Draw along the streets.");
-            return false;
+            selectedVisitNodeIds.RemoveAt(existingIndex);
+        }
+        else
+        {
+            selectedVisitNodeIds.Add(nodeId);
         }
 
-        return AppendExactPoint(snapped, allowDuplicateHome, edgeIndex);
-    }
-
-    private bool AppendExactPoint(Vector2 snapped, bool allowDuplicateHome, int edgeIndex)
-    {
-        if (routePoints.Count == 0)
-        {
-            routePoints.Add(PawPalWalkRouteGraph.HomePosition);
-        }
-
-        Vector2 lastPoint = routePoints[routePoints.Count - 1];
-        if (!allowDuplicateHome && Vector2.Distance(lastPoint, snapped) < MinimumPointSpacing)
-        {
-            return false;
-        }
-
-        if (PawPalWalkRouteGraph.IsNearHome(snapped))
-        {
-            snapped = PawPalWalkRouteGraph.HomePosition;
-            if (PawPalWalkRouteGraph.IsNearHome(lastPoint) && !allowDuplicateHome)
-            {
-                return false;
-            }
-        }
-
-        List<Vector2> pointsToAdd = new List<Vector2>();
-        if (lastEdgeIndex >= 0 && edgeIndex >= 0 && lastEdgeIndex != edgeIndex && !PawPalWalkRouteGraph.IsWalkableSegment(lastPoint, snapped))
-        {
-            Vector2 sharedNode;
-            if (!PawPalWalkRouteGraph.TryGetSharedNode(lastEdgeIndex, edgeIndex, out sharedNode))
-            {
-                ShowFeedback("Stay on connected streets.");
-                return false;
-            }
-
-            if (Vector2.Distance(lastPoint, sharedNode) >= MinimumPointSpacing)
-            {
-                pointsToAdd.Add(sharedNode);
-            }
-        }
-        else if (!PawPalWalkRouteGraph.IsWalkableSegment(lastPoint, snapped))
-        {
-            ShowFeedback("Stay on connected streets.");
-            return false;
-        }
-
-        if (pointsToAdd.Count == 0 || Vector2.Distance(pointsToAdd[pointsToAdd.Count - 1], snapped) >= MinimumPointSpacing || allowDuplicateHome)
-        {
-            pointsToAdd.Add(snapped);
-        }
-
-        if (pointsToAdd.Count == 0)
-        {
-            return false;
-        }
-
-        if (!CanAffordPreview(pointsToAdd))
-        {
-            ShowFeedback("Too tired for this route.");
-            return false;
-        }
-
-        for (int i = 0; i < pointsToAdd.Count; i++)
-        {
-            routePoints.Add(pointsToAdd[i]);
-        }
-
-        lastEdgeIndex = edgeIndex;
-        ShowFeedback(string.Empty);
         RefreshPlanUi();
-        return true;
     }
 
-    private bool CanAffordPreview(IList<Vector2> pointsToAdd)
+    private void UndoLastVisit()
     {
-        List<Vector2> preview = new List<Vector2>(routePoints);
-        for (int i = 0; i < pointsToAdd.Count; i++)
+        if (selectedVisitNodeIds.Count > 0)
         {
-            preview.Add(pointsToAdd[i]);
+            selectedVisitNodeIds.RemoveAt(selectedVisitNodeIds.Count - 1);
         }
 
-        PawPalWalkRoutePlan previewPlan = PawPalWalkRouteGraph.BuildPlan(preview);
-        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
-        if (runtime != null)
-        {
-            runtime.ApplyWalkPersonalityToPlan(runtime.ActiveDog, previewPlan);
-        }
-
-        PawPalWalkStaminaSnapshot stamina = runtime != null
-            ? runtime.GetActiveDogWalkStaminaSnapshot()
-            : new PawPalWalkStaminaSnapshot();
-        return previewPlan.StaminaCost <= stamina.Current + 0.001f;
+        RefreshPlanUi();
     }
 
     private PawPalWalkRoutePlan BuildCurrentPlan()
     {
-        PawPalWalkRoutePlan plan = PawPalWalkRouteGraph.BuildPlan(routePoints);
+        if (routeSnapshot == null || selectedVisitNodeIds.Count == 0)
+        {
+            return null;
+        }
+
+        PawPalWalkRoutePlan plan;
+        string failureMessage;
+        if (!PawPalWalkGraphService.TryBuildPlanThroughVisitNodeIds(
+                routeSnapshot,
+                routeDefinition.HomeStartNodeId,
+                routeDefinition.HomeEndNodeId,
+                selectedVisitNodeIds,
+                out plan,
+                out failureMessage))
+        {
+            validationMessage = failureMessage;
+            return null;
+        }
+
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime != null)
         {
@@ -387,31 +359,54 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
 
     private void RefreshPlanUi()
     {
-        RefreshRouteLines();
-
+        validationMessage = string.Empty;
         PawPalWalkRoutePlan plan = BuildCurrentPlan();
+        RefreshRouteLines(plan);
+        RefreshNodeButtonStates();
+
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         PawPalWalkStaminaSnapshot stamina = runtime != null
             ? runtime.GetActiveDogWalkStaminaSnapshot()
             : new PawPalWalkStaminaSnapshot();
 
-        validationMessage = PawPalWalkRouteGraph.ValidatePlan(plan, stamina.Current);
+        if (routeSnapshot == null)
+        {
+            validationMessage = snapshotFailureMessage;
+        }
+        else if (selectedVisitNodeIds.Count == 0)
+        {
+            validationMessage = "Tap places in the order you want to visit.";
+        }
+        else if (plan != null)
+        {
+            validationMessage = PawPalWalkGraphService.ValidatePlan(plan, stamina.Current);
+        }
+
         bool valid = string.IsNullOrEmpty(validationMessage);
 
         if (distanceLabel != null)
         {
-            distanceLabel.text = "Distance " + Mathf.RoundToInt(plan.RouteDistance) + "  Effort " + GetEffortLabel(plan.StaminaCost, stamina.Max);
+            float routeDistance = plan != null ? plan.RouteDistance : 0f;
+            float staminaCost = plan != null ? plan.StaminaCost : 0f;
+            distanceLabel.text = "Distance " + Mathf.RoundToInt(routeDistance) + "  Effort " + GetEffortLabel(staminaCost, stamina.Max);
         }
 
         if (stopsLabel != null)
         {
-            stopsLabel.text = "Stops: " + BuildStopsText(plan);
+            stopsLabel.text = "Stops: " + BuildStopsText();
         }
 
-        if (feedbackLabel != null && !string.IsNullOrEmpty(validationMessage))
+        if (feedbackLabel != null)
         {
-            feedbackLabel.text = validationMessage;
-            feedbackLabel.color = InvalidRed;
+            if (valid)
+            {
+                ShowFeedback(string.Empty);
+            }
+            else
+            {
+                feedbackLabel.text = validationMessage;
+                feedbackLabel.color = InvalidRed;
+            }
         }
 
         if (startButton != null)
@@ -430,22 +425,59 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         }
     }
 
-    private string BuildStopsText(PawPalWalkRoutePlan plan)
+    private void RefreshNodeButtonStates()
     {
-        if (plan == null || plan.PlannedStops.Count == 0)
+        for (int i = 0; i < nodeButtons.Count; i++)
+        {
+            NodeButtonState state = nodeButtons[i];
+            if (state == null || state.Node == null)
+            {
+                continue;
+            }
+
+            int orderIndex = selectedVisitNodeIds.IndexOf(state.Node.NodeId);
+            bool selected = orderIndex >= 0;
+            if (state.Fill != null)
+            {
+                state.Fill.color = selected ? Coral : new Color32(252, 248, 232, 218);
+            }
+
+            if (state.Label != null)
+            {
+                state.Label.color = selected ? White : CoralDark;
+            }
+
+            if (state.Badge != null)
+            {
+                state.Badge.text = selected ? (orderIndex + 1).ToString() : string.Empty;
+            }
+
+            if (state.BadgeRoot != null)
+            {
+                state.BadgeRoot.SetActive(selected);
+            }
+        }
+    }
+
+    private string BuildStopsText()
+    {
+        if (selectedVisitNodeIds.Count == 0)
         {
             return "none";
         }
 
         string text = string.Empty;
-        for (int i = 0; i < plan.PlannedStops.Count; i++)
+        for (int i = 0; i < selectedVisitNodeIds.Count; i++)
         {
+            PawPalWalkMapRouteNodeDefinition node = routeDefinition != null ? routeDefinition.FindNode(selectedVisitNodeIds[i]) : null;
             if (i > 0)
             {
-                text += ", ";
+                text += " > ";
             }
 
-            text += plan.PlannedStops[i].DisplayName;
+            text += node != null && !string.IsNullOrWhiteSpace(node.DisplayName)
+                ? node.DisplayName
+                : selectedVisitNodeIds[i];
         }
 
         return text;
@@ -472,7 +504,7 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         return "Very High";
     }
 
-    private void RefreshRouteLines()
+    private void RefreshRouteLines(PawPalWalkRoutePlan plan)
     {
         for (int i = 0; i < routeSegments.Count; i++)
         {
@@ -483,14 +515,14 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         }
 
         routeSegments.Clear();
-        if (routePoints.Count < 2)
+        if (plan == null || plan.RoutePoints == null || plan.RoutePoints.Count < 2)
         {
             return;
         }
 
-        for (int i = 1; i < routePoints.Count; i++)
+        for (int i = 1; i < plan.RoutePoints.Count; i++)
         {
-            routeSegments.Add(CreateRouteSegment(routePoints[i - 1], routePoints[i]));
+            routeSegments.Add(CreateRouteSegment(plan.RoutePoints[i - 1].ToVector2(), plan.RoutePoints[i].ToVector2()));
         }
     }
 
@@ -511,18 +543,16 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         Image image = rect.gameObject.AddComponent<Image>();
         image.sprite = UiTheme.RoundedTenSprite;
         image.type = Image.Type.Sliced;
-        image.color = Coral;
+        image.color = RoutePreview;
         image.raycastTarget = false;
         return image;
     }
 
     private void ClearRoute()
     {
-        routePoints.Clear();
-        routePoints.Add(PawPalWalkRouteGraph.HomePosition);
-        lastEdgeIndex = -1;
+        selectedVisitNodeIds.Clear();
         validationMessage = string.Empty;
-        ShowFeedback("Draw from Home.");
+        ShowFeedback("Tap places in the order you want to visit.");
         RefreshPlanUi();
     }
 
@@ -537,15 +567,21 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
         }
 
         PawPalWalkStaminaSnapshot stamina = runtime.GetActiveDogWalkStaminaSnapshot();
-        string message = PawPalWalkRouteGraph.ValidatePlan(plan, stamina.Current);
+        string message = plan != null
+            ? PawPalWalkGraphService.ValidatePlan(plan, stamina.Current)
+            : "Tap places in the order you want to visit.";
         if (!string.IsNullOrEmpty(message))
         {
             ShowFeedback(message);
             return;
         }
 
-        plan.ReturnSceneName = PawPalWalkSceneFlow.HomeSceneName;
-        if (!runtime.TryStartWalkSession(plan, out message))
+        if (!runtime.TryStartDeferredWalkSession(
+                selectedVisitNodeIds,
+                routeDefinition.HomeStartNodeId,
+                routeDefinition.HomeEndNodeId,
+                PawPalWalkSceneFlow.HomeSceneName,
+                out message))
         {
             ShowFeedback(message);
             return;
@@ -565,27 +601,8 @@ public sealed class MapWalkPlannerController : MonoBehaviour, IPointerDownHandle
             return;
         }
 
-        feedbackLabel.text = string.IsNullOrEmpty(message) ? "You might find presents or meet other dogs!" : message;
+        feedbackLabel.text = string.IsNullOrEmpty(message) ? "Home is fixed as the start and finish." : message;
         feedbackLabel.color = string.IsNullOrEmpty(message) ? CoralDark : InvalidRed;
-    }
-
-    private bool TryGetMapPoint(PointerEventData eventData, out Vector2 mapPoint)
-    {
-        mapPoint = Vector2.zero;
-        if (root == null || eventData == null)
-        {
-            return false;
-        }
-
-        Vector2 localPoint;
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(root, eventData.position, eventData.pressEventCamera, out localPoint))
-        {
-            return false;
-        }
-
-        mapPoint = new Vector2(localPoint.x, -localPoint.y);
-        return mapPoint.x >= 0f && mapPoint.x <= PawPalWalkRouteGraph.MapWidth
-            && mapPoint.y >= 0f && mapPoint.y <= PawPalWalkRouteGraph.MapHeight;
     }
 
     private static RectTransform CreateNode(string name, RectTransform parent, float x, float y, float width, float height)

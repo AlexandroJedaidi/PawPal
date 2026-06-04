@@ -229,7 +229,7 @@ public sealed class PawPalRoomPetHandle
             return DogAgent.MoveNearInteraction(worldPosition, timeout, pace, reachedDistance);
         }
 
-        return CatAgent != null ? CatAgent.MoveNearPrecise(worldPosition, timeout, pace, reachedDistance) : EmptyRoutine();
+        return CatAgent != null ? CatAgent.MoveNearPlayerInteraction(worldPosition, timeout, pace, reachedDistance) : EmptyRoutine();
     }
 
     public IEnumerator FaceTarget(Transform target, float duration)

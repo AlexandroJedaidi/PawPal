@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
@@ -106,12 +107,12 @@ public sealed class IntroTimeOfDayLightingController : MonoBehaviour
 
     private Light ResolveDirectionalLight()
     {
-        if (directionalLight != null)
+        if (IsSceneObject(directionalLight))
         {
             return directionalLight;
         }
 
-        if (RenderSettings.sun != null)
+        if (IsSceneObject(RenderSettings.sun) && RenderSettings.sun.type == LightType.Directional)
         {
             return RenderSettings.sun;
         }
@@ -120,12 +121,23 @@ public sealed class IntroTimeOfDayLightingController : MonoBehaviour
         for (int i = 0; i < lights.Length; i++)
         {
             Light candidate = lights[i];
-            if (candidate != null && candidate.type == LightType.Directional)
+            if (IsSceneObject(candidate) && candidate.type == LightType.Directional)
             {
                 return candidate;
             }
         }
 
         return null;
+    }
+
+    private bool IsSceneObject(Component component)
+    {
+        if (component == null)
+        {
+            return false;
+        }
+
+        Scene componentScene = component.gameObject.scene;
+        return componentScene.IsValid() && componentScene == gameObject.scene;
     }
 }

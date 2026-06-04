@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: StrayCat
+  m_EditorClassIdentifier: 
+  PetId: cat_stray
+  DisplayName: Stray Cat
+  Species: 1
+  BreedName: Stray Cat
+  Description: Lean, watchful, and quick to move, this stray cat keeps its own model while sharing the cat locomotion rig.
+  BasePrefab: {fileID: 100100000, guid: 7c0557e0370c89544a98c4ab94adbd8f, type: 3}
+  IntroScale: {x: 0.92, y: 0.92, z: 0.92}
+  HomeScale: {x: 0.92, y: 0.92, z: 0.92}
+  IntroCameraOffset: {x: 0, y: 0.88, z: -2.2}
+  HomeCameraOffset: {x: 0, y: 0.78, z: -2.3}
+  RoamRadius: 3
+  AnimationSet: {fileID: 11400000, guid: 6cab22fe24c84c44827b8b858fae523c, type: 2}
+  FurVariants: []

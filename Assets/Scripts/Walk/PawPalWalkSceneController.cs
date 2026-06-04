@@ -17,7 +17,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
     private const float GroundProbeHeight = 8f;
     private const float GroundProbeDistance = 24f;
-    private const float WalkMusicVolume = 0.375f;
+    private const float WalkMusicVolume = 0.1875f;
     private static readonly int MoveHash = Animator.StringToHash("Move");
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int DirectionHash = Animator.StringToHash("Direction");
@@ -33,21 +33,28 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
     private SelectedPetSessionData runtimeDogSelection;
     private Transform walker;
     private DogRoomAgent walkerRoomAgent;
+    private PawPalCatRoomAgent walkerCatAgent;
     private Animator walkerAnimator;
     private Camera sceneCamera;
+    private PawPalWalkLeashDirector leashDirector;
+    private PawPalWalkPetGraphicsEnhancer petGraphicsEnhancer;
     private AudioSource walkMusicSource;
     private AudioClip walkMusicClip;
     private float[] cumulativeRouteDistances = new float[0];
     private PawPalPetMovementProfile walkMovementProfile = PawPalPetMovementProfiles.DefaultProfile;
+    private IntroPetSpecies activePetSpecies = IntroPetSpecies.Dog;
     private float totalRouteDistance = 1f;
     private float currentDistance;
     private float progress;
-    private float runSpeed = 1f;
+    private float routeSpeedScale = 1f;
     private string returnSceneName = PawPalWalkSceneFlow.HomeSceneName;
     private WalkState state;
     private Coroutine stateRoutine;
     private string startupFailureMessage = string.Empty;
     private bool startupFailed;
+
+    public Vector3 CurrentRouteDirection => GetRouteDirectionAtDistance(currentDistance);
+    public Camera CurrentWalkCamera => sceneCamera;
 
     public void Initialize(PawPalWalkSessionSaveData walkSession)
     {
@@ -116,7 +123,9 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         currentDistance = Mathf.Clamp01(progress) * totalRouteDistance;
         MoveWalkerToDistance(currentDistance, true);
         ConfigureSceneCamera();
+        ConfigureWalkPetGraphics();
         PawPalLeashRig.TryInstallSceneRig();
+        ConfigureWalkLeashDirector();
         state = WalkState.Running;
         PushProgressToRuntime();
     }
@@ -183,7 +192,13 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             return;
         }
 
-        currentDistance = Mathf.Min(totalRouteDistance, currentDistance + runSpeed * Time.deltaTime);
+        if (leashDirector != null && leashDirector.BlocksRouteProgress)
+        {
+            MoveWalkerToDistance(currentDistance, false);
+            return;
+        }
+
+        currentDistance = Mathf.Min(totalRouteDistance, currentDistance + ResolveCurrentRouteSpeed() * Time.deltaTime);
         MoveWalkerToDistance(currentDistance, false);
         progress = totalRouteDistance <= 0.001f ? 1f : Mathf.Clamp01(currentDistance / totalRouteDistance);
         PushProgressToRuntime();
@@ -234,7 +249,37 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             return true;
         }
 
-        if (!PawPalWalkGraphService.TryBuildDefaultRoutePlan(sceneBindings, out PawPalWalkRoutePlan routePlan, out string failureMessage))
+        PawPalWalkRoutePlan routePlan;
+        string failureMessage;
+        if (HasRequestedVisitRoute(session))
+        {
+            if (!PawPalWalkGraphService.TryGetSceneGraphSnapshot(sceneBindings, out PawPalWalkGraphSnapshot snapshot, out failureMessage))
+            {
+                startupFailureMessage = failureMessage;
+                Debug.LogWarning("PawPalWalkSceneController could not resolve the authored scene walk graph. " + failureMessage);
+                return false;
+            }
+
+            string startNodeId = string.IsNullOrEmpty(session.StartNodeId) ? snapshot.DefaultStartNodeId : session.StartNodeId;
+            string endNodeId = string.IsNullOrEmpty(session.EndNodeId) ? snapshot.DefaultEndNodeId : session.EndNodeId;
+            if (!PawPalWalkGraphService.TryBuildPlanThroughVisitNodeIds(
+                    snapshot,
+                    startNodeId,
+                    endNodeId,
+                    session.RequestedVisitNodeIds,
+                    out routePlan,
+                    out failureMessage))
+            {
+                Debug.LogWarning("PawPalWalkSceneController could not build the selected map route in the walking scene, so it will use the default walking route. " + failureMessage);
+                if (!PawPalWalkGraphService.TryBuildDefaultRoutePlan(sceneBindings, out routePlan, out failureMessage))
+                {
+                    startupFailureMessage = failureMessage;
+                    Debug.LogWarning("PawPalWalkSceneController could not resolve the default scene walk route. " + failureMessage);
+                    return false;
+                }
+            }
+        }
+        else if (!PawPalWalkGraphService.TryBuildDefaultRoutePlan(sceneBindings, out routePlan, out failureMessage))
         {
             startupFailureMessage = failureMessage;
             Debug.LogWarning("PawPalWalkSceneController could not resolve the default scene walk route. " + failureMessage);
@@ -333,7 +378,13 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         walker = preparedDog.transform;
-        walkerRoomAgent = preparedDog.GetComponent<DogRoomAgent>();
+        walkerRoomAgent = activePetSpecies == IntroPetSpecies.Cat ? null : preparedDog.GetComponent<DogRoomAgent>();
+        walkerCatAgent = preparedDog.GetComponent<PawPalCatRoomAgent>();
+        if (walkerCatAgent == null)
+        {
+            walkerCatAgent = preparedDog.GetComponentInChildren<PawPalCatRoomAgent>(true);
+        }
+
         walkerAnimator = preparedDog.GetComponent<Animator>();
         if (walkerAnimator == null)
         {
@@ -343,6 +394,11 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         if (walkerRoomAgent != null && runtimeDog != null)
         {
             walkerRoomAgent.SetRuntimeDogId(runtimeDog.Id);
+        }
+
+        if (walkerCatAgent != null)
+        {
+            walkerCatAgent.SetExternalWalkControl(true);
         }
 
         return true;
@@ -387,7 +443,13 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         walker = dogObject.transform;
-        walkerRoomAgent = dogObject.GetComponent<DogRoomAgent>();
+        walkerRoomAgent = activePetSpecies == IntroPetSpecies.Cat ? null : dogObject.GetComponent<DogRoomAgent>();
+        walkerCatAgent = dogObject.GetComponent<PawPalCatRoomAgent>();
+        if (walkerCatAgent == null)
+        {
+            walkerCatAgent = dogObject.GetComponentInChildren<PawPalCatRoomAgent>(true);
+        }
+
         walkerAnimator = dogObject.GetComponent<Animator>();
         if (walkerAnimator == null)
         {
@@ -431,15 +493,23 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             }
         }
 
-        dogObject.name = "WalkDog_" + selection.SafeName;
+        dogObject.name = (selection.Species == IntroPetSpecies.Cat ? "WalkCat_" : "WalkDog_") + selection.SafeName;
         DogRoomAgent roomAgent = dogObject.GetComponent<DogRoomAgent>();
-        PawPalCatRoomAgent[] catAgents = dogObject.GetComponentsInChildren<PawPalCatRoomAgent>(true);
-        for (int i = 0; i < catAgents.Length; i++)
+        if (selection.Species == IntroPetSpecies.Dog)
         {
-            if (catAgents[i] != null)
+            PawPalCatRoomAgent[] catAgents = dogObject.GetComponentsInChildren<PawPalCatRoomAgent>(true);
+            for (int i = 0; i < catAgents.Length; i++)
             {
-                Destroy(catAgents[i]);
+                if (catAgents[i] != null)
+                {
+                    Destroy(catAgents[i]);
+                }
             }
+        }
+        else if (roomAgent != null)
+        {
+            Destroy(roomAgent);
+            roomAgent = null;
         }
 
         ApplySpawnedDogPresentation(selection, dogObject);
@@ -449,6 +519,22 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             roomAgent.SetRuntimeDogId(selection.RuntimePetId);
             roomAgent.ApplySelectedPetPresentation(selection);
             roomAgent.ConfigureSelectedPetRuntime(selection);
+        }
+        else if (selection.Species == IntroPetSpecies.Cat)
+        {
+            PawPalCatRoomAgent catAgent = dogObject.GetComponent<PawPalCatRoomAgent>();
+            if (catAgent == null)
+            {
+                catAgent = dogObject.GetComponentInChildren<PawPalCatRoomAgent>(true);
+            }
+
+            if (catAgent == null)
+            {
+                catAgent = dogObject.AddComponent<PawPalCatRoomAgent>();
+            }
+
+            catAgent.Initialize(selection);
+            catAgent.SetExternalWalkControl(true);
         }
 
         return true;
@@ -487,11 +573,12 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             return null;
         }
 
-        IntroPetDefinition definition = ResolveIntroPetDefinition(dog);
+        activePetSpecies = runtime != null ? runtime.GetPetSpecies(dog.Id) : IntroPetSpecies.Dog;
+        IntroPetDefinition definition = ResolveIntroPetDefinition(dog, activePetSpecies);
         if (definition == null)
         {
-            startupFailureMessage = "Could not match runtime dog '" + dog.DisplayName + "' / breed '" + dog.Breed + "' to an IntroPetDefinition.";
-            Debug.LogWarning("PawPalWalkSceneController could not resolve an IntroPetDefinition for runtime dog '" + dog.Id + "' / breed '" + dog.Breed + "'.");
+            startupFailureMessage = "Could not match runtime pet '" + dog.DisplayName + "' / breed '" + dog.Breed + "' to an IntroPetDefinition.";
+            Debug.LogWarning("PawPalWalkSceneController could not resolve an IntroPetDefinition for runtime pet '" + dog.Id + "' / breed '" + dog.Breed + "'.");
             return null;
         }
 
@@ -503,12 +590,17 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             FurIndex = definition.GetFurVariantIndex(furVariant),
             Gender = dog.Gender,
             Personality = dog.Personality,
-            PetName = string.IsNullOrWhiteSpace(dog.DisplayName) ? "Dog" : dog.DisplayName,
+            PetName = string.IsNullOrWhiteSpace(dog.DisplayName) ? definition.SpeciesLabel : dog.DisplayName,
             RuntimePetId = dog.Id
         };
     }
 
     private static IntroPetDefinition ResolveIntroPetDefinition(PawPalDogState dog)
+    {
+        return ResolveIntroPetDefinition(dog, IntroPetSpecies.Dog);
+    }
+
+    public static IntroPetDefinition ResolveIntroPetDefinition(PawPalDogState dog, IntroPetSpecies species)
     {
         IntroPetDefinition[] definitions = Resources.LoadAll<IntroPetDefinition>("PawPal/IntroPets/Definitions");
         if (definitions == null || definitions.Length == 0 || dog == null)
@@ -521,7 +613,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         for (int i = 0; i < definitions.Length; i++)
         {
             IntroPetDefinition definition = definitions[i];
-            if (definition == null || definition.Species != IntroPetSpecies.Dog)
+            if (definition == null || definition.Species != species)
             {
                 continue;
             }
@@ -538,7 +630,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         for (int i = 0; i < definitions.Length; i++)
         {
             IntroPetDefinition definition = definitions[i];
-            if (definition == null || definition.Species != IntroPetSpecies.Dog)
+            if (definition == null || definition.Species != species)
             {
                 continue;
             }
@@ -595,9 +687,18 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             }
         }
 
-        if (walkerRoomAgent == null)
+        if (walkerRoomAgent == null && activePetSpecies != IntroPetSpecies.Cat)
         {
             walkerRoomAgent = walker.GetComponent<DogRoomAgent>();
+        }
+
+        if (walkerCatAgent == null)
+        {
+            walkerCatAgent = walker.GetComponent<PawPalCatRoomAgent>();
+            if (walkerCatAgent == null)
+            {
+                walkerCatAgent = walker.GetComponentInChildren<PawPalCatRoomAgent>(true);
+            }
         }
 
         NavMeshAgent navMeshAgent = walker.GetComponent<NavMeshAgent>();
@@ -606,6 +707,15 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             walkerRoomAgent.SetExternalWalkControl(true);
             walkerRoomAgent.SetExternalWalkPace(DogMovementPace.Walk);
             walkMovementProfile = walkerRoomAgent.MovementProfile;
+        }
+        else if (walkerCatAgent != null)
+        {
+            walkerCatAgent.SetExternalWalkControl(true);
+            walkerCatAgent.SetExternalWalkPace(DogMovementPace.Walk);
+            walkMovementProfile = PawPalPetMovementProfiles.Resolve(
+                runtimeDogSelection != null ? runtimeDogSelection.Definition : null,
+                runtimeDog != null ? runtimeDog.Breed : null,
+                walker.name);
         }
         else if (runtimeDog != null)
         {
@@ -621,7 +731,39 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         DisableConflictingComponents(walker);
-        runSpeed = Mathf.Max(0.05f, walkMovementProfile.WalkSpeed * sceneBindings.RunSpeedMultiplier);
+        routeSpeedScale = Mathf.Max(0.05f, sceneBindings.RunSpeedMultiplier);
+    }
+
+    private void ConfigureWalkLeashDirector()
+    {
+        PawPalLeashRig leashRig = Object.FindFirstObjectByType<PawPalLeashRig>(FindObjectsInactive.Include);
+        PawPalLeashDragController leashDrag = Object.FindFirstObjectByType<PawPalLeashDragController>(FindObjectsInactive.Include);
+        if (leashDrag == null && leashRig != null)
+        {
+            leashDrag = leashRig.GetComponent<PawPalLeashDragController>();
+        }
+
+        if (leashDrag == null || walker == null)
+        {
+            return;
+        }
+
+        leashDirector = GetComponent<PawPalWalkLeashDirector>();
+        if (leashDirector == null)
+        {
+            leashDirector = gameObject.AddComponent<PawPalWalkLeashDirector>();
+        }
+
+        leashDirector.Configure(
+            this,
+            leashDrag,
+            walkerAnimator,
+            walkerRoomAgent,
+            walkerCatAgent,
+            activePetSpecies,
+            runtimeDogSelection != null ? runtimeDogSelection.Definition : null,
+            runtimeDog != null ? runtimeDog.Breed : string.Empty,
+            walker.name);
     }
 
     private void ConfigureSceneCamera()
@@ -727,6 +869,22 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         PositionCamera(true);
     }
 
+    private void ConfigureWalkPetGraphics()
+    {
+        if (walker == null)
+        {
+            return;
+        }
+
+        petGraphicsEnhancer = GetComponent<PawPalWalkPetGraphicsEnhancer>();
+        if (petGraphicsEnhancer == null)
+        {
+            petGraphicsEnhancer = gameObject.AddComponent<PawPalWalkPetGraphicsEnhancer>();
+        }
+
+        petGraphicsEnhancer.Configure(walker, sceneCamera, allowedRoads);
+    }
+
     private void PositionCamera(bool immediate)
     {
         if (sceneCamera == null || walker == null || sceneBindings == null)
@@ -759,7 +917,9 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
                 : Quaternion.Slerp(walker.rotation, targetRotation, Time.deltaTime * 10f);
         }
 
-        if (walkerRoomAgent == null)
+        if (walkerRoomAgent == null
+            && walkerCatAgent == null
+            && (leashDirector == null || !leashDirector.IsPlayingPetOneShot))
         {
             SetFallbackAnimatorLocomotion(state == WalkState.Running);
         }
@@ -1046,7 +1206,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
                 continue;
             }
 
-            if (behaviour == walkerRoomAgent)
+            if (behaviour == walkerRoomAgent || behaviour == walkerCatAgent || behaviour is DogCameraAttention)
             {
                 continue;
             }
@@ -1099,32 +1259,58 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
             && walkSession.RouteEdgeIds.Count > 0;
     }
 
+    private static bool HasRequestedVisitRoute(PawPalWalkSessionSaveData walkSession)
+    {
+        return walkSession != null
+            && walkSession.RequestedVisitNodeIds != null
+            && walkSession.RequestedVisitNodeIds.Count > 0;
+    }
+
     private void SetFallbackAnimatorLocomotion(bool moving)
     {
-        if (walkerAnimator == null || walkerRoomAgent != null)
+        if (walkerAnimator == null || walkerRoomAgent != null || walkerCatAgent != null)
         {
             return;
         }
 
-        if (HasAnimatorParameter(walkerAnimator, MoveHash, AnimatorControllerParameterType.Bool))
+        if (!moving)
         {
-            walkerAnimator.SetBool(MoveHash, moving);
+            if (HasAnimatorParameter(walkerAnimator, MoveHash, AnimatorControllerParameterType.Bool))
+            {
+                walkerAnimator.SetBool(MoveHash, false);
+            }
+
+            if (HasAnimatorParameter(walkerAnimator, SpeedHash, AnimatorControllerParameterType.Float))
+            {
+                walkerAnimator.SetFloat(SpeedHash, 0f);
+            }
+
+            if (HasAnimatorParameter(walkerAnimator, DirectionHash, AnimatorControllerParameterType.Float))
+            {
+                walkerAnimator.SetFloat(DirectionHash, 0f);
+            }
+
+            if (HasAnimatorParameter(walkerAnimator, IdleIndexHash, AnimatorControllerParameterType.Int))
+            {
+                walkerAnimator.SetInteger(IdleIndexHash, 99);
+            }
+
+            return;
         }
 
-        if (HasAnimatorParameter(walkerAnimator, SpeedHash, AnimatorControllerParameterType.Float))
-        {
-            walkerAnimator.SetFloat(SpeedHash, moving ? walkMovementProfile.RunAnimatorSpeed : 0f);
-        }
+        PawPalWalkPetAnimationPlayer.ForceLocomotionForPace(
+            walkerAnimator,
+            walkMovementProfile,
+            activePetSpecies,
+            leashDirector != null ? leashDirector.CurrentPace : DogMovementPace.Walk);
+    }
 
-        if (HasAnimatorParameter(walkerAnimator, DirectionHash, AnimatorControllerParameterType.Float))
-        {
-            walkerAnimator.SetFloat(DirectionHash, 0f);
-        }
-
-        if (HasAnimatorParameter(walkerAnimator, IdleIndexHash, AnimatorControllerParameterType.Int))
-        {
-            walkerAnimator.SetInteger(IdleIndexHash, moving ? -1 : 99);
-        }
+    private float ResolveCurrentRouteSpeed()
+    {
+        DogMovementPace pace = leashDirector != null ? leashDirector.CurrentPace : DogMovementPace.Walk;
+        float paceSpeed = Mathf.Max(0.05f, walkMovementProfile.GetSpeed(pace));
+        float paceMultiplier = leashDirector != null ? leashDirector.RouteSpeedMultiplier : 1f;
+        return paceSpeed * Mathf.Max(0.05f, routeSpeedScale) * Mathf.Max(0.05f, paceMultiplier);
     }
 
     private static bool HasAnimatorParameter(Animator animator, int parameterHash, AnimatorControllerParameterType type)

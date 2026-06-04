@@ -480,6 +480,7 @@ public class DogRoomAgent : MonoBehaviour
     private ObstacleAvoidanceType suppressedActiveTravelAvoidanceType;
     private int suppressedActiveTravelAvoidancePriority;
     private float cachedNavigationFootprintRadius = -1f;
+    private float cachedInteractionNavigationFootprintRadius = -1f;
     private string movementDebugContext;
     private float nextMovementDebugLogTime;
     private float nextMovementSlideAnomalyLogTime;
@@ -1723,7 +1724,7 @@ public class DogRoomAgent : MonoBehaviour
 
     public IEnumerator MoveNearInteraction(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
     {
-        yield return TravelTo(worldPosition, timeout, pace, false, reachedDistance, false, crowdingSpacingPadding, true, false);
+        yield return TravelTo(worldPosition, 0f, pace, false, reachedDistance, false, crowdingSpacingPadding, true, false, null, true);
     }
 
     public IEnumerator MoveNearPrecise(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
@@ -1734,6 +1735,42 @@ public class DogRoomAgent : MonoBehaviour
     public IEnumerator MoveNearSocial(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
     {
         yield return TravelTo(worldPosition, timeout, pace, false, reachedDistance, true, socialCrowdingSpacingPadding, false, false);
+    }
+
+    public bool TryYieldForPlayerInteractionPath(Vector3 protectedDestination, Transform caller)
+    {
+        if (!isActiveAndEnabled || caller == null || caller == transform || transform.IsChildOf(caller) || caller.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        WakeForPlayerInteraction(4f);
+        if (roamRoutine != null)
+        {
+            StopCoroutine(roamRoutine);
+            roamRoutine = null;
+        }
+
+        if (fetchRoutine != null)
+        {
+            StopCoroutine(fetchRoutine);
+            fetchRoutine = null;
+        }
+
+        socialPaused = false;
+        IsBusy = false;
+        IsPreparingToMove = false;
+        StopHeldToyTugAnimation();
+        StopDirectClipGraph();
+        ClearRestState();
+
+        Vector3 yieldPoint;
+        if (!TryFindInteractionYieldPoint(protectedDestination, caller, out yieldPoint))
+        {
+            return false;
+        }
+
+        return TrySetDestination(yieldPoint, DogMovementPace.Walk);
     }
 
     public void StartHeldToyTugAnimation()
@@ -2207,7 +2244,7 @@ public class DogRoomAgent : MonoBehaviour
 
     public float GetInteractionNavigationFootprintRadius()
     {
-        return GetNavigationFootprintRadius();
+        return GetInteractionNavigationVisualRadius();
     }
 
     public IEnumerator PlayInteractionTrainingMissIdle()
@@ -3047,7 +3084,7 @@ public class DogRoomAgent : MonoBehaviour
         yield return TravelTo(worldPosition, timeout, pace, stopWhenSocialPaused, reachedDistance, preciseArrival, crowdingPadding, reserveDestination, false);
     }
 
-    private IEnumerator TravelTo(Vector3 worldPosition, float timeout, DogMovementPace pace, bool stopWhenSocialPaused, float reachedDistance, bool preciseArrival, float crowdingPadding, bool reserveDestination, bool allowHeldToyMovement, PawPalAutoTravelContext? autoTravelContext = null)
+    private IEnumerator TravelTo(Vector3 worldPosition, float timeout, DogMovementPace pace, bool stopWhenSocialPaused, float reachedDistance, bool preciseArrival, float crowdingPadding, bool reserveDestination, bool allowHeldToyMovement, PawPalAutoTravelContext? autoTravelContext = null, bool persistentInteractionArrival = false)
     {
         uint commandGeneration = movementCommandGeneration;
         WasLastTravelSuccessful = false;
@@ -3135,6 +3172,7 @@ public class DogRoomAgent : MonoBehaviour
         float elapsed = 0f;
         float effectiveBlockedWaitDuration = Mathf.Max(0.05f, Mathf.Min(blockedPathWaitDuration, minimumMovementCommitDuration));
         float blockedWaitElapsed = 0f;
+        float nextInteractionYieldRequestAt = 0f;
         int rerouteAttempts = 0;
         bool pausedForCrowding = false;
         while ((timeout <= 0f || elapsed < timeout) && !HasReachedDestination(reachedDistance, preciseArrival))
@@ -3164,12 +3202,18 @@ public class DogRoomAgent : MonoBehaviour
                 break;
             }
 
-            DogRoomAgent blockingDog;
+            Transform blockingPet;
             bool personalSpaceBlocked;
-            bool corridorBlocked = IsPathBlockedByAnotherDog(roomPoint, crowdingPadding, true, out blockingDog, out personalSpaceBlocked);
-            bool blockedByDog = personalSpaceBlocked || corridorBlocked;
-            if (blockedByDog)
+            bool corridorBlocked = IsPathBlockedByAnotherPet(roomPoint, crowdingPadding, true, out blockingPet, out personalSpaceBlocked);
+            bool blockedByPet = personalSpaceBlocked || corridorBlocked;
+            if (blockedByPet)
             {
+                if (persistentInteractionArrival && Time.time >= nextInteractionYieldRequestAt)
+                {
+                    TryRequestInteractionPathYield(blockingPet, originalRoomPoint);
+                    nextInteractionYieldRequestAt = Time.time + 0.65f;
+                }
+
                 if (!personalSpaceBlocked
                     && rerouteAttempts < Mathf.Max(0, blockedPathMaxRerouteAttempts)
                     && Time.time >= nextAllowedCrowdingRepathTime)
@@ -3204,7 +3248,7 @@ public class DogRoomAgent : MonoBehaviour
                 {
                     PauseActiveTravel();
                     pausedForCrowding = true;
-                    string blockerName = blockingDog != null ? blockingDog.name : "unknown";
+                    string blockerName = blockingPet != null ? blockingPet.name : "unknown";
                     LogMovementDebug("TRAVEL_BLOCKED blocker=" + blockerName);
                 }
 
@@ -3237,6 +3281,17 @@ public class DogRoomAgent : MonoBehaviour
 
                 if (blockedWaitElapsed >= effectiveBlockedWaitDuration)
                 {
+                    if (persistentInteractionArrival && blockingPet != null)
+                    {
+                        TryRequestInteractionPathYield(blockingPet, originalRoomPoint);
+                        blockedWaitElapsed = 0f;
+                        rerouteAttempts = 0;
+                        TickMovementDebug("TRAVEL_WAITING_FOR_INTERACTION_BLOCKER");
+                        elapsed += Time.deltaTime;
+                        yield return null;
+                        continue;
+                    }
+
                     LogMovementDebug("TRAVEL_BLOCKED_ABORT");
                     break;
                 }
@@ -3457,9 +3512,9 @@ public class DogRoomAgent : MonoBehaviour
                 continue;
             }
 
-            DogRoomAgent blocker;
+            Transform blocker;
             bool personalSpaceBlocked;
-            if (IsPathBlockedByAnotherDog(reachablePoint, crowdingPadding, false, out blocker, out personalSpaceBlocked))
+            if (IsPathBlockedByAnotherPet(reachablePoint, crowdingPadding, false, out blocker, out personalSpaceBlocked))
             {
                 continue;
             }
@@ -3666,23 +3721,12 @@ public class DogRoomAgent : MonoBehaviour
 
         Vector3 velocity = agent.enabled ? agent.velocity : Vector3.zero;
         velocity.y = 0f;
-        float currentPaceSpeed = Mathf.Max(0.01f, GetAgentSpeed(CurrentPace));
         float currentAnimatorPaceSpeed = GetAnimatorSpeed(CurrentPace) * animatorSpeedScale;
 
         bool hasMoveIntent = HasMoveIntent();
         bool hasWorldMotionAssist = sampledPlanarWorldVelocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold;
         bool shouldDriveLocomotion = hasMoveIntent || hasWorldMotionAssist;
         float targetSpeed = shouldDriveLocomotion ? currentAnimatorPaceSpeed : 0f;
-        if (hasMoveIntent && agent.hasPath && !agent.pathPending && agent.remainingDistance <= arrivalSlowdownDistance)
-        {
-            float slowFactor = Mathf.InverseLerp(destinationReachedDistance, arrivalSlowdownDistance, agent.remainingDistance);
-            targetSpeed *= Mathf.Lerp(0.35f, 1f, slowFactor);
-        }
-        else if (!hasMoveIntent && hasWorldMotionAssist)
-        {
-            float worldSpeed01 = Mathf.Clamp01(sampledPlanarWorldVelocity.magnitude / currentPaceSpeed);
-            targetSpeed *= Mathf.Lerp(0.4f, 1f, worldSpeed01);
-        }
 
         Vector3 effectiveVelocity = velocity.sqrMagnitude > 0.0001f ? velocity : sampledPlanarWorldVelocity;
         float targetDirection = GetMovementTurnBlendDirection(effectiveVelocity, shouldDriveLocomotion);
@@ -3701,13 +3745,6 @@ public class DogRoomAgent : MonoBehaviour
         bool velocityMoving = velocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold
             || hasWorldMotionAssist;
         bool shouldMove = shouldDriveLocomotion || velocityMoving || animatorSpeedValue > 0.08f;
-        float effectiveMotionSpeed = Mathf.Max(velocity.magnitude, sampledPlanarWorldVelocity.magnitude);
-        if (shouldMove && effectiveMotionSpeed > movingVelocityThreshold)
-        {
-            float motion01 = Mathf.Clamp01(effectiveMotionSpeed / currentPaceSpeed);
-            float minimumAnimatedSpeed = Mathf.Lerp(currentAnimatorPaceSpeed * 0.35f, currentAnimatorPaceSpeed, motion01);
-            animatorSpeedValue = Mathf.Max(animatorSpeedValue, minimumAnimatedSpeed);
-        }
 
         if (!hasLoggedShouldMoveState || lastLoggedShouldMoveState != shouldMove)
         {
@@ -4947,23 +4984,40 @@ public class DogRoomAgent : MonoBehaviour
             return cachedNavigationFootprintRadius;
         }
 
+        cachedNavigationFootprintRadius = PawPalPetNavigationAvoidance.EstimateMovementClearanceRadius(
+            transform,
+            agent,
+            0.2f,
+            0.01f,
+            Mathf.Max(0.08f, minimumDogNavigationRadius),
+            Mathf.Max(minimumDogNavigationRadius, maximumDogNavigationRadius));
+        return cachedNavigationFootprintRadius;
+    }
+
+    private float GetInteractionNavigationVisualRadius()
+    {
+        if (cachedInteractionNavigationFootprintRadius > 0f)
+        {
+            return cachedInteractionNavigationFootprintRadius;
+        }
+
         Bounds bounds;
         if (TryGetDogVisualWorldBounds(out bounds))
         {
             float visualRadius = Mathf.Max(bounds.extents.x, bounds.extents.z);
-            cachedNavigationFootprintRadius = Mathf.Clamp(
+            cachedInteractionNavigationFootprintRadius = Mathf.Clamp(
                 visualRadius + Mathf.Max(0f, dogNavigationFootprintPadding),
                 Mathf.Max(0.08f, minimumDogNavigationRadius),
                 Mathf.Max(minimumDogNavigationRadius, maximumDogNavigationRadius));
-            return cachedNavigationFootprintRadius;
+            return cachedInteractionNavigationFootprintRadius;
         }
 
         float fallbackRadius = agent != null ? Mathf.Max(0.08f, agent.radius) : 0.2f;
-        cachedNavigationFootprintRadius = Mathf.Clamp(
+        cachedInteractionNavigationFootprintRadius = Mathf.Clamp(
             fallbackRadius,
             Mathf.Max(0.08f, minimumDogNavigationRadius),
             Mathf.Max(minimumDogNavigationRadius, maximumDogNavigationRadius));
-        return cachedNavigationFootprintRadius;
+        return cachedInteractionNavigationFootprintRadius;
     }
 
     private bool TryGetDogVisualWorldBounds(out Bounds bounds)
@@ -7929,25 +7983,73 @@ public class DogRoomAgent : MonoBehaviour
         return false;
     }
 
+    private bool TryFindInteractionYieldPoint(Vector3 protectedDestination, Transform caller, out Vector3 point)
+    {
+        Vector3 awayFromCaller = transform.position - (caller != null ? caller.position : protectedDestination);
+        awayFromCaller.y = 0f;
+        if (awayFromCaller.sqrMagnitude <= 0.0001f)
+        {
+            awayFromCaller = transform.position - protectedDestination;
+            awayFromCaller.y = 0f;
+        }
+
+        if (awayFromCaller.sqrMagnitude <= 0.0001f)
+        {
+            awayFromCaller = transform.right;
+            awayFromCaller.y = 0f;
+        }
+
+        if (awayFromCaller.sqrMagnitude <= 0.0001f)
+        {
+            awayFromCaller = Vector3.right;
+        }
+
+        awayFromCaller.Normalize();
+        Vector3 side = Vector3.Cross(Vector3.up, awayFromCaller);
+        if (side.sqrMagnitude <= 0.0001f)
+        {
+            side = Vector3.forward;
+        }
+
+        side.Normalize();
+        float baseDistance = Mathf.Max(0.35f, GetNavigationFootprintRadius() + destinationReservationPadding + 0.2f);
+        float[] forwardMultipliers = { 1f, 1.45f, 2f, 2.7f };
+        float[] sideMultipliers = { 0f, 0.85f, -0.85f, 1.45f, -1.45f };
+
+        for (int distanceIndex = 0; distanceIndex < forwardMultipliers.Length; distanceIndex++)
+        {
+            for (int sideIndex = 0; sideIndex < sideMultipliers.Length; sideIndex++)
+            {
+                Vector3 candidate = transform.position
+                    + awayFromCaller * (baseDistance * forwardMultipliers[distanceIndex])
+                    + side * (baseDistance * sideMultipliers[sideIndex]);
+                candidate = ClampToRoomBounds(candidate);
+                if (!TryGetReachableRoomPoint(candidate, sampleRadius, out point)
+                    || !IsPointComfortable(point, destinationReservationPadding, true))
+                {
+                    continue;
+                }
+
+                if (PawPalPetNavigationAvoidance.DistanceToPlanarSegment(point, caller != null ? caller.position : transform.position, protectedDestination)
+                    <= GetNavigationFootprintRadius() + destinationReservationPadding)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        return TryFindNearbyComfortablePoint(transform.position + awayFromCaller * baseDistance, out point);
+    }
+
     private bool IsPointComfortable(Vector3 point, float radius, bool includeReservations)
     {
         float selfRadius = GetNavigationFootprintRadius();
         float extraPadding = Mathf.Max(0f, radius);
-        for (int i = 0; i < ActiveAgents.Count; i++)
+        if (!PawPalPetNavigationAvoidance.IsPointComfortable(transform, point, selfRadius, extraPadding, true))
         {
-            DogRoomAgent other = ActiveAgents[i];
-            if (other == null || other == this)
-            {
-                continue;
-            }
-
-            Vector3 delta = other.transform.position - point;
-            delta.y = 0f;
-            float requiredDistance = selfRadius + other.GetNavigationFootprintRadius() + extraPadding;
-            if (delta.sqrMagnitude < requiredDistance * requiredDistance)
-            {
-                return false;
-            }
+            return false;
         }
 
         if (!includeReservations)
@@ -7976,88 +8078,50 @@ public class DogRoomAgent : MonoBehaviour
 
     private bool IsCrowdedByAnotherDog(float radius)
     {
-        DogRoomAgent blocker;
-        return IsCrowdedByAnotherDog(radius, out blocker);
+        Transform blocker;
+        return IsCrowdedByAnotherPet(radius, out blocker);
     }
 
-    private bool IsCrowdedByAnotherDog(float radius, out DogRoomAgent blocker)
+    private bool IsCrowdedByAnotherPet(float radius, out Transform blocker)
     {
-        blocker = null;
         float selfRadius = GetNavigationFootprintRadius();
         float extraPadding = Mathf.Max(0f, radius);
-        for (int i = 0; i < ActiveAgents.Count; i++)
-        {
-            DogRoomAgent other = ActiveAgents[i];
-            if (other == null || other == this)
-            {
-                continue;
-            }
-
-            Vector3 delta = other.transform.position - transform.position;
-            delta.y = 0f;
-            float requiredDistance = selfRadius + other.GetNavigationFootprintRadius() + extraPadding;
-            if (delta.sqrMagnitude < requiredDistance * requiredDistance)
-            {
-                blocker = other;
-                return true;
-            }
-        }
-
-        return false;
+        return PawPalPetNavigationAvoidance.TryFindPointBlocker(transform, transform.position, selfRadius, extraPadding, true, out blocker);
     }
 
-    private bool IsPathBlockedByAnotherDog(Vector3 destination, float radius, bool includeSteeringTarget, out DogRoomAgent blocker, out bool personalSpaceBlocked)
+    private bool IsPathBlockedByAnotherPet(Vector3 destination, float radius, bool includeSteeringTarget, out Transform blocker, out bool personalSpaceBlocked)
     {
-        personalSpaceBlocked = IsCrowdedByAnotherDog(radius, out blocker);
-        if (personalSpaceBlocked)
-        {
-            return true;
-        }
-
-        blocker = null;
-        Vector3 start = transform.position;
-        start.y = 0f;
-        Vector3 steeringTarget = destination;
-        steeringTarget.y = 0f;
-        if (includeSteeringTarget && agent != null && agent.enabled && agent.isOnNavMesh && agent.hasPath)
-        {
-            steeringTarget = agent.steeringTarget;
-            steeringTarget.y = 0f;
-            if (GetPlanarDistance(start, steeringTarget) <= 0.05f)
-            {
-                steeringTarget = destination;
-                steeringTarget.y = 0f;
-            }
-        }
-
-        Vector3 goal = destination;
-        goal.y = 0f;
         float selfRadius = GetNavigationFootprintRadius();
         float extraPadding = Mathf.Max(0f, radius);
-        float proactiveStopBuffer = Mathf.Max(0.01f, proactiveCrowdingStopPadding + extraPadding + blockedPathMinimumProgressDelta);
-        for (int i = 0; i < ActiveAgents.Count; i++)
-        {
-            DogRoomAgent other = ActiveAgents[i];
-            if (other == null || other == this)
-            {
-                continue;
-            }
+        return PawPalPetNavigationAvoidance.IsPathBlocked(
+            transform,
+            agent,
+            destination,
+            selfRadius,
+            extraPadding,
+            includeSteeringTarget,
+            true,
+            proactiveCrowdingStopPadding,
+            blockedPathMinimumProgressDelta,
+            out blocker,
+            out personalSpaceBlocked);
+    }
 
-            Vector3 otherPosition = other.transform.position;
-            otherPosition.y = 0f;
-            float requiredDistance = selfRadius + other.GetNavigationFootprintRadius() + extraPadding;
-            float corridorDistanceThreshold = requiredDistance + proactiveStopBuffer;
-            bool blocksSteeringSegment = includeSteeringTarget
-                && DistanceToPlanarSegment(otherPosition, start, steeringTarget) <= corridorDistanceThreshold;
-            bool blocksGoalSegment = DistanceToPlanarSegment(otherPosition, start, goal) <= corridorDistanceThreshold;
-            if (blocksSteeringSegment || blocksGoalSegment)
-            {
-                blocker = other;
-                return true;
-            }
+    private bool TryRequestInteractionPathYield(Transform blocker, Vector3 protectedDestination)
+    {
+        if (blocker == null)
+        {
+            return false;
         }
 
-        return false;
+        DogRoomAgent dog = blocker.GetComponentInParent<DogRoomAgent>();
+        if (dog != null && dog != this)
+        {
+            return dog.TryYieldForPlayerInteractionPath(protectedDestination, transform);
+        }
+
+        PawPalCatRoomAgent cat = blocker.GetComponentInParent<PawPalCatRoomAgent>();
+        return cat != null && cat.TryYieldForPlayerInteractionPath(protectedDestination, transform);
     }
 
     private bool TrySampleRoomPosition(Vector3 candidate, float radius, out NavMeshHit hit)

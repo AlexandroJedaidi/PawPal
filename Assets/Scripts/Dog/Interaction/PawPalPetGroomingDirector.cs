@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 #if UNITY_EDITOR
@@ -82,6 +83,8 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     private Image[] rewardBurstImages;
     private RectTransform inputBlockerRoot;
     private Image inputBlocker;
+    private RectTransform countdownRoot;
+    private TextMeshProUGUI countdownLabel;
     private bool brushHeld;
     private bool brushingActive;
     private float brushingElapsed;
@@ -170,6 +173,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
     {
         bool completed = false;
         DogCycleCamera resolvedDogCamera = ResolveDogCamera();
+        int catCameraFocusId = 0;
 
         try
         {
@@ -196,14 +200,16 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             }
             else if (!pet.IsDog)
             {
-                FocusCatInteractionCamera(pet);
+                catCameraFocusId = BeginCatInteractionCameraFocus(pet, resolvedDogCamera);
             }
 
             SetShellChromeHidden(true);
             ShowInputBlocker();
             EnsureRewardBurstOverlay();
+            ShowCountdownTimer();
 
             brushingElapsed = 0f;
+            UpdateCountdownTimer();
             nextBurstAt = 0f;
             brushHeld = false;
             brushingActive = false;
@@ -238,6 +244,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
                 }
 
                 UpdateScratchAudio();
+                UpdateCountdownTimer();
                 RefreshCatCameraLookIfNeeded(pet);
                 yield return null;
             }
@@ -262,6 +269,17 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
                 resolvedDogCamera.SetDogInteractionSidePanBias(0f);
                 resolvedDogCamera.ExitDogInteractionMode();
                 dogInteractionCameraActive = false;
+            }
+
+            if (catCameraFocusId != 0)
+            {
+                DogCycleCamera releaseCamera = resolvedDogCamera != null ? resolvedDogCamera : ResolveDogCamera();
+                if (releaseCamera != null)
+                {
+                    releaseCamera.EndFocus(catCameraFocusId);
+                }
+
+                catCameraFocusId = 0;
             }
 
             SetShellChromeHidden(false);
@@ -643,47 +661,43 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         return Mathf.Max(0f, target.transform.position.y - bounds.min.y);
     }
 
-    private void FocusCatInteractionCamera(PawPalRoomPetHandle pet)
+    private int BeginCatInteractionCameraFocus(PawPalRoomPetHandle pet, DogCycleCamera resolvedDogCamera)
     {
         if (pet == null || !pet.IsValid)
         {
-            return;
+            return 0;
         }
 
-        Camera mainCamera = Camera.main;
-        if (mainCamera == null)
+        DogCycleCamera runtimeDogCamera = resolvedDogCamera;
+        if (runtimeDogCamera == null)
         {
-            return;
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
+            }
         }
 
-        DogCycleCamera runtimeDogCamera = mainCamera.GetComponent<DogCycleCamera>();
-        if (runtimeDogCamera != null)
+        if (runtimeDogCamera == null)
         {
-            runtimeDogCamera.enabled = false;
+            return 0;
         }
 
-        PawPalPetFollowCamera followCamera = mainCamera.GetComponent<PawPalPetFollowCamera>();
-        if (followCamera == null)
+        runtimeDogCamera.enabled = true;
+
+        PawPalPetFollowCamera followCamera = runtimeDogCamera.GetComponent<PawPalPetFollowCamera>();
+        if (followCamera != null)
         {
-            followCamera = mainCamera.gameObject.AddComponent<PawPalPetFollowCamera>();
+            followCamera.enabled = false;
         }
 
-        followCamera.enabled = true;
-        followCamera.Focus(pet.FocusTransform != null ? pet.FocusTransform : pet.RootTransform, pet.HomeCameraOffset, true);
+        Transform focusTarget = pet.FocusTransform != null ? pet.FocusTransform : pet.RootTransform;
+        return runtimeDogCamera.BeginFocus(focusTarget, DogCameraFocusPriority.NeedInteraction, pet.HomeCameraOffset);
     }
 
     private void RefreshCatCameraLookIfNeeded(PawPalRoomPetHandle pet)
     {
-        if (pet == null || pet.IsDog || pet.CatAgent == null)
-        {
-            return;
-        }
-
-        Camera camera = ResolveRoomCamera();
-        if (camera != null)
-        {
-            pet.CatAgent.RequestInteractionCameraLook(camera.transform, 0.45f);
-        }
+        // Keep cat grooming poses stable; DogCycleCamera already frames the interaction.
     }
 
     private Camera ResolveRoomCamera()
@@ -1196,6 +1210,62 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         }
     }
 
+    private void ShowCountdownTimer()
+    {
+        Canvas hostCanvas = ResolveOverlayCanvas();
+        if (hostCanvas == null)
+        {
+            return;
+        }
+
+        if (countdownRoot == null)
+        {
+            countdownRoot = UiFactory.CreateRect("GroomingCountdown", hostCanvas.transform);
+            countdownRoot.anchorMin = new Vector2(0.5f, 0f);
+            countdownRoot.anchorMax = new Vector2(0.5f, 0f);
+            countdownRoot.pivot = new Vector2(0.5f, 0f);
+            countdownRoot.sizeDelta = new Vector2(96f, 42f);
+            countdownRoot.anchoredPosition = new Vector2(0f, 92f);
+
+            Image background = countdownRoot.gameObject.AddComponent<Image>();
+            background.sprite = UiTheme.RoundedTenSprite;
+            background.type = Image.Type.Sliced;
+            background.color = new Color(UiTheme.NavBackgroundCream.r, UiTheme.NavBackgroundCream.g, UiTheme.NavBackgroundCream.b, 0.94f);
+            background.raycastTarget = false;
+
+            Shadow shadow = countdownRoot.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0.45f, 0.27f, 0.22f, 0.18f);
+            shadow.effectDistance = new Vector2(0f, -2f);
+            shadow.useGraphicAlpha = true;
+
+            countdownLabel = UiFactory.CreateLabel("Label", countdownRoot, string.Empty, 18, UiTheme.NavBrandDark, FontStyles.Bold, TextAlignmentOptions.Center);
+            countdownLabel.font = UiTheme.NavExtraBoldFont;
+            countdownLabel.raycastTarget = false;
+            UiFactory.Stretch(countdownLabel.rectTransform, 4f, 4f, 4f, 4f);
+        }
+
+        countdownRoot.gameObject.SetActive(true);
+    }
+
+    private void UpdateCountdownTimer()
+    {
+        if (countdownLabel == null)
+        {
+            return;
+        }
+
+        float remaining = Mathf.Max(0f, Mathf.Max(0.1f, targetBrushingSeconds) - brushingElapsed);
+        countdownLabel.text = Mathf.CeilToInt(remaining).ToString("0") + "s";
+    }
+
+    private void HideCountdownTimer()
+    {
+        if (countdownRoot != null)
+        {
+            countdownRoot.gameObject.SetActive(false);
+        }
+    }
+
     private Canvas ResolveOverlayCanvas()
     {
         AppShellController shell = FindFirstObjectByType<AppShellController>(FindObjectsInactive.Include);
@@ -1250,6 +1320,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
         }
 
         HideInputBlocker();
+        HideCountdownTimer();
         HideRewardBurst();
     }
 

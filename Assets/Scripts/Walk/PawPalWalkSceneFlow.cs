@@ -269,6 +269,7 @@ public sealed class PawPalWalkSceneBootstrap : MonoBehaviour
                 yield break;
             }
 
+            runtime.CancelActiveWalkSession();
             PawPalWalkSceneFlow.SetAppShellVisible(true);
             PawPalWalkSceneFlow.ClearPreparedWalkDog();
             yield break;

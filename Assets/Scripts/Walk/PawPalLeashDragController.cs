@@ -15,6 +15,15 @@ public sealed class PawPalLeashDragController : MonoBehaviour
     private bool dragging;
     private int activeTouchId = -1;
     private Vector3 dragOffset;
+    private Vector3 lastDragPosition;
+    private Vector3 lastDragDelta;
+    private Vector3 lastDragVelocity;
+    private bool hasDragPosition;
+
+    public bool IsDragging => dragging;
+    public Vector3 LastDragPosition => lastDragPosition;
+    public Vector3 LastDragDelta => lastDragDelta;
+    public Vector3 LastDragVelocity => lastDragVelocity;
 
     public void Configure(PawPalLeashRig rig, Transform grabTarget)
     {
@@ -129,6 +138,10 @@ public sealed class PawPalLeashDragController : MonoBehaviour
         leashRig.SetHandleDragActive(true);
         Vector3 worldHit = ray.GetPoint(enter);
         dragOffset = dragRoot.position - worldHit;
+        lastDragPosition = dragRoot.position;
+        lastDragDelta = Vector3.zero;
+        lastDragVelocity = Vector3.zero;
+        hasDragPosition = true;
         UpdateDrag(screenPosition);
     }
 
@@ -145,13 +158,30 @@ public sealed class PawPalLeashDragController : MonoBehaviour
             return;
         }
 
-        leashRig.SetDragRootPosition(ray.GetPoint(enter) + dragOffset);
+        Vector3 newPosition = ray.GetPoint(enter) + dragOffset;
+        if (hasDragPosition)
+        {
+            lastDragDelta = newPosition - lastDragPosition;
+            lastDragVelocity = Time.deltaTime > 0.0001f ? lastDragDelta / Time.deltaTime : Vector3.zero;
+        }
+        else
+        {
+            lastDragDelta = Vector3.zero;
+            lastDragVelocity = Vector3.zero;
+            hasDragPosition = true;
+        }
+
+        lastDragPosition = newPosition;
+        leashRig.SetDragRootPosition(newPosition);
     }
 
     private void EndDrag()
     {
         dragging = false;
         activeTouchId = -1;
+        hasDragPosition = false;
+        lastDragDelta = Vector3.zero;
+        lastDragVelocity = Vector3.zero;
         if (leashRig != null)
         {
             leashRig.SetHandleDragActive(false);

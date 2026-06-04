@@ -281,7 +281,7 @@ public class MapScreenView : AppScreenViewBase
 
         CreateWalkButton(parent, 11f, 699f, delegate
         {
-            TryStartQuickWalk();
+            SetMode(MapMode.Walk);
         });
 
         CreateSocialButton(parent, 326f, 708f, delegate

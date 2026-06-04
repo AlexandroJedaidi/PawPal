@@ -37,14 +37,30 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         SceneManager.sceneLoaded -= HandleSceneLoaded;
     }
 
+    private IEnumerator Start()
+    {
+        yield return null;
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (PawPalIntroSceneFlow.IsHomeScene(activeScene) && !SelectedPetSessionContext.HasPendingSelection)
+        {
+            InitializeHandPlacedHomeCats();
+        }
+    }
+
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        if (!PawPalIntroSceneFlow.IsHomeScene(scene) || !SelectedPetSessionContext.HasPendingSelection)
+        if (!PawPalIntroSceneFlow.IsHomeScene(scene))
         {
             return;
         }
 
-        StartCoroutine(SpawnAfterSceneReady());
+        if (SelectedPetSessionContext.HasPendingSelection)
+        {
+            StartCoroutine(SpawnAfterSceneReady());
+            return;
+        }
+
+        StartCoroutine(InitializeHandPlacedHomeCatsAfterSceneReady());
     }
 
     private IEnumerator SpawnAfterSceneReady()
@@ -75,7 +91,14 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
             SpawnDog(selection, defaultDogAnchor, runtime);
         }
 
+        InitializeHandPlacedHomeCats();
         PawPalSceneTransitionController.MarkActiveTransitionReady("Selected intro pet finished spawning in the home scene.");
+    }
+
+    private IEnumerator InitializeHandPlacedHomeCatsAfterSceneReady()
+    {
+        yield return null;
+        InitializeHandPlacedHomeCats();
     }
 
     private static SpawnAnchor DisableDefaultSceneDogs()
@@ -176,21 +199,24 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
             navMeshAgent = petObject.AddComponent<NavMeshAgent>();
         }
 
-        DogRoomAgent roomAgent = petObject.GetComponent<DogRoomAgent>();
-        if (roomAgent == null)
+        DogRoomAgent legacyDogAgent = petObject.GetComponent<DogRoomAgent>();
+        if (legacyDogAgent != null)
         {
-            roomAgent = petObject.AddComponent<DogRoomAgent>();
+            UnityEngine.Object.Destroy(legacyDogAgent);
         }
 
-        PawPalCatRoomAgent legacyCatAgent = petObject.GetComponent<PawPalCatRoomAgent>();
-        if (legacyCatAgent != null)
+        PawPalCatRoomAgent catAgent = petObject.GetComponent<PawPalCatRoomAgent>();
+        if (catAgent == null)
         {
-            UnityEngine.Object.Destroy(legacyCatAgent);
+            catAgent = petObject.GetComponentInChildren<PawPalCatRoomAgent>(true);
         }
 
-        roomAgent.SetRuntimeDogId(selection.RuntimePetId);
-        roomAgent.ApplySelectedPetPresentation(selection);
-        roomAgent.ConfigureSelectedPetRuntime(selection);
+        if (catAgent == null)
+        {
+            catAgent = petObject.AddComponent<PawPalCatRoomAgent>();
+        }
+
+        catAgent.Initialize(selection);
         if (runtime != null)
         {
             runtime.RegisterTemporaryIntroPet(selection.BuildTemporaryDogState(), selection.Species, true);
@@ -214,6 +240,154 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
 
         PawPalIntroSceneFlow.SetAppShellVisible(true);
         DogCycleCamera.TryFocusRuntimeActiveDogFromSelection();
+    }
+
+    private static void InitializeHandPlacedHomeCats()
+    {
+        IntroPetDefinition[] definitions = Resources.LoadAll<IntroPetDefinition>("PawPal/IntroPets/Definitions");
+        if (definitions == null || definitions.Length == 0)
+        {
+            return;
+        }
+
+        Animator[] animators = FindObjectsByType<Animator>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        int initializedCount = 0;
+        for (int i = 0; i < animators.Length; i++)
+        {
+            Animator animator = animators[i];
+            if (animator == null)
+            {
+                continue;
+            }
+
+            GameObject petObject = animator.gameObject;
+            PawPalCatRoomAgent existingCatAgent = petObject.GetComponent<PawPalCatRoomAgent>();
+            if (existingCatAgent != null && !string.IsNullOrWhiteSpace(existingCatAgent.RuntimePetId))
+            {
+                continue;
+            }
+
+            PawPalCatRoomAgent parentCatAgent = petObject.GetComponentInParent<PawPalCatRoomAgent>();
+            if (parentCatAgent != null && parentCatAgent != existingCatAgent)
+            {
+                continue;
+            }
+
+            IntroPetDefinition definition = ResolveHandPlacedCatDefinition(petObject, animator, definitions);
+            if (definition == null)
+            {
+                continue;
+            }
+
+            NavMeshAgent navMeshAgent = petObject.GetComponent<NavMeshAgent>();
+            if (navMeshAgent == null)
+            {
+                navMeshAgent = petObject.AddComponent<NavMeshAgent>();
+            }
+
+            navMeshAgent.radius = Mathf.Max(0.18f, navMeshAgent.radius);
+            navMeshAgent.height = Mathf.Max(0.45f, navMeshAgent.height);
+            navMeshAgent.speed = Mathf.Max(0.55f, navMeshAgent.speed);
+            navMeshAgent.angularSpeed = Mathf.Max(360f, navMeshAgent.angularSpeed);
+            navMeshAgent.acceleration = Mathf.Max(5f, navMeshAgent.acceleration);
+
+            DogRoomAgent legacyDogAgent = petObject.GetComponent<DogRoomAgent>();
+            if (legacyDogAgent != null)
+            {
+                Destroy(legacyDogAgent);
+            }
+
+            PawPalCatRoomAgent catAgent = existingCatAgent != null ? existingCatAgent : petObject.AddComponent<PawPalCatRoomAgent>();
+            catAgent.Initialize(BuildHandPlacedCatSession(definition, petObject.name, initializedCount));
+            initializedCount++;
+        }
+    }
+
+    private static SelectedPetSessionData BuildHandPlacedCatSession(IntroPetDefinition definition, string objectName, int index)
+    {
+        string safeName = !string.IsNullOrWhiteSpace(objectName) ? objectName : (definition != null ? definition.DisplayName : "Cat");
+        return new SelectedPetSessionData
+        {
+            Definition = definition,
+            FurVariant = null,
+            FurIndex = 0,
+            Gender = index % 2 == 0 ? PawPalDogGender.Female : PawPalDogGender.Male,
+            Personality = PawPalDogPersonality.Curious,
+            PetName = safeName,
+            RuntimePetId = "placed_cat_" + NormalizeIdentity(safeName) + "_" + index.ToString()
+        };
+    }
+
+    private static IntroPetDefinition ResolveHandPlacedCatDefinition(GameObject petObject, Animator animator, IntroPetDefinition[] definitions)
+    {
+        string candidateIdentity = NormalizeIdentity(
+            (petObject != null ? petObject.name : string.Empty)
+            + " "
+            + (animator != null ? animator.name : string.Empty));
+        if (string.IsNullOrEmpty(candidateIdentity))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < definitions.Length; i++)
+        {
+            IntroPetDefinition definition = definitions[i];
+            if (definition == null || definition.Species != IntroPetSpecies.Cat)
+            {
+                continue;
+            }
+
+            if (IdentityMatchesDefinition(candidateIdentity, definition))
+            {
+                return definition;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IdentityMatchesDefinition(string candidateIdentity, IntroPetDefinition definition)
+    {
+        if (definition == null)
+        {
+            return false;
+        }
+
+        string petId = NormalizeIdentity(definition.PetId);
+        string displayName = NormalizeIdentity(definition.DisplayName);
+        string breedName = NormalizeIdentity(definition.BreedName);
+        return MatchesIdentity(candidateIdentity, petId)
+            || MatchesIdentity(candidateIdentity, displayName)
+            || MatchesIdentity(candidateIdentity, breedName)
+            || (candidateIdentity.Contains("catsimple") && string.Equals(petId, "catsimple", System.StringComparison.Ordinal))
+            || (candidateIdentity.Contains("kitten") && petId.Contains("kitten"))
+            || (candidateIdentity.Contains("catstray") && petId.Contains("stray"))
+            || (candidateIdentity.Contains("catfat") && petId.Contains("chubby"));
+    }
+
+    private static bool MatchesIdentity(string candidateIdentity, string value)
+    {
+        return !string.IsNullOrEmpty(value) && candidateIdentity.Contains(value);
+    }
+
+    private static string NormalizeIdentity(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char character = value[i];
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static GameObject InstantiateSelectedPet(SelectedPetSessionData selection, SpawnAnchor defaultDogAnchor, string namePrefix)
@@ -253,6 +427,10 @@ public sealed class HomeSelectedPetSpawner : MonoBehaviour
         }
 
         petObject.name = namePrefix + "_" + selection.SafeName;
+        if (selection.FurVariant != null && selection.FurVariant.ReplacementMaterial != null)
+        {
+            PetVariantApplier.ApplyMaterial(petObject, selection.FurVariant);
+        }
 
         if (selection.Definition.HomeScale != Vector3.zero)
         {

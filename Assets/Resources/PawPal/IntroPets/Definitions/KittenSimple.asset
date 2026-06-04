@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 380b8f47be70424ea1b61f7d0c7aa74b, type: 3}
+  m_Name: KittenSimple
+  m_EditorClassIdentifier: 
+  PetId: kitten_simple
+  DisplayName: Small Kitten
+  Species: 1
+  BreedName: Small Kitten
+  Description: Small, playful, and quick to pounce, this kitten uses the cat locomotion set while keeping its own model and scale.
+  BasePrefab: {fileID: 100100000, guid: 004c38dfafc8a4e4d9386ecef91cc7f1, type: 3}
+  IntroScale: {x: 0.68, y: 0.68, z: 0.68}
+  HomeScale: {x: 0.68, y: 0.68, z: 0.68}
+  IntroCameraOffset: {x: 0, y: 0.68, z: -1.95}
+  HomeCameraOffset: {x: 0, y: 0.62, z: -2.05}
+  RoamRadius: 2.45
+  AnimationSet: {fileID: 11400000, guid: 6cab22fe24c84c44827b8b858fae523c, type: 2}
+  FurVariants: []

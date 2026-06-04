@@ -29,6 +29,7 @@ public sealed class PawPalPetAnimationEntry
         PawPalPetLifeStage lifeStage,
         PawPalPetSizeClass sizeClass,
         PawPalPetVocalClass vocalClass,
+        string modelAssetPath,
         string importedAnimationAssetPath,
         string importedClipPrefix,
         string runtimeControllerAssetPath,
@@ -40,6 +41,7 @@ public sealed class PawPalPetAnimationEntry
         LifeStage = lifeStage;
         SizeClass = sizeClass;
         VocalClass = vocalClass;
+        ModelAssetPath = modelAssetPath ?? string.Empty;
         ImportedAnimationAssetPath = importedAnimationAssetPath ?? string.Empty;
         ImportedClipPrefix = importedClipPrefix ?? string.Empty;
         RuntimeControllerAssetPath = runtimeControllerAssetPath ?? string.Empty;
@@ -52,6 +54,7 @@ public sealed class PawPalPetAnimationEntry
     public PawPalPetLifeStage LifeStage { get; }
     public PawPalPetSizeClass SizeClass { get; }
     public PawPalPetVocalClass VocalClass { get; }
+    public string ModelAssetPath { get; }
     public string ImportedAnimationAssetPath { get; }
     public string ImportedClipPrefix { get; }
     public string RuntimeControllerAssetPath { get; }
@@ -61,6 +64,7 @@ public sealed class PawPalPetAnimationEntry
 
 public static class PawPalPetAnimationRegistry
 {
+    public const string CatBaseControllerAssetPath = "Assets/Animations/Cat_BaseController.controller";
     public const string DogBaseControllerAssetPath = "Assets/Animations/Dog_BaseController.controller";
     public const string ImportedLabradorPuppyPettingAssetPath = "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_petting.fbx";
 
@@ -72,6 +76,7 @@ public static class PawPalPetAnimationRegistry
             PawPalPetLifeStage.Puppy,
             PawPalPetSizeClass.Small,
             PawPalPetVocalClass.BarkLight,
+            "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Puppy_Labrador.fbx",
             "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx",
             "Arm_Labrador",
             DogBaseControllerAssetPath,
@@ -85,9 +90,10 @@ public static class PawPalPetAnimationRegistry
             PawPalPetLifeStage.Kitten,
             PawPalPetSizeClass.Small,
             PawPalPetVocalClass.Cat,
-            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_RM.fbx",
-            "Arm_Cat",
-            DogBaseControllerAssetPath,
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Kittens/KittenSimple/Kitten_Simple/FBX/Anim/KittenSimple_anim_IP.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Kittens/KittenSimple/Kitten_Simple/FBX/Anim/KittenSimple_anim_RM.fbx",
+            "Arm_Kitten",
+            CatBaseControllerAssetPath,
             string.Empty,
             "kittensimple",
             "kitten_simple"),
@@ -97,12 +103,24 @@ public static class PawPalPetAnimationRegistry
             PawPalPetLifeStage.Adult,
             PawPalPetSizeClass.Medium,
             PawPalPetVocalClass.Cat,
-            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_RM.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_IP.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Simple/Cat/FBX/Anim/Cat_Simple_anim_IP.fbx",
             "Arm_Cat",
-            DogBaseControllerAssetPath,
+            CatBaseControllerAssetPath,
             string.Empty,
             "catsimple",
-            "cat_simple",
+            "cat_simple"),
+        new PawPalPetAnimationEntry(
+            "cat_stray",
+            IntroPetSpecies.Cat,
+            PawPalPetLifeStage.Adult,
+            PawPalPetSizeClass.Medium,
+            PawPalPetVocalClass.Cat,
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Stray/CatStray/FBX/Anim/CatStray_anim_IP.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Stray/CatStray/FBX/Anim/CatStray_anim_RM.fbx",
+            "Arm_Cat",
+            CatBaseControllerAssetPath,
+            string.Empty,
             "catstray",
             "cat_stray",
             "straycat"),
@@ -112,33 +130,34 @@ public static class PawPalPetAnimationRegistry
             PawPalPetLifeStage.Adult,
             PawPalPetSizeClass.Medium,
             PawPalPetVocalClass.Cat,
-            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Fat/CatFat/FBX/Anim/CatFat_anim_RM.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Fat/CatFat/FBX/Anim/CatFat_anim_IP.fbx",
+            "Assets/3rd Party Packs/Dogs (Red Deer)/CatFamily/Cats/Cat_Fat/CatFat/FBX/Anim/CatFat_anim_IP.fbx",
             "Arm_Cat",
-            DogBaseControllerAssetPath,
+            CatBaseControllerAssetPath,
             string.Empty,
             "catchubby",
             "cat_chubby",
             "catfat",
             "chubbycat"),
-        new PawPalPetAnimationEntry("beagle", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Beagle/Dog/FBX/Anim/Beagle_anim_IP.fbx", "Arm_Beagle", DogBaseControllerAssetPath, string.Empty, "beagle"),
-        new PawPalPetAnimationEntry("border_collie", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Border_Collie/Dog/FBX/Anim/BorderCollie_anim_IP.fbx", "Arm_Collie", DogBaseControllerAssetPath, string.Empty, "bordercollie", "border_collie", "collie"),
-        new PawPalPetAnimationEntry("boxer", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Boxer/Dog/FBX/Anim/Dog_Boxer_anim_IP.fbx", "Arm_Boxer", DogBaseControllerAssetPath, string.Empty, "boxer"),
-        new PawPalPetAnimationEntry("bullterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/BullTerrier/Dog/FBX/Anim/BullTerrier_anim_IP.fbx", "Arm_BullTerrier", DogBaseControllerAssetPath, string.Empty, "bullterrier", "bull_terrier"),
-        new PawPalPetAnimationEntry("corgi", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Corgi/Dog/FBX/Anim/Corgi_anim_IP.fbx", "Arm_Corgi", DogBaseControllerAssetPath, string.Empty, "corgi"),
-        new PawPalPetAnimationEntry("dalmatian", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Dalmatian/Dog/FBX/Anim/Dalmatian_anim_IP.fbx", "Arm_Dalmatian", DogBaseControllerAssetPath, string.Empty, "dalmatian"),
-        new PawPalPetAnimationEntry("doberman", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Doberman/Dog/FBX/Anim/Doberman_anim_IP.fbx", "Arm_Doberman", DogBaseControllerAssetPath, string.Empty, "doberman"),
-        new PawPalPetAnimationEntry("frenchbulldog", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/FrenchBulldog/Dog/FBX/Anim/FrenchBulldog_anim_IP.fbx", "Arm_FrBulldog", DogBaseControllerAssetPath, string.Empty, "frenchbulldog", "french_bulldog"),
-        new PawPalPetAnimationEntry("goldenretriever", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/GoldenRetriever/Dog/FBX/Anim/Retriever_anim_IP.fbx", "Arm_Retriever", DogBaseControllerAssetPath, string.Empty, "goldenretriever", "golden_retriever", "retriever", "golden"),
-        new PawPalPetAnimationEntry("husky", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Husky/Dog/FBX/Anim/Husky_anim_IP.fbx", "Arm_Husky", DogBaseControllerAssetPath, string.Empty, "husky"),
-        new PawPalPetAnimationEntry("jackrussellterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Small, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/JackRussellTerrier/Dog/FBX/Anim/JRTerrier_anim_IP.fbx", "Arm_JRTerrier", DogBaseControllerAssetPath, string.Empty, "jackrussellterrier", "jack_russell_terrier", "jrterrier"),
-        new PawPalPetAnimationEntry("labrador", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx", "Arm_Labrador", DogBaseControllerAssetPath, string.Empty, "labrador"),
-        new PawPalPetAnimationEntry("pitbull", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pitbull/Dog/FBX/Anim/Pitbull_anim_IP.fbx", "Arm_Pitbull", DogBaseControllerAssetPath, string.Empty, "pitbull", "pit_bull"),
-        new PawPalPetAnimationEntry("pug", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pug/Dog/FBX/Anim/Pug_anim_IP.fbx", "Arm_Pug", DogBaseControllerAssetPath, string.Empty, "pug"),
-        new PawPalPetAnimationEntry("rottweiler", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Rottweiler/Dog/FBX/Anim/Rottweiler_anim_IP.fbx", "Arm_Rottweiler", DogBaseControllerAssetPath, string.Empty, "rottweiler"),
-        new PawPalPetAnimationEntry("shepherd", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Shepherd/Dog/FBX/Anim/Shepherd_anim_IP.fbx", "Arm_Shepherd", DogBaseControllerAssetPath, string.Empty, "shepherd", "germanshepherd", "german_shepherd"),
-        new PawPalPetAnimationEntry("shibainu", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ShibaInu/Dog/FBX/Anim/ShibaInu_anim_IP.fbx", "Arm_Shiba", DogBaseControllerAssetPath, string.Empty, "shibainu", "shiba_inu", "shiba"),
-        new PawPalPetAnimationEntry("spitz", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Spitz/Dog/FBX/Anim/Spitz_anim_IP.fbx", "Arm_Spitz", DogBaseControllerAssetPath, string.Empty, "spitz"),
-        new PawPalPetAnimationEntry("toyterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Small, PawPalPetVocalClass.BarkLight, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ToyTerrier/Dog/FBX/Anim/ToyTerrier_anim_IP.fbx", "Arm_ToyTerrier", DogBaseControllerAssetPath, string.Empty, "toyterrier", "toy_terrier")
+        new PawPalPetAnimationEntry("beagle", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Beagle/Dog/FBX/Anim/Beagle_anim_IP.fbx", "Arm_Beagle", DogBaseControllerAssetPath, string.Empty, "beagle"),
+        new PawPalPetAnimationEntry("border_collie", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Border_Collie/Dog/FBX/Anim/BorderCollie_anim_IP.fbx", "Arm_Collie", DogBaseControllerAssetPath, string.Empty, "bordercollie", "border_collie", "collie"),
+        new PawPalPetAnimationEntry("boxer", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Boxer/Dog/FBX/Anim/Dog_Boxer_anim_IP.fbx", "Arm_Boxer", DogBaseControllerAssetPath, string.Empty, "boxer"),
+        new PawPalPetAnimationEntry("bullterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/BullTerrier/Dog/FBX/Anim/BullTerrier_anim_IP.fbx", "Arm_BullTerrier", DogBaseControllerAssetPath, string.Empty, "bullterrier", "bull_terrier"),
+        new PawPalPetAnimationEntry("corgi", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Corgi/Dog/FBX/Anim/Corgi_anim_IP.fbx", "Arm_Corgi", DogBaseControllerAssetPath, string.Empty, "corgi"),
+        new PawPalPetAnimationEntry("dalmatian", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Dalmatian/Dog/FBX/Anim/Dalmatian_anim_IP.fbx", "Arm_Dalmatian", DogBaseControllerAssetPath, string.Empty, "dalmatian"),
+        new PawPalPetAnimationEntry("doberman", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Doberman/Dog/FBX/Anim/Doberman_anim_IP.fbx", "Arm_Doberman", DogBaseControllerAssetPath, string.Empty, "doberman"),
+        new PawPalPetAnimationEntry("frenchbulldog", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/FrenchBulldog/Dog/FBX/Anim/FrenchBulldog_anim_IP.fbx", "Arm_FrBulldog", DogBaseControllerAssetPath, string.Empty, "frenchbulldog", "french_bulldog"),
+        new PawPalPetAnimationEntry("goldenretriever", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/GoldenRetriever/Dog/FBX/Anim/Retriever_anim_IP.fbx", "Arm_Retriever", DogBaseControllerAssetPath, string.Empty, "goldenretriever", "golden_retriever", "retriever", "golden"),
+        new PawPalPetAnimationEntry("husky", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Husky/Dog/FBX/Anim/Husky_anim_IP.fbx", "Arm_Husky", DogBaseControllerAssetPath, string.Empty, "husky"),
+        new PawPalPetAnimationEntry("jackrussellterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Small, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/JackRussellTerrier/Dog/FBX/Anim/JRTerrier_anim_IP.fbx", "Arm_JRTerrier", DogBaseControllerAssetPath, string.Empty, "jackrussellterrier", "jack_russell_terrier", "jrterrier"),
+        new PawPalPetAnimationEntry("labrador", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Labrador/Dog/FBX/Anim/Labrador_anim_IP.fbx", "Arm_Labrador", DogBaseControllerAssetPath, string.Empty, "labrador"),
+        new PawPalPetAnimationEntry("pitbull", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pitbull/Dog/FBX/Anim/Pitbull_anim_IP.fbx", "Arm_Pitbull", DogBaseControllerAssetPath, string.Empty, "pitbull", "pit_bull"),
+        new PawPalPetAnimationEntry("pug", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Pug/Dog/FBX/Anim/Pug_anim_IP.fbx", "Arm_Pug", DogBaseControllerAssetPath, string.Empty, "pug"),
+        new PawPalPetAnimationEntry("rottweiler", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Rottweiler/Dog/FBX/Anim/Rottweiler_anim_IP.fbx", "Arm_Rottweiler", DogBaseControllerAssetPath, string.Empty, "rottweiler"),
+        new PawPalPetAnimationEntry("shepherd", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Large, PawPalPetVocalClass.BarkDark, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Shepherd/Dog/FBX/Anim/Shepherd_anim_IP.fbx", "Arm_Shepherd", DogBaseControllerAssetPath, string.Empty, "shepherd", "germanshepherd", "german_shepherd"),
+        new PawPalPetAnimationEntry("shibainu", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ShibaInu/Dog/FBX/Anim/ShibaInu_anim_IP.fbx", "Arm_Shiba", DogBaseControllerAssetPath, string.Empty, "shibainu", "shiba_inu", "shiba"),
+        new PawPalPetAnimationEntry("spitz", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Medium, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/Spitz/Dog/FBX/Anim/Spitz_anim_IP.fbx", "Arm_Spitz", DogBaseControllerAssetPath, string.Empty, "spitz"),
+        new PawPalPetAnimationEntry("toyterrier", IntroPetSpecies.Dog, PawPalPetLifeStage.Adult, PawPalPetSizeClass.Small, PawPalPetVocalClass.BarkLight, string.Empty, "Assets/3rd Party Packs/Dogs (Red Deer)/Dogs/ToyTerrier/Dog/FBX/Anim/ToyTerrier_anim_IP.fbx", "Arm_ToyTerrier", DogBaseControllerAssetPath, string.Empty, "toyterrier", "toy_terrier")
     };
 
 #if UNITY_EDITOR
@@ -307,6 +326,12 @@ public static class PawPalPetAnimationRegistry
     }
 
 #if UNITY_EDITOR
+    public static void ClearEditorCaches()
+    {
+        ClipCache.Clear();
+        OverrideControllerCache.Clear();
+    }
+
     public static RuntimeAnimatorController ResolveEditorOverrideController(RuntimeAnimatorController baseController, PawPalPetAnimationEntry entry)
     {
         if (baseController == null || entry == null || string.IsNullOrWhiteSpace(entry.ImportedAnimationAssetPath))
@@ -414,6 +439,28 @@ public static class PawPalPetAnimationRegistry
             ? entry.RuntimeControllerAssetPath
             : DogBaseControllerAssetPath;
         return AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(path) != null;
+    }
+
+    public static Avatar GetEditorModelAvatar(PawPalPetAnimationEntry entry)
+    {
+        return TryLoadAvatarAtPath(entry != null ? entry.ModelAssetPath : null);
+    }
+
+    public static Avatar GetPreferredEditorAvatar(PawPalPetAnimationEntry entry)
+    {
+        Avatar avatar = GetEditorModelAvatar(entry);
+        if (avatar != null)
+        {
+            return avatar;
+        }
+
+        avatar = TryLoadAvatarAtPath(entry != null ? entry.ImportedAnimationAssetPath : null);
+        if (avatar != null)
+        {
+            return avatar;
+        }
+
+        return null;
     }
 
     public static bool HasRequiredGameplayClips(PawPalPetAnimationEntry entry, out string missingClipSuffix)
@@ -585,6 +632,31 @@ public static class PawPalPetAnimationRegistry
         }
 
         return false;
+    }
+
+    private static Avatar TryLoadAvatarAtPath(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return null;
+        }
+
+        UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        if (assets == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < assets.Length; i++)
+        {
+            Avatar avatar = assets[i] as Avatar;
+            if (avatar != null)
+            {
+                return avatar;
+            }
+        }
+
+        return null;
     }
 #endif
 }

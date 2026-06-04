@@ -163,6 +163,12 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
         activePet = pet;
         pet.PauseForSocial(false);
         yield return FaceCameraAndRequestAttention(pet, camera, CameraAttentionDuration);
+        if (!pet.IsDog)
+        {
+            yield return StartCoroutine(pet.PlaySocialVocal(WhistleBarkDuration));
+            yield break;
+        }
+
         yield return new WaitForSeconds(WhistleHoldDuration);
     }
 
@@ -236,6 +242,10 @@ public sealed class PawPalPhotoDogCommandDirector : MonoBehaviour
         }
 
         RequestCameraAttention(pet, attentionDuration);
+        if (!pet.IsDog && pet.CatAgent != null && camera != null)
+        {
+            pet.CatAgent.RequestInteractionCameraLook(camera.transform, attentionDuration);
+        }
     }
 
     private static void RequestCameraAttention(PawPalRoomPetHandle pet, float duration)

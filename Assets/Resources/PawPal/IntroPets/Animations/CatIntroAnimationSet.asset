@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1623bb6896e34bf28fd9803fd3b45acc, type: 3}
   m_Name: CatIntroAnimationSet
   m_EditorClassIdentifier: 
-  RuntimeController: {fileID: 0}
+  RuntimeController: {fileID: 9100000, guid: fa4fdf1e1319472291564f3bfc91c3b3, type: 2}
   IdleClip: {fileID: 0}
   WalkClip: {fileID: 0}
   SelectedClip: {fileID: 0}
-  IdleStateName: Idle
-  WalkStateName: Walk
-  SelectedStateName: 
+  IdleStateName: Idle1
+  WalkStateName: CatSimple_Walk_F_RM
+  SelectedStateName: Idle2
   MoveBoolParameter: Move
   SpeedFloatParameter: Speed
   IdleIndexParameter: 
-  SelectedIdleIndex: 0
+  SelectedIdleIndex: 1
   SelectedTriggerParameter: 

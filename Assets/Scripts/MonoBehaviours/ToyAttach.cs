@@ -343,16 +343,75 @@ public class ToyAttach : MonoBehaviour
             return;
         }
 
+        mouthSocket = FindAnatomicalCarrySocket();
+    }
+
+    private Transform FindAnatomicalCarrySocket()
+    {
         Transform[] children = GetComponentsInChildren<Transform>(true);
-        for (int i = 0; i < children.Length; i++)
+        string[] exactNames =
         {
-            string lowerName = children[i].name.ToLowerInvariant();
-            if (lowerName == "mouth")
+            "mouth",
+            "mouth.r",
+            "mouth.l",
+            "nose"
+        };
+
+        for (int nameIndex = 0; nameIndex < exactNames.Length; nameIndex++)
+        {
+            for (int i = 0; i < children.Length; i++)
             {
-                mouthSocket = children[i];
-                return;
+                Transform child = children[i];
+                if (child != null && child.name.ToLowerInvariant() == exactNames[nameIndex])
+                {
+                    return child;
+                }
             }
         }
+
+        string[] partialNames =
+        {
+            "mouth",
+            "muzzle",
+            "snout",
+            "jaw",
+            "nose"
+        };
+
+        for (int nameIndex = 0; nameIndex < partialNames.Length; nameIndex++)
+        {
+            for (int i = 0; i < children.Length; i++)
+            {
+                Transform child = children[i];
+                if (child == null)
+                {
+                    continue;
+                }
+
+                string lowerName = child.name.ToLowerInvariant();
+                if (lowerName.Contains(partialNames[nameIndex]) && !lowerName.Contains("target") && !lowerName.Contains("helper"))
+                {
+                    return child;
+                }
+            }
+        }
+
+        for (int i = 0; i < children.Length; i++)
+        {
+            Transform child = children[i];
+            if (child == null)
+            {
+                continue;
+            }
+
+            string lowerName = child.name.ToLowerInvariant();
+            if (lowerName == "head" || lowerName.Contains("head"))
+            {
+                return child;
+            }
+        }
+
+        return null;
     }
 
     private Transform FindPreferredMouthSocket()
@@ -559,7 +618,13 @@ public class ToyAttach : MonoBehaviour
         }
 
         string lowerName = candidate.name.ToLowerInvariant();
-        return lowerName == "mouth" || lowerName == "mouth.r" || lowerName == "mouth.l";
+        return lowerName == "mouth"
+            || lowerName == "mouth.r"
+            || lowerName == "mouth.l"
+            || lowerName == "nose"
+            || lowerName.Contains("muzzle")
+            || lowerName.Contains("snout")
+            || lowerName.Contains("jaw");
     }
 
     private Transform FindAnchorByExactName(Transform searchRoot, string targetName)
@@ -793,7 +858,7 @@ public class ToyAttach : MonoBehaviour
         }
 
         string lowerName = socket.name.ToLowerInvariant();
-        if (!lowerName.Contains("mouthsocket"))
+        if (!lowerName.Contains("mouthsocket") && lowerName != "head" && !lowerName.Contains("head"))
         {
             return false;
         }

@@ -2,6 +2,7 @@ using UnityEngine;
 
 internal static class PetAnimationControllerResolver
 {
+    private const string CatAnimationSetResourcePath = "PawPal/IntroPets/Animations/CatIntroAnimationSet";
     private const string DogAnimationSetResourcePath = "PawPal/IntroPets/Animations/DogIntroAnimationSet";
 
     public static RuntimeAnimatorController Resolve(
@@ -10,13 +11,9 @@ internal static class PetAnimationControllerResolver
         IntroPetDefinition definition)
     {
         RuntimeAnimatorController baseController = configuredController;
-        if (baseController == null && definition != null && definition.Species == IntroPetSpecies.Cat)
+        if (baseController == null)
         {
-            PetAnimationSet dogAnimationSet = Resources.Load<PetAnimationSet>(DogAnimationSetResourcePath);
-            if (dogAnimationSet != null)
-            {
-                baseController = dogAnimationSet.RuntimeController;
-            }
+            baseController = ResolveSpeciesFallbackController(definition);
         }
 
 #if UNITY_EDITOR
@@ -28,6 +25,15 @@ internal static class PetAnimationControllerResolver
 #endif
 
         return baseController;
+    }
+
+    private static RuntimeAnimatorController ResolveSpeciesFallbackController(IntroPetDefinition definition)
+    {
+        string resourcePath = definition != null && definition.Species == IntroPetSpecies.Cat
+            ? CatAnimationSetResourcePath
+            : DogAnimationSetResourcePath;
+        PetAnimationSet animationSet = Resources.Load<PetAnimationSet>(resourcePath);
+        return animationSet != null ? animationSet.RuntimeController : null;
     }
 
 #if UNITY_EDITOR

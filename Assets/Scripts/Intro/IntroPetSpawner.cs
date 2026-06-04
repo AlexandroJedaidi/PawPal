@@ -191,7 +191,8 @@ public sealed class IntroPetSpawner : MonoBehaviour
 
         instance.name = "IntroPet_" + (definition != null ? definition.DisplayName : "Pet");
         SelectedPetSessionData session = selection != null ? selection.ToSessionData() : SelectionToSession(definition, variant, index);
-        PawPalRoomPetHandle roomPet = BuildRuntimeRoomPet(instance, definition, session);
+        SelectedPetSessionData runtimeSession = CreateRuntimeSession(session, usedPrefab, variant, usedBasePrefabFallback);
+        PawPalRoomPetHandle roomPet = BuildRuntimeRoomPet(instance, definition, runtimeSession);
         SnapRuntimePetToNavMesh(instance, navMeshPosition);
         IntroPetAgent agent = instance.GetComponent<IntroPetAgent>();
         if (agent == null)
@@ -212,6 +213,34 @@ public sealed class IntroPetSpawner : MonoBehaviour
         }
 
         return agent;
+    }
+
+    private static SelectedPetSessionData CreateRuntimeSession(
+        SelectedPetSessionData source,
+        GameObject usedPrefab,
+        FurVariantDefinition variant,
+        bool usedBasePrefabFallback)
+    {
+        if (source == null)
+        {
+            return null;
+        }
+
+        if (usedBasePrefabFallback || PetVariantApplier.ShouldApplyMaterialOverride(usedPrefab, variant))
+        {
+            return source;
+        }
+
+        return new SelectedPetSessionData
+        {
+            Definition = source.Definition,
+            FurVariant = null,
+            FurIndex = source.FurIndex,
+            Gender = source.Gender,
+            Personality = source.Personality,
+            PetName = source.PetName,
+            RuntimePetId = source.RuntimePetId
+        };
     }
 
     private SelectedPetSessionData SelectionToSession(IntroPetDefinition definition, FurVariantDefinition variant, int index)
@@ -235,6 +264,32 @@ public sealed class IntroPetSpawner : MonoBehaviour
             navMeshAgent = instance.AddComponent<UnityEngine.AI.NavMeshAgent>();
         }
 
+        if (definition != null && definition.Species == IntroPetSpecies.Cat)
+        {
+            ConfigureRuntimeLodGroups(instance);
+
+            DogRoomAgent legacyDogAgent = instance.GetComponent<DogRoomAgent>();
+            if (legacyDogAgent != null)
+            {
+                Destroy(legacyDogAgent);
+            }
+
+            PawPalCatRoomAgent catAgent = instance.GetComponent<PawPalCatRoomAgent>();
+            if (catAgent == null)
+            {
+                catAgent = instance.GetComponentInChildren<PawPalCatRoomAgent>(true);
+            }
+
+            if (catAgent == null)
+            {
+                catAgent = instance.AddComponent<PawPalCatRoomAgent>();
+            }
+
+            catAgent.ConfigureRoomBounds(fieldBounds);
+            catAgent.Initialize(session);
+            return new PawPalRoomPetHandle(catAgent);
+        }
+
         DogRoomAgent dogAgent = instance.GetComponent<DogRoomAgent>();
         if (dogAgent == null)
         {
@@ -252,6 +307,24 @@ public sealed class IntroPetSpawner : MonoBehaviour
         dogAgent.ApplySelectedPetPresentation(session);
         dogAgent.ConfigureSelectedPetRuntime(session);
         return new PawPalRoomPetHandle(dogAgent);
+    }
+
+    private static void ConfigureRuntimeLodGroups(GameObject instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        LODGroup[] lodGroups = instance.GetComponentsInChildren<LODGroup>(true);
+        for (int i = 0; i < lodGroups.Length; i++)
+        {
+            if (lodGroups[i] != null)
+            {
+                lodGroups[i].enabled = true;
+                lodGroups[i].ForceLOD(0);
+            }
+        }
     }
 
     private void SnapRuntimePetToNavMesh(GameObject instance, Vector3 candidate)
@@ -334,11 +407,13 @@ public sealed class IntroPetSpawner : MonoBehaviour
         Vector3 extents = fieldBounds.extents;
         Vector3[] candidates =
         {
-            new Vector3(center.x - extents.x * 0.34f, fieldBounds.min.y, center.z + extents.z * 0.18f),
-            new Vector3(center.x - extents.x * 0.16f, fieldBounds.min.y, center.z + extents.z * 0.32f),
-            new Vector3(center.x + extents.x * 0.02f, fieldBounds.min.y, center.z + extents.z * 0.18f),
-            new Vector3(center.x + extents.x * 0.21f, fieldBounds.min.y, center.z + extents.z * 0.3f),
-            new Vector3(center.x + extents.x * 0.38f, fieldBounds.min.y, center.z + extents.z * 0.14f)
+            new Vector3(center.x - extents.x * 0.42f, fieldBounds.min.y, center.z + extents.z * 0.18f),
+            new Vector3(center.x - extents.x * 0.27f, fieldBounds.min.y, center.z + extents.z * 0.34f),
+            new Vector3(center.x - extents.x * 0.12f, fieldBounds.min.y, center.z + extents.z * 0.18f),
+            new Vector3(center.x + extents.x * 0.04f, fieldBounds.min.y, center.z + extents.z * 0.34f),
+            new Vector3(center.x + extents.x * 0.19f, fieldBounds.min.y, center.z + extents.z * 0.18f),
+            new Vector3(center.x + extents.x * 0.34f, fieldBounds.min.y, center.z + extents.z * 0.32f),
+            new Vector3(center.x + extents.x * 0.46f, fieldBounds.min.y, center.z + extents.z * 0.12f)
         };
 
         for (int i = 0; i < candidates.Length; i++)

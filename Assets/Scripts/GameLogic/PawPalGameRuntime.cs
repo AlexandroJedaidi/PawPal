@@ -1589,6 +1589,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     private void OnApplicationQuit()
     {
+        CancelUnfinishedActiveWalkSession("quitting the application");
         SaveProfile();
     }
 
@@ -1609,6 +1610,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public PawPalCatalogItemDefinition GetCatalogItem(string itemId)
     {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return null;
+        }
+
         PawPalCatalogItemDefinition item;
         catalogById.TryGetValue(itemId, out item);
         return item;
@@ -1616,6 +1622,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public PawPalOwnedItemState GetOwnedItemState(string itemId)
     {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return null;
+        }
+
         PawPalOwnedItemState item;
         ownedItemById.TryGetValue(itemId, out item);
         return item;
@@ -1623,6 +1634,11 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public PawPalDogEquipmentState GetDogEquipmentState(string dogId)
     {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return null;
+        }
+
         PawPalDogEquipmentState state;
         dogEquipmentByDogId.TryGetValue(dogId, out state);
         return state;
@@ -1631,7 +1647,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     public string GetEquippedCollarItemId(string dogId)
     {
         PawPalDogEquipmentState state = GetDogEquipmentState(dogId);
-        return state != null ? state.EquippedCollarItemId : string.Empty;
+        return state != null && !string.IsNullOrWhiteSpace(state.EquippedCollarItemId)
+            ? state.EquippedCollarItemId
+            : string.Empty;
     }
 
     public int GetItemQuantity(string itemId)
@@ -2236,6 +2254,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return false;
         }
 
+        CancelUnfinishedActiveWalkSession("starting a new walk");
         if (activeWalkSession != null && !activeWalkSession.Completed)
         {
             failureMessage = "Finish this walk first.";
@@ -2268,6 +2287,16 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public bool TryStartDeferredWalkSession(string returnSceneName, out string failureMessage)
     {
+        return TryStartDeferredWalkSession(null, string.Empty, string.Empty, returnSceneName, out failureMessage);
+    }
+
+    public bool TryStartDeferredWalkSession(
+        IList<string> requestedVisitNodeIds,
+        string startNodeId,
+        string endNodeId,
+        string returnSceneName,
+        out string failureMessage)
+    {
         failureMessage = string.Empty;
         PawPalDogState dog = ActiveDog;
         if (dog == null)
@@ -2276,6 +2305,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return false;
         }
 
+        CancelUnfinishedActiveWalkSession("starting a new walk");
         if (activeWalkSession != null && !activeWalkSession.Completed)
         {
             failureMessage = "Finish this walk first.";
@@ -2290,8 +2320,22 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             SelectedDogName = dog.DisplayName,
             ReturnSceneName = string.IsNullOrEmpty(returnSceneName) ? PawPalWalkSceneFlow.HomeSceneName : returnSceneName,
             StartedAtUtcTicks = nowUtc.Ticks,
-            DeferredGraphResolution = true
+            DeferredGraphResolution = true,
+            StartNodeId = string.Empty,
+            EndNodeId = string.Empty
         };
+        if (requestedVisitNodeIds != null)
+        {
+            for (int i = 0; i < requestedVisitNodeIds.Count; i++)
+            {
+                string nodeId = requestedVisitNodeIds[i];
+                if (!string.IsNullOrWhiteSpace(nodeId))
+                {
+                    activeWalkSession.RequestedVisitNodeIds.Add(nodeId.Trim());
+                }
+            }
+        }
+
         CommitState(true, false, false);
         return true;
     }
@@ -2346,24 +2390,64 @@ public sealed class PawPalGameRuntime : MonoBehaviour
 
     public bool CancelActiveWalkSession()
     {
-        if (activeWalkSession == null || activeWalkSession.Completed || activeWalkSession.FinalRewardsApplied)
+        return CancelUnfinishedActiveWalkSession("canceling the active walk");
+    }
+
+    private bool CancelUnfinishedActiveWalkSession(string reason)
+    {
+        if (activeWalkSession == null || activeWalkSession.Completed)
         {
             return false;
         }
 
-        PawPalDogState dog = FindDogState(activeWalkSession.SelectedDogId);
-        if (dog != null)
+        string sessionId = activeWalkSession.SessionId;
+        if (!activeWalkSession.FinalRewardsApplied)
         {
-            EnsureWalkData(dog);
-            RefreshWalkStamina(dog, DateTime.UtcNow, false);
-            dog.WalkData.CurrentWalkStamina = Mathf.Min(dog.WalkData.MaxWalkStamina, dog.WalkData.CurrentWalkStamina + activeWalkSession.StaminaCost);
-            dog.WalkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
-            SyncLegacyEnergyFromStamina(dog);
+            RefundWalkSessionStamina(activeWalkSession);
         }
 
         activeWalkSession = null;
         CommitState(true, false, false);
+        Debug.Log("PawPalGameRuntime cleared unfinished walk session '" + sessionId + "' while " + reason + ".");
         return true;
+    }
+
+    private bool CancelLoadedUnfinishedWalkSession()
+    {
+        if (activeWalkSession == null || activeWalkSession.Completed)
+        {
+            return false;
+        }
+
+        string sessionId = activeWalkSession.SessionId;
+        if (!activeWalkSession.FinalRewardsApplied)
+        {
+            RefundWalkSessionStamina(activeWalkSession);
+        }
+
+        activeWalkSession = null;
+        Debug.Log("PawPalGameRuntime cleared saved unfinished walk session '" + sessionId + "' on profile load.");
+        return true;
+    }
+
+    private void RefundWalkSessionStamina(PawPalWalkSessionSaveData session)
+    {
+        if (session == null || session.StaminaCost <= 0.001f)
+        {
+            return;
+        }
+
+        PawPalDogState dog = FindDogState(session.SelectedDogId);
+        if (dog == null)
+        {
+            return;
+        }
+
+        EnsureWalkData(dog);
+        RefreshWalkStamina(dog, DateTime.UtcNow, false);
+        dog.WalkData.CurrentWalkStamina = Mathf.Min(dog.WalkData.MaxWalkStamina, dog.WalkData.CurrentWalkStamina + session.StaminaCost);
+        dog.WalkData.LastStaminaRefreshAtUtcTicks = DateTime.UtcNow.Ticks;
+        SyncLegacyEnergyFromStamina(dog);
     }
 
     public void UpdateActiveWalkSessionProgress(float progress01)
@@ -3841,6 +3925,15 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             }
         }
 
+        session.RequestedVisitNodeIds.Clear();
+        if (routePlan.RequestedVisitNodeIds != null)
+        {
+            for (int i = 0; i < routePlan.RequestedVisitNodeIds.Count; i++)
+            {
+                session.RequestedVisitNodeIds.Add(routePlan.RequestedVisitNodeIds[i]);
+            }
+        }
+
         session.EncounterPoints.Clear();
         if (routePlan.EncounterPoints != null)
         {
@@ -4691,13 +4784,14 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         RestoreTrainerMilestoneState(saveData);
         EnsureDailyTasksPresent(false);
         activeWalkSession = CloneWalkSession(saveData.ActiveWalkSession);
+        bool canceledUnfinishedWalkSession = CancelLoadedUnfinishedWalkSession();
 
         activeDogIndex = Mathf.Clamp(saveData.ActiveDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
         lastPersistentActiveDogIndex = activeDogIndex;
         inventoryRevision++;
         shopRevision++;
 
-        if (migratedDogProfiles || migratedTrickData || backfilledDogNeeds || migratedEquipment)
+        if (migratedDogProfiles || migratedTrickData || backfilledDogNeeds || migratedEquipment || canceledUnfinishedWalkSession)
         {
             SaveProfile();
         }
@@ -5106,6 +5200,14 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             for (int i = 0; i < source.RouteEdgeIds.Count; i++)
             {
                 clone.RouteEdgeIds.Add(source.RouteEdgeIds[i]);
+            }
+        }
+
+        if (source.RequestedVisitNodeIds != null)
+        {
+            for (int i = 0; i < source.RequestedVisitNodeIds.Count; i++)
+            {
+                clone.RequestedVisitNodeIds.Add(source.RequestedVisitNodeIds[i]);
             }
         }
 

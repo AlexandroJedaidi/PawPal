@@ -24,6 +24,7 @@ public static class PawPalWalkRouteGraph
     public const float MapWidth = 393f;
     public const float MapHeight = 786f;
     public const float DistanceToStaminaScale = 0.125f;
+    public const float StaminaCostToRouteDistanceScale = 0.01f;
     public const float SnapDistance = 46f;
     public const float HomeRadius = 48f;
     public const float MinimumRouteDistance = 8f;
@@ -197,7 +198,7 @@ public static class PawPalWalkRouteGraph
         }
 
         plan.RouteDistance = CalculateDistance(routePoints);
-        plan.BaseStaminaCost = plan.RouteDistance;
+        plan.BaseStaminaCost = plan.RouteDistance * StaminaCostToRouteDistanceScale;
         plan.StaminaCost = plan.BaseStaminaCost;
         AddPlannedStops(plan, routePoints);
         return plan;

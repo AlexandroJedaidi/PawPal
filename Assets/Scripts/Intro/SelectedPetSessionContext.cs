@@ -180,9 +180,6 @@ public static class PawPalPetMovementProfiles
     private const float LargeWalkSpeed = 0.66f;
     private const float LargeTrotSpeed = 1.18f;
     private const float LargeRunSpeed = 3.35f;
-    private const float LegacyMediumWalkSpeedForAnimator = 0.65f;
-    private const float LegacyLargeWalkSpeedForAnimator = 0.80f;
-    private const float LegacyLargeRunSpeedForAnimator = 1.55f;
     private const float MediumWalkAnimatorBaseline = 0.5f;
     private const float MediumTrotAnimatorBaseline = 0.78f;
     private const float MediumRunAnimatorBaseline = 1f;
@@ -191,26 +188,17 @@ public static class PawPalPetMovementProfiles
         PawPalPetSizeClass.Small,
         0.24f,
         0.78f,
-        1.05f,
-        0.42f,
-        ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, 0.78f, MediumTrotSpeed),
-        ScaleAnimatorBaseline(MediumRunAnimatorBaseline, 1.05f, MediumRunSpeed));
+        1.05f);
     private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(
         PawPalPetSizeClass.Medium,
         MediumWalkSpeed,
         MediumTrotSpeed,
-        MediumRunSpeed,
-        MediumWalkAnimatorBaseline,
-        MediumTrotAnimatorBaseline,
-        MediumRunAnimatorBaseline);
+        MediumRunSpeed);
     private static readonly PawPalPetMovementProfile LargeProfile = BuildProfile(
         PawPalPetSizeClass.Large,
         LargeWalkSpeed,
         LargeTrotSpeed,
-        LargeRunSpeed,
-        ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, LegacyLargeWalkSpeedForAnimator, LegacyMediumWalkSpeedForAnimator),
-        ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, LargeTrotSpeed, MediumTrotSpeed),
-        ScaleAnimatorBaseline(MediumRunAnimatorBaseline, LegacyLargeRunSpeedForAnimator, MediumRunSpeed));
+        LargeRunSpeed);
 
     public static PawPalPetMovementProfile DefaultProfile
     {
@@ -270,9 +258,9 @@ public static class PawPalPetMovementProfiles
             walkSpeed,
             trotSpeed,
             runSpeed,
-            ScaleAnimatorBaseline(MediumWalkAnimatorBaseline, walkSpeed, MediumWalkSpeed),
-            ScaleAnimatorBaseline(MediumTrotAnimatorBaseline, trotSpeed, MediumTrotSpeed),
-            ScaleAnimatorBaseline(MediumRunAnimatorBaseline, runSpeed, MediumRunSpeed));
+            MediumWalkAnimatorBaseline,
+            MediumTrotAnimatorBaseline,
+            MediumRunAnimatorBaseline);
     }
 
     private static PawPalPetMovementProfile BuildProfile(
@@ -294,16 +282,6 @@ public static class PawPalPetMovementProfiles
             TrotAnimatorSpeed = trotAnimatorSpeed,
             RunAnimatorSpeed = runAnimatorSpeed
         };
-    }
-
-    private static float ScaleAnimatorBaseline(float baseline, float targetSpeed, float mediumSpeed)
-    {
-        if (mediumSpeed <= 0.0001f)
-        {
-            return baseline;
-        }
-
-        return baseline * (targetSpeed / mediumSpeed);
     }
 
 }

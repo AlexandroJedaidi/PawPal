@@ -381,7 +381,8 @@ public sealed class IntroPetUIController : MonoBehaviour
         BuildFurButtons(customizeCard, 75f);
 
         CreateLabel(customizeCard, "GenderCaption", "Gender:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(customizeCard.Find("GenderCaption") as RectTransform, 24f, 115f, 70f, 18f);
+        RectTransform genderCaptionRoot = customizeCard.Find("GenderCaption") as RectTransform;
+        Place(genderCaptionRoot, 24f, 115f, 70f, 18f);
         BuildGenderToggle(customizeCard, 109f);
 
         CreateStyledActionButton(customizeCard, "BackButton", "Back", new Vector2(42f, 180f), new Vector2(92f, 26f), new Color32(209, 209, 209, 255), Color.white, new Color(0f, 0f, 0f, 0.14f), delegate
@@ -405,7 +406,7 @@ public sealed class IntroPetUIController : MonoBehaviour
 
     private void BuildFurButtons(RectTransform parent, float y)
     {
-        const int buttonCount = 4;
+        const int buttonCount = 6;
         furButtons = new Button[buttonCount];
         furButtonFills = new Image[buttonCount];
         furButtonLabels = new TextMeshProUGUI[buttonCount];
@@ -435,8 +436,9 @@ public sealed class IntroPetUIController : MonoBehaviour
             furButtonRoots[i] = button;
             if (furButtonLabels[i] != null)
             {
-                furButtonLabels[i].enableAutoSizing = false;
-                furButtonLabels[i].fontSize = 13f;
+                furButtonLabels[i].enableAutoSizing = true;
+                furButtonLabels[i].fontSizeMin = 8f;
+                furButtonLabels[i].fontSizeMax = 12f;
             }
         }
     }
@@ -485,6 +487,8 @@ public sealed class IntroPetUIController : MonoBehaviour
             if (furButtons[i] != null)
             {
                 furButtons[i].gameObject.SetActive(isVisible);
+                furButtons[i].enabled = true;
+                furButtons[i].interactable = isVisible;
             }
 
             if (!isVisible)
@@ -507,7 +511,8 @@ public sealed class IntroPetUIController : MonoBehaviour
         }
 
         const float startX = 114f;
-        const float spacing = 8f;
+        const float spacing = 6f;
+        const float startY = 75f;
         float currentX = startX;
         for (int i = 0; i < furButtonRoots.Length; i++)
         {
@@ -518,7 +523,7 @@ public sealed class IntroPetUIController : MonoBehaviour
 
             RectTransform rootRect = furButtonRoots[i];
             float width = widths[i] > 0f ? widths[i] : 48f;
-            Place(rootRect, currentX, 75f, width, 24f);
+            Place(rootRect, currentX, startY, width, 24f);
             currentX += width + spacing;
         }
     }
@@ -711,7 +716,35 @@ public sealed class IntroPetUIController : MonoBehaviour
             label = "Fur " + (index + 1).ToString();
         }
 
-        return label;
+        return NormalizeVariantLabel(label);
+    }
+
+    private static bool IsNumericLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < label.Length; i++)
+        {
+            if (!char.IsDigit(label[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string NormalizeVariantLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return label;
+        }
+
+        return label.Replace('\u0421', 'C').Replace("_c", "_C");
     }
 
     private static float GetFurButtonWidth(TextMeshProUGUI label, string text)
@@ -722,7 +755,8 @@ public sealed class IntroPetUIController : MonoBehaviour
         }
 
         Vector2 preferred = label.GetPreferredValues(text);
-        return Mathf.Clamp(Mathf.Ceil(preferred.x) + 18f, 48f, 96f);
+        float minWidth = IsNumericLabel(text) ? 30f : 48f;
+        return Mathf.Clamp(Mathf.Ceil(preferred.x) + 18f, minWidth, 96f);
     }
 
     private static void Place(RectTransform rect, float x, float y, float width, float height)

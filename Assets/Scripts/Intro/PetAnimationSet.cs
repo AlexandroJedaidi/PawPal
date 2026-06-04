@@ -29,9 +29,21 @@ public sealed class PetAnimationSet : ScriptableObject
         }
 
         RuntimeAnimatorController resolvedController = PetAnimationControllerResolver.Resolve(RuntimeController, animator, definition);
+        bool controllerChanged = false;
         if (resolvedController != null && animator.runtimeAnimatorController != resolvedController)
         {
             animator.runtimeAnimatorController = resolvedController;
+            controllerChanged = true;
+        }
+
+        animator.enabled = true;
+        animator.applyRootMotion = false;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+        if (controllerChanged || !animator.isInitialized)
+        {
+            animator.Rebind();
+            animator.Update(0f);
         }
     }
 

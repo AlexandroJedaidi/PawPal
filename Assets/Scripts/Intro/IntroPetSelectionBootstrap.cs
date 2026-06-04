@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -14,9 +15,33 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
     private const string RuntimeRootName = "IntroSceneRuntime";
     private const string RuntimeNavMeshRootName = "IntroRuntimeNavMesh";
     private const string RuntimeWalkSurfaceName = "IntroWalkSurface";
+    private const string RuntimeBlockerRootName = "IntroNavigationBlockers";
     private const string EditorPreviewRootName = RuntimeRootName;
     private const string EditorPreviewCameraName = "Main Camera";
     private const string EditorPreviewLightName = "Warm Sun";
+    private const int NotWalkableArea = 1;
+    private const float NavigationBlockerPadding = 0.08f;
+    private const float NavigationBlockerFootprintScale = 0.5f;
+    private const float MinimumNavigationBlockerFootprint = 0.08f;
+    private const float NavigationBlockerFieldOverlapPadding = 0.15f;
+    private static readonly string[] NavigationBlockerNameFragments =
+    {
+        "lamp_pole_small",
+        "foliageplant",
+        "flower",
+        "plant",
+        "bush",
+        "hedge",
+        "terrace",
+        "deck",
+        "patio",
+        "porch",
+        "doghouse",
+        "dog_house",
+        "cat_house",
+        "kennel",
+        "food_toy"
+    };
     private static readonly string[] IntroToyNames =
     {
         "Toy_BallLeft",
@@ -227,6 +252,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         }
 
         EnsureRuntimeWalkSurface(navMeshRoot, fieldBounds);
+        EnsureRuntimeNavigationBlockers(navMeshRoot, fieldBounds);
 
         NavMeshSurface surface = navMeshRoot.GetComponent<NavMeshSurface>();
         if (surface == null)
@@ -239,6 +265,7 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         surface.size = new Vector3(fieldBounds.size.x, 1f, fieldBounds.size.z);
         surface.layerMask = Physics.DefaultRaycastLayers;
         surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
+        surface.defaultArea = 0;
         surface.BuildNavMesh();
     }
 
@@ -270,6 +297,235 @@ public sealed class IntroPetSelectionBootstrap : MonoBehaviour
         collider.isTrigger = false;
         collider.center = Vector3.zero;
         collider.size = new Vector3(fieldBounds.size.x, 0.1f, fieldBounds.size.z);
+    }
+
+    private static void EnsureRuntimeNavigationBlockers(Transform navMeshRoot, Bounds fieldBounds)
+    {
+        if (navMeshRoot == null)
+        {
+            return;
+        }
+
+        Transform existingRoot = navMeshRoot.Find(RuntimeBlockerRootName);
+        if (existingRoot != null)
+        {
+            existingRoot.gameObject.SetActive(false);
+            DestroySceneObject(existingRoot.gameObject);
+        }
+
+        List<Bounds> blockerBounds = CollectNavigationBlockerBounds(navMeshRoot, fieldBounds);
+        if (blockerBounds.Count == 0)
+        {
+            return;
+        }
+
+        Transform blockerRoot = new GameObject(RuntimeBlockerRootName).transform;
+        blockerRoot.SetParent(navMeshRoot, false);
+
+        for (int i = 0; i < blockerBounds.Count; i++)
+        {
+            Bounds bounds = blockerBounds[i];
+            GameObject blocker = new GameObject("IntroNavBlocker_" + i);
+            blocker.transform.SetParent(blockerRoot, false);
+            blocker.transform.position = bounds.center;
+
+            NavMeshModifierVolume volume = blocker.AddComponent<NavMeshModifierVolume>();
+            volume.area = NotWalkableArea;
+            volume.center = Vector3.zero;
+            volume.size = bounds.size;
+        }
+    }
+
+    private static List<Bounds> CollectNavigationBlockerBounds(Transform navMeshRoot, Bounds fieldBounds)
+    {
+        List<Bounds> blockers = new List<Bounds>();
+        HashSet<Transform> visitedRoots = new HashSet<Transform>();
+        Transform[] allTransforms = FindObjectsByType<Transform>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            Transform candidate = allTransforms[i];
+            if (!ShouldUseNavigationBlockerCandidate(candidate, navMeshRoot))
+            {
+                continue;
+            }
+
+            Transform blockerRoot = ResolveNavigationBlockerRoot(candidate, navMeshRoot);
+            if (blockerRoot == null || !visitedRoots.Add(blockerRoot))
+            {
+                continue;
+            }
+
+            Bounds objectBounds;
+            if (!TryGetNavigationBlockerObjectBounds(blockerRoot, out objectBounds))
+            {
+                continue;
+            }
+
+            Bounds footprintBounds;
+            if (!TryBuildNavigationBlockerFootprint(objectBounds, fieldBounds, out footprintBounds))
+            {
+                continue;
+            }
+
+            blockers.Add(footprintBounds);
+        }
+
+        return blockers;
+    }
+
+    private static bool ShouldUseNavigationBlockerCandidate(Transform candidate, Transform navMeshRoot)
+    {
+        if (candidate == null || navMeshRoot == null || !candidate.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        if (candidate == navMeshRoot || candidate.IsChildOf(navMeshRoot))
+        {
+            return false;
+        }
+
+        if (candidate.GetComponentInParent<IntroPetAgent>() != null
+            || candidate.GetComponentInParent<DogRoomAgent>() != null
+            || candidate.GetComponentInParent<PawPalCatRoomAgent>() != null
+            || candidate.GetComponentInParent<PawPalToyRuntimeMetadata>() != null)
+        {
+            return false;
+        }
+
+        return IsNavigationBlockerName(candidate.name);
+    }
+
+    private static Transform ResolveNavigationBlockerRoot(Transform candidate, Transform navMeshRoot)
+    {
+        Transform root = candidate;
+        while (root.parent != null
+            && root.parent != navMeshRoot
+            && root.parent.gameObject.activeInHierarchy
+            && IsNavigationBlockerName(root.parent.name))
+        {
+            root = root.parent;
+        }
+
+        return root;
+    }
+
+    private static bool IsNavigationBlockerName(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < NavigationBlockerNameFragments.Length; i++)
+        {
+            if (objectName.IndexOf(NavigationBlockerNameFragments[i], System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetNavigationBlockerObjectBounds(Transform root, out Bounds bounds)
+    {
+        bounds = new Bounds();
+        bool hasBounds = false;
+
+        Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider == null || !collider.enabled || collider.isTrigger)
+            {
+                continue;
+            }
+
+            EncapsulateBounds(ref bounds, ref hasBounds, collider.bounds);
+        }
+
+        if (hasBounds)
+        {
+            return true;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            EncapsulateBounds(ref bounds, ref hasBounds, renderer.bounds);
+        }
+
+        return hasBounds;
+    }
+
+    private static void EncapsulateBounds(ref Bounds bounds, ref bool hasBounds, Bounds nextBounds)
+    {
+        if (!hasBounds)
+        {
+            bounds = nextBounds;
+            hasBounds = true;
+            return;
+        }
+
+        bounds.Encapsulate(nextBounds);
+    }
+
+    private static bool TryBuildNavigationBlockerFootprint(Bounds objectBounds, Bounds fieldBounds, out Bounds footprintBounds)
+    {
+        footprintBounds = new Bounds();
+        if (objectBounds.size.x < MinimumNavigationBlockerFootprint
+            || objectBounds.size.z < MinimumNavigationBlockerFootprint)
+        {
+            return false;
+        }
+
+        float paddedMinX = fieldBounds.min.x - NavigationBlockerFieldOverlapPadding;
+        float paddedMaxX = fieldBounds.max.x + NavigationBlockerFieldOverlapPadding;
+        float paddedMinZ = fieldBounds.min.z - NavigationBlockerFieldOverlapPadding;
+        float paddedMaxZ = fieldBounds.max.z + NavigationBlockerFieldOverlapPadding;
+        if (objectBounds.max.x < paddedMinX
+            || objectBounds.min.x > paddedMaxX
+            || objectBounds.max.z < paddedMinZ
+            || objectBounds.min.z > paddedMaxZ)
+        {
+            return false;
+        }
+
+        float minX = Mathf.Max(fieldBounds.min.x, objectBounds.min.x - NavigationBlockerPadding);
+        float maxX = Mathf.Min(fieldBounds.max.x, objectBounds.max.x + NavigationBlockerPadding);
+        float minZ = Mathf.Max(fieldBounds.min.z, objectBounds.min.z - NavigationBlockerPadding);
+        float maxZ = Mathf.Min(fieldBounds.max.z, objectBounds.max.z + NavigationBlockerPadding);
+        if (maxX - minX < MinimumNavigationBlockerFootprint
+            || maxZ - minZ < MinimumNavigationBlockerFootprint)
+        {
+            return false;
+        }
+
+        float centerX = (minX + maxX) * 0.5f;
+        float centerZ = (minZ + maxZ) * 0.5f;
+        float scaledWidth = Mathf.Max(MinimumNavigationBlockerFootprint, (maxX - minX) * NavigationBlockerFootprintScale);
+        float scaledDepth = Mathf.Max(MinimumNavigationBlockerFootprint, (maxZ - minZ) * NavigationBlockerFootprintScale);
+        minX = Mathf.Max(fieldBounds.min.x, centerX - scaledWidth * 0.5f);
+        maxX = Mathf.Min(fieldBounds.max.x, centerX + scaledWidth * 0.5f);
+        minZ = Mathf.Max(fieldBounds.min.z, centerZ - scaledDepth * 0.5f);
+        maxZ = Mathf.Min(fieldBounds.max.z, centerZ + scaledDepth * 0.5f);
+
+        Vector3 center = new Vector3((minX + maxX) * 0.5f, fieldBounds.center.y, (minZ + maxZ) * 0.5f);
+        Vector3 size = new Vector3(
+            maxX - minX,
+            Mathf.Max(0.5f, fieldBounds.size.y + 0.5f),
+            maxZ - minZ);
+
+        footprintBounds = new Bounds(center, size);
+        return true;
     }
 
 #if UNITY_EDITOR

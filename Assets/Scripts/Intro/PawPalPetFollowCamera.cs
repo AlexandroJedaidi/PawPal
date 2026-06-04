@@ -90,6 +90,12 @@ public sealed class PawPalPetFollowCamera : MonoBehaviour
             return false;
         }
 
+        PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
+        if (runtime != null && runtime.ActivePetSpecies == IntroPetSpecies.Cat)
+        {
+            return false;
+        }
+
         Scene activeScene = SceneManager.GetActiveScene();
         return PawPalIntroSceneFlow.IsHomeScene(activeScene);
     }

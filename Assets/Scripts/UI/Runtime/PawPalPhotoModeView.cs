@@ -56,6 +56,8 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
     private AspectRatioFitter detailFitter;
     private Slider zoomSlider;
     private TextMeshProUGUI zoomValueLabel;
+    private Image freezeTimeButtonBackground;
+    private TextMeshProUGUI freezeTimeButtonLabel;
     private Coroutine toastRoutine;
     private PawPalPhotoAlbumStore currentAlbumStore;
     private AlbumFilterMode albumFilter = AlbumFilterMode.All;
@@ -65,6 +67,7 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
     private PawPalPhotoRecord deleteConfirmRecord;
     private bool deleteConfirmFromDetail;
     private bool poseMenuExpanded;
+    private bool freezeTimeActive;
 
     public event Action CloseRequested;
     public event Action ShutterRequested;
@@ -84,6 +87,7 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
     public event Action<PawPalPhotoRecord> DetailDeleteRequested;
     public event Action<PawPalPhotoRecord> DetailFavoriteToggled;
     public event Action<float> ZoomChanged;
+    public event Action<bool> FreezeTimeToggled;
 
     public void Initialize(UiSpriteLibrary spriteLibrary)
     {
@@ -197,6 +201,12 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
         {
             deleteConfirmRoot.gameObject.SetActive(false);
         }
+    }
+
+    public void SetFreezeTimeActive(bool active)
+    {
+        freezeTimeActive = active;
+        RefreshFreezeTimeButton();
     }
 
     public void SetCaptureHudVisible(bool visible)
@@ -523,6 +533,27 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
             delegate { Raise(AttentionRequested); });
 
         CreateControlCaption(controlLayer, "AttentionLabel", "Whistle", 96f, -138f);
+
+        RectTransform freezeButton = CreateStyledCircleButton(
+            controlLayer,
+            "FreezeTime",
+            new Vector2(154f, -94f),
+            SecondaryControlSize,
+            null,
+            "II",
+            UiTheme.NavBackgroundCream,
+            UiTheme.NavBrandDark,
+            softBrandOutline,
+            true,
+            delegate
+            {
+                SetFreezeTimeActive(!freezeTimeActive);
+                Raise(FreezeTimeToggled, freezeTimeActive);
+            });
+        freezeTimeButtonBackground = freezeButton != null ? freezeButton.GetComponent<Image>() : null;
+        freezeTimeButtonLabel = freezeButton != null ? freezeButton.GetComponentInChildren<TextMeshProUGUI>(true) : null;
+        CreateControlCaption(controlLayer, "FreezeLabel", "Freeze", 154f, -138f);
+        RefreshFreezeTimeButton();
 
         Color shutterRingColor = UiTheme.NavBrand;
         shutterRingColor.a = 0.42f;
@@ -1407,6 +1438,20 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
         zoomValueLabel.text = displayZoom.ToString("0.0", CultureInfo.InvariantCulture) + "x";
     }
 
+    private void RefreshFreezeTimeButton()
+    {
+        if (freezeTimeButtonBackground != null)
+        {
+            freezeTimeButtonBackground.color = freezeTimeActive ? UiTheme.NavBrand : UiTheme.NavBackgroundCream;
+        }
+
+        if (freezeTimeButtonLabel != null)
+        {
+            freezeTimeButtonLabel.text = "II";
+            freezeTimeButtonLabel.color = freezeTimeActive ? Color.white : UiTheme.NavBrandDark;
+        }
+    }
+
     private void StepZoom(float delta)
     {
         if (zoomSlider == null)
@@ -1790,6 +1835,14 @@ public sealed class PawPalPhotoModeView : MonoBehaviour
         if (handler != null)
         {
             handler(poseId);
+        }
+    }
+
+    private void Raise(Action<bool> handler, bool value)
+    {
+        if (handler != null)
+        {
+            handler(value);
         }
     }
 

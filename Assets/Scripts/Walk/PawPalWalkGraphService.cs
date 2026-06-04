@@ -126,8 +126,115 @@ public static class PawPalWalkGraphService
 
         float gameplayDistance = Mathf.Max(0f, plan.RouteDistance * WorldDistanceToWalkDistanceScale);
         plan.RouteDistance = gameplayDistance;
-        plan.BaseStaminaCost = gameplayDistance;
+        plan.BaseStaminaCost = gameplayDistance * PawPalWalkRouteGraph.StaminaCostToRouteDistanceScale;
         plan.StaminaCost = plan.BaseStaminaCost;
+        return true;
+    }
+
+    public static bool TryBuildPlanThroughVisitNodeIds(
+        PawPalWalkGraphSnapshot snapshot,
+        string startNodeId,
+        string endNodeId,
+        IList<string> visitNodeIds,
+        out PawPalWalkRoutePlan plan,
+        out string failureMessage)
+    {
+        plan = null;
+        failureMessage = string.Empty;
+        if (snapshot == null)
+        {
+            failureMessage = "Walk graph snapshot is missing.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(startNodeId))
+        {
+            startNodeId = snapshot.DefaultStartNodeId;
+        }
+
+        if (string.IsNullOrWhiteSpace(endNodeId))
+        {
+            endNodeId = snapshot.DefaultEndNodeId;
+        }
+
+        if (string.IsNullOrWhiteSpace(startNodeId) || string.IsNullOrWhiteSpace(endNodeId))
+        {
+            failureMessage = "Walk route is missing its Home start or end node.";
+            return false;
+        }
+
+        List<string> waypoints = new List<string>();
+        waypoints.Add(startNodeId);
+        if (visitNodeIds != null)
+        {
+            for (int i = 0; i < visitNodeIds.Count; i++)
+            {
+                string visitNodeId = visitNodeIds[i];
+                if (!string.IsNullOrWhiteSpace(visitNodeId))
+                {
+                    waypoints.Add(visitNodeId.Trim());
+                }
+            }
+        }
+
+        waypoints.Add(endNodeId);
+        if (waypoints.Count < 3)
+        {
+            failureMessage = "Choose at least one place to visit.";
+            return false;
+        }
+
+        List<string> expandedNodeIds = new List<string>();
+        List<string> segmentNodeIds = new List<string>();
+        for (int waypointIndex = 0; waypointIndex < waypoints.Count - 1; waypointIndex++)
+        {
+            string segmentStartNodeId = waypoints[waypointIndex];
+            string segmentEndNodeId = waypoints[waypointIndex + 1];
+            if (segmentStartNodeId == segmentEndNodeId)
+            {
+                if (expandedNodeIds.Count == 0)
+                {
+                    expandedNodeIds.Add(segmentStartNodeId);
+                }
+
+                continue;
+            }
+
+            if (!TryFindShortestPathNodeIds(snapshot, segmentStartNodeId, segmentEndNodeId, segmentNodeIds, out failureMessage))
+            {
+                return false;
+            }
+
+            for (int nodeIndex = 0; nodeIndex < segmentNodeIds.Count; nodeIndex++)
+            {
+                string nodeId = segmentNodeIds[nodeIndex];
+                if (expandedNodeIds.Count == 0 || expandedNodeIds[expandedNodeIds.Count - 1] != nodeId)
+                {
+                    expandedNodeIds.Add(nodeId);
+                }
+            }
+        }
+
+        if (!TryBuildPlanFromNodeIds(snapshot, expandedNodeIds, out plan, out failureMessage))
+        {
+            return false;
+        }
+
+        plan.StartNodeId = startNodeId;
+        plan.EndNodeId = endNodeId;
+        plan.RequestedVisitNodeIds.Clear();
+        if (visitNodeIds != null)
+        {
+            for (int i = 0; i < visitNodeIds.Count; i++)
+            {
+                string visitNodeId = visitNodeIds[i];
+                if (!string.IsNullOrWhiteSpace(visitNodeId))
+                {
+                    plan.RequestedVisitNodeIds.Add(visitNodeId.Trim());
+                }
+            }
+        }
+
         return true;
     }
 

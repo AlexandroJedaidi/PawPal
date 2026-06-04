@@ -87,6 +87,8 @@ public class DogCameraAttention : MonoBehaviour
     private Transform socialHeadLookTarget;
     private bool cameraLookOverrideActive;
     private float cameraLookOverrideUntil;
+    private bool walkCameraLookOverrideActive;
+    private float walkCameraLookOverrideMaxYaw = 90f;
     private float nextNearbyDogScanTime;
     private Vector3 smoothedLookPoint;
     private Vector3 smoothedLookPointVelocity;
@@ -171,6 +173,8 @@ public class DogCameraAttention : MonoBehaviour
         socialHeadLookTarget = null;
         cameraLookOverrideActive = false;
         cameraLookOverrideUntil = 0f;
+        walkCameraLookOverrideActive = false;
+        walkCameraLookOverrideMaxYaw = 90f;
         activeTargetType = AttentionTargetType.None;
         activeLookTarget = null;
         headTiltStartedAt = 0f;
@@ -240,6 +244,18 @@ public class DogCameraAttention : MonoBehaviour
         activeLookTarget = cameraTransform;
         targetWeight = 1f;
         attentionRoutine = StartCoroutine(AttentionRoutine());
+    }
+
+    public void RequestWalkCameraAttention(Transform targetCamera, float duration, float maxYawDegrees)
+    {
+        if (targetCamera != null)
+        {
+            cameraTransform = targetCamera;
+        }
+
+        RequestCameraAttention(duration);
+        walkCameraLookOverrideActive = true;
+        walkCameraLookOverrideMaxYaw = Mathf.Clamp(maxYawDegrees, 1f, 180f);
     }
 
     public void RequestHeadTilt(float angleDegrees, float duration)
@@ -612,6 +628,11 @@ public class DogCameraAttention : MonoBehaviour
 
     private bool CanLookAtCamera()
     {
+        if (walkCameraLookOverrideActive && cameraLookOverrideActive)
+        {
+            return true;
+        }
+
         return roomAgent == null
             || (!roomAgent.IsMoving
                 && !roomAgent.IsPreparingToMove
@@ -801,6 +822,11 @@ public class DogCameraAttention : MonoBehaviour
     {
         if (activeTargetType == AttentionTargetType.Camera && cameraLookOverrideActive)
         {
+            if (walkCameraLookOverrideActive)
+            {
+                return walkCameraLookOverrideMaxYaw;
+            }
+
             return maxNeckYaw;
         }
 
@@ -871,6 +897,7 @@ public class DogCameraAttention : MonoBehaviour
 
         cameraLookOverrideActive = false;
         cameraLookOverrideUntil = 0f;
+        walkCameraLookOverrideActive = false;
         targetWeight = 0f;
         activeTargetType = AttentionTargetType.None;
         activeLookTarget = null;

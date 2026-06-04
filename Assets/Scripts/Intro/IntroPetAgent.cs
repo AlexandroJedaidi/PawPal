@@ -63,7 +63,8 @@ public sealed class IntroPetAgent : MonoBehaviour
         roomPet = runtimePet;
         SelectionIndex = index;
 
-        if (variant != null && variant.ReplacementMaterial != null && !PetVariantApplier.ApplyMaterial(gameObject, variant))
+        if (PetVariantApplier.ShouldApplyMaterialOverride(sourcePrefab, variant)
+            && !PetVariantApplier.ApplyMaterial(gameObject, variant))
         {
             WarnMissingVariantMaterial();
         }
@@ -83,7 +84,8 @@ public sealed class IntroPetAgent : MonoBehaviour
     public void ApplyFurVariant(FurVariantDefinition variant)
     {
         activeVariant = variant;
-        if (variant != null && variant.ReplacementMaterial != null && !PetVariantApplier.ApplyMaterial(gameObject, variant))
+        if (PetVariantApplier.ShouldApplyMaterialOverride(sourcePrefab, variant)
+            && !PetVariantApplier.ApplyMaterial(gameObject, variant))
         {
             WarnMissingVariantMaterial();
         }

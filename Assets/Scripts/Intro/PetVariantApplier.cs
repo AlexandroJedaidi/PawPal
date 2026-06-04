@@ -15,6 +15,16 @@ public static class PetVariantApplier
         return definition != null ? definition.BasePrefab : null;
     }
 
+    public static bool ShouldApplyMaterialOverride(GameObject spawnedFromPrefab, FurVariantDefinition variant)
+    {
+        if (variant == null || variant.ReplacementMaterial == null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     public static bool ApplyMaterial(GameObject root, FurVariantDefinition variant)
     {
         if (root == null || variant == null || variant.ReplacementMaterial == null)
@@ -35,6 +45,7 @@ public static class PetVariantApplier
             }
 
             Material[] materials = renderer.sharedMaterials;
+            bool rendererChanged = false;
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
                 Material current = materials[materialIndex];
@@ -46,10 +57,56 @@ public static class PetVariantApplier
                 }
 
                 materials[materialIndex] = variant.ReplacementMaterial;
+                rendererChanged = true;
                 changed = true;
             }
 
-            if (changed)
+            if (rendererChanged)
+            {
+                renderer.sharedMaterials = materials;
+            }
+        }
+
+        if (changed || string.IsNullOrWhiteSpace(match))
+        {
+            return changed;
+        }
+
+        return ApplyFallbackMaterialSlots(root, variant.ReplacementMaterial);
+    }
+
+    private static bool ApplyFallbackMaterialSlots(GameObject root, Material replacementMaterial)
+    {
+        if (root == null || replacementMaterial == null)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        bool changed = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Material[] materials = renderer.sharedMaterials;
+            bool rendererChanged = false;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                if (!IsRuntimeFallbackMaterial(materials[materialIndex]))
+                {
+                    continue;
+                }
+
+                materials[materialIndex] = replacementMaterial;
+                rendererChanged = true;
+                changed = true;
+            }
+
+            if (rendererChanged)
             {
                 renderer.sharedMaterials = materials;
             }
@@ -298,8 +355,19 @@ public static class PetVariantApplier
 
         string shaderName = shader.name ?? string.Empty;
         return shaderName.Equals("Hidden/InternalErrorShader", System.StringComparison.OrdinalIgnoreCase)
-            || shaderName.Equals("Standard", System.StringComparison.OrdinalIgnoreCase)
-            || shaderName.StartsWith("Legacy Shaders/", System.StringComparison.OrdinalIgnoreCase);
+            || !shader.isSupported;
+    }
+
+    private static bool IsRuntimeFallbackMaterial(Material material)
+    {
+        if (material == null)
+        {
+            return true;
+        }
+
+        string materialName = material.name ?? string.Empty;
+        return materialName.IndexOf("RuntimeFallback", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || materialName.IndexOf("Default-Material", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static Material BuildFallbackMaterial(Material source, Shader shader)

@@ -1,4 +1,7 @@
+using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.AI;
 
 public sealed class PawPalPetMovementProfilesEditModeTests
 {
@@ -49,19 +52,99 @@ public sealed class PawPalPetMovementProfilesEditModeTests
     public void SizeProfilesExposeExpectedSpeedValues()
     {
         PawPalPetMovementProfile small = PawPalPetMovementProfiles.Resolve("puppy_labrador", null, null, null);
-        PawPalPetMovementProfile medium = PawPalPetMovementProfiles.Resolve("corgi", null, null, null);
+        PawPalPetMovementProfile medium = PawPalPetMovementProfiles.Resolve("cat_simple", null, null, null);
         PawPalPetMovementProfile large = PawPalPetMovementProfiles.Resolve("husky", null, null, null);
 
-        Assert.AreEqual(0.50f, small.WalkSpeed, 0.0001f);
+        Assert.AreEqual(0.24f, small.WalkSpeed, 0.0001f);
         Assert.AreEqual(0.78f, small.TrotSpeed, 0.0001f);
         Assert.AreEqual(1.05f, small.RunSpeed, 0.0001f);
 
-        Assert.AreEqual(0.65f, medium.WalkSpeed, 0.0001f);
+        Assert.AreEqual(0.52f, medium.WalkSpeed, 0.0001f);
         Assert.AreEqual(0.98f, medium.TrotSpeed, 0.0001f);
         Assert.AreEqual(1.30f, medium.RunSpeed, 0.0001f);
 
-        Assert.AreEqual(0.80f, large.WalkSpeed, 0.0001f);
+        Assert.AreEqual(0.66f, large.WalkSpeed, 0.0001f);
         Assert.AreEqual(1.18f, large.TrotSpeed, 0.0001f);
-        Assert.AreEqual(1.55f, large.RunSpeed, 0.0001f);
+        Assert.AreEqual(3.35f, large.RunSpeed, 0.0001f);
+    }
+
+    [Test]
+    public void CatProfileExposesExpectedAnimatorSpeedValues()
+    {
+        PawPalPetMovementProfile medium = PawPalPetMovementProfiles.Resolve("cat_simple", null, null, null);
+
+        Assert.AreEqual(PawPalPetSizeClass.Medium, medium.SizeClass);
+        Assert.AreEqual(0.5f, medium.WalkAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(0.78f, medium.TrotAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(1f, medium.RunAnimatorSpeed, 0.0001f);
+    }
+
+    [Test]
+    public void AnimatorSpeedProfilesStayFixedAcrossSizeClasses()
+    {
+        PawPalPetMovementProfile small = PawPalPetMovementProfiles.Resolve("puppy_labrador", null, null, null);
+        PawPalPetMovementProfile medium = PawPalPetMovementProfiles.Resolve("cat_simple", null, null, null);
+        PawPalPetMovementProfile large = PawPalPetMovementProfiles.Resolve("husky", null, null, null);
+
+        Assert.AreEqual(0.5f, small.WalkAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(0.78f, small.TrotAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(1f, small.RunAnimatorSpeed, 0.0001f);
+
+        Assert.AreEqual(0.5f, medium.WalkAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(0.78f, medium.TrotAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(1f, medium.RunAnimatorSpeed, 0.0001f);
+
+        Assert.AreEqual(0.5f, large.WalkAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(0.78f, large.TrotAnimatorSpeed, 0.0001f);
+        Assert.AreEqual(1f, large.RunAnimatorSpeed, 0.0001f);
+    }
+
+    [Test]
+    public void CatRoomAgentUsesResolvedMovementProfileForPaceAndKeepsAuthoredPlaybackSpeed()
+    {
+        GameObject root = new GameObject("CatAgentTest");
+        NavMeshAgent navMeshAgent = root.AddComponent<NavMeshAgent>();
+        Animator animator = root.AddComponent<Animator>();
+        PawPalCatRoomAgent agent = root.AddComponent<PawPalCatRoomAgent>();
+        PetAnimationSet animationSet = ScriptableObject.CreateInstance<PetAnimationSet>();
+
+        PawPalPetMovementProfile catProfile = PawPalPetMovementProfiles.Resolve("cat_simple", null, null, null);
+        SetPrivateField(agent, "movementProfile", catProfile);
+        SetPrivateField(agent, "hasMovementProfile", true);
+        SetPrivateField(agent, "agent", navMeshAgent);
+        SetPrivateField(agent, "animator", animator);
+        SetPrivateField(agent, "animationSet", animationSet);
+
+        InvokePrivate(agent, "SetMovePace", DogMovementPace.Run);
+        InvokePrivate(agent, "SetMoving", true);
+
+        float currentMoveSpeed = (float)GetPrivateField(agent, "currentMoveSpeed");
+        Assert.AreEqual(catProfile.RunSpeed, currentMoveSpeed, 0.0001f);
+        Assert.AreEqual(catProfile.RunSpeed, navMeshAgent.speed, 0.0001f);
+        Assert.AreEqual(1f, animator.speed, 0.0001f);
+
+        Object.DestroyImmediate(animationSet);
+        Object.DestroyImmediate(root);
+    }
+
+    private static void InvokePrivate(object target, string methodName, params object[] arguments)
+    {
+        MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(target, arguments);
+    }
+
+    private static object GetPrivateField(object target, string fieldName)
+    {
+        FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return field.GetValue(target);
+    }
+
+    private static void SetPrivateField(object target, string fieldName, object value)
+    {
+        FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field.SetValue(target, value);
     }
 }

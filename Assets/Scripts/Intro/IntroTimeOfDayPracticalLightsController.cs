@@ -11,11 +11,17 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
 
     [Header("Lamp Matching")]
     [SerializeField] private string lampRootNamePrefix = "lamp_pole_small";
+    [Tooltip("Lamp lights reach their original scene intensity once daylight falls to this value.")]
     [SerializeField, Range(0f, 1f)] private float nightActivationDaylightThreshold = 0.35f;
+    [SerializeField, Range(0f, 2f)] private float dayIntensityMultiplier;
+    [SerializeField, Range(0f, 2f)] private float nightIntensityMultiplier = 1f;
+    [SerializeField] private bool usePointLightsForLampPosts = true;
+    [SerializeField, Min(0f)] private float minimumNightIntensity = 4f;
+    [SerializeField, Min(0f)] private float minimumNightRange = 6f;
 
     private readonly List<ManagedLampLight> managedLights = new List<ManagedLampLight>();
     private int lastAppliedMinuteStamp = int.MinValue;
-    private bool lastAppliedNightState;
+    private float lastAppliedNightBlend = -1f;
 
     public void Configure(IntroBackdropRingController backdropRingController)
     {
@@ -50,14 +56,15 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
 
         PawPalTimeOfDayState state = ResolveTimeOfDayState();
         int minuteStamp = PawPalTimeOfDayEvaluator.ToMinuteStamp(state);
-        bool useNightLights = state.Daylight01 <= nightActivationDaylightThreshold;
-        if (!force && minuteStamp == lastAppliedMinuteStamp && useNightLights == lastAppliedNightState)
+        float daylight01 = Mathf.Clamp01(state.Daylight01);
+        float nightBlend = CalculateNightBlend(daylight01);
+        if (!force && minuteStamp == lastAppliedMinuteStamp && Mathf.Approximately(nightBlend, lastAppliedNightBlend))
         {
             return;
         }
 
         lastAppliedMinuteStamp = minuteStamp;
-        lastAppliedNightState = useNightLights;
+        lastAppliedNightBlend = nightBlend;
 
         for (int i = managedLights.Count - 1; i >= 0; i--)
         {
@@ -68,8 +75,32 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
                 continue;
             }
 
-            entry.Light.enabled = useNightLights && entry.WasInitiallyEnabled;
+            float dayIntensity = entry.BaseIntensity * dayIntensityMultiplier;
+            float nightIntensity = Mathf.Max(entry.BaseIntensity * nightIntensityMultiplier, minimumNightIntensity);
+            float intensity = Mathf.Lerp(dayIntensity, nightIntensity, nightBlend);
+
+            if (usePointLightsForLampPosts)
+            {
+                entry.Light.type = LightType.Point;
+            }
+
+            entry.Light.enabled = intensity > 0.001f;
+            entry.Light.intensity = intensity;
+            entry.Light.range = Mathf.Lerp(entry.BaseRange, Mathf.Max(entry.BaseRange, minimumNightRange), nightBlend);
+            entry.Light.shadows = LightShadows.None;
+            entry.Light.renderMode = LightRenderMode.ForcePixel;
         }
+    }
+
+    private float CalculateNightBlend(float daylight01)
+    {
+        float fullNightDaylight = Mathf.Clamp01(nightActivationDaylightThreshold);
+        if (Mathf.Approximately(fullNightDaylight, 1f))
+        {
+            return daylight01 < 1f ? 1f : 0f;
+        }
+
+        return Mathf.Clamp01(Mathf.InverseLerp(1f, fullNightDaylight, daylight01));
     }
 
     private void EnsureManagedLights()
@@ -112,7 +143,7 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
                     continue;
                 }
 
-                managedLights.Add(new ManagedLampLight(light, light.enabled));
+                managedLights.Add(new ManagedLampLight(light));
             }
         }
     }
@@ -140,8 +171,10 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
 
     private void InvalidateCache()
     {
+        RestoreOriginalState();
         managedLights.Clear();
         lastAppliedMinuteStamp = int.MinValue;
+        lastAppliedNightBlend = -1f;
     }
 
     private void RestoreOriginalState()
@@ -155,6 +188,11 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
             }
 
             entry.Light.enabled = entry.WasInitiallyEnabled;
+            entry.Light.intensity = entry.BaseIntensity;
+            entry.Light.range = entry.BaseRange;
+            entry.Light.type = entry.BaseType;
+            entry.Light.shadows = entry.BaseShadows;
+            entry.Light.renderMode = entry.BaseRenderMode;
         }
     }
 
@@ -176,13 +214,23 @@ public sealed class IntroTimeOfDayPracticalLightsController : MonoBehaviour
 
     private readonly struct ManagedLampLight
     {
-        public ManagedLampLight(Light light, bool wasInitiallyEnabled)
+        public ManagedLampLight(Light light)
         {
             Light = light;
-            WasInitiallyEnabled = wasInitiallyEnabled;
+            WasInitiallyEnabled = light != null && light.enabled;
+            BaseIntensity = light != null ? light.intensity : 0f;
+            BaseRange = light != null ? light.range : 0f;
+            BaseType = light != null ? light.type : LightType.Point;
+            BaseShadows = light != null ? light.shadows : LightShadows.None;
+            BaseRenderMode = light != null ? light.renderMode : LightRenderMode.Auto;
         }
 
         public Light Light { get; }
         public bool WasInitiallyEnabled { get; }
+        public float BaseIntensity { get; }
+        public float BaseRange { get; }
+        public LightType BaseType { get; }
+        public LightShadows BaseShadows { get; }
+        public LightRenderMode BaseRenderMode { get; }
     }
 }

@@ -9,6 +9,7 @@ public sealed class PetSelectionCameraController : MonoBehaviour
 
     [SerializeField] private float positionSmooth = 4.2f;
     [SerializeField] private float rotationSmooth = 6.5f;
+    [SerializeField] private float switchBlendDuration = 1.25f;
     [SerializeField] private Vector3 fallbackOffset = new Vector3(0f, 1.35f, -3.2f);
     [SerializeField] private float initialPoseHoldSeconds = 0.85f;
     [SerializeField] private bool allowManualLook = true;
@@ -23,6 +24,11 @@ public sealed class PetSelectionCameraController : MonoBehaviour
     private Camera controlledCamera;
     private IntroPetAgent targetAgent;
     private bool snapNextFrame = true;
+    private Vector3 fixedPosition;
+    private bool hasFocusPoint;
+    private Vector3 currentFocusPoint;
+    private Vector3 switchStartFocusPoint;
+    private float switchBlendTimer;
     private float holdInitialPoseUntil;
     private float orbitYaw;
     private float orbitPitch = 12f;
@@ -50,6 +56,7 @@ public sealed class PetSelectionCameraController : MonoBehaviour
         controlledCamera.transform.SetPositionAndRotation(
             IntroSceneCameraPosition,
             Quaternion.Euler(IntroSceneCameraEulerAngles));
+        fixedPosition = controlledCamera.transform.position;
         holdInitialPoseUntil = Time.unscaledTime + Mathf.Max(0f, initialPoseHoldSeconds);
     }
 
@@ -58,6 +65,8 @@ public sealed class PetSelectionCameraController : MonoBehaviour
         targetAgent = agent;
         snapNextFrame = snap;
         orbitInitialized = false;
+        switchStartFocusPoint = hasFocusPoint ? currentFocusPoint : GetCameraFocusPoint(agent);
+        switchBlendTimer = snap ? switchBlendDuration : 0f;
         ApplyFocus();
     }
 
@@ -78,6 +87,7 @@ public sealed class PetSelectionCameraController : MonoBehaviour
             controlledCamera.transform.SetPositionAndRotation(
                 IntroSceneCameraPosition,
                 Quaternion.Euler(IntroSceneCameraEulerAngles));
+            fixedPosition = controlledCamera.transform.position;
             return;
         }
 
@@ -86,24 +96,103 @@ public sealed class PetSelectionCameraController : MonoBehaviour
             HandleManualLookInput();
         }
 
-        IntroPetDefinition definition = targetAgent.Definition;
-        Vector3 offset = definition != null ? definition.IntroCameraOffset : fallbackOffset;
-        Transform target = targetAgent.FocusTransform;
-        Vector3 focusPoint = target.position + Vector3.up * 0.55f;
-        Vector3 desiredOffset = BuildOrbitOffset(offset);
-        Vector3 desiredPosition = target.position + desiredOffset;
-        Quaternion desiredRotation = Quaternion.LookRotation(focusPoint - desiredPosition, Vector3.up);
+        controlledCamera.transform.position = fixedPosition;
+
+        Vector3 focusPoint = snapNextFrame
+            ? GetCameraFocusPoint(targetAgent)
+            : GetSmoothedFocusPoint(GetCameraFocusPoint(targetAgent));
+        Vector3 desiredPosition = fixedPosition;
+        Vector3 toTarget = focusPoint - desiredPosition;
+        if (toTarget.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion desiredRotation = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
 
         if (snapNextFrame)
         {
-            controlledCamera.transform.position = desiredPosition;
             controlledCamera.transform.rotation = desiredRotation;
+            currentFocusPoint = focusPoint;
+            switchStartFocusPoint = focusPoint;
+            hasFocusPoint = true;
+            switchBlendTimer = switchBlendDuration;
             snapNextFrame = false;
             return;
         }
 
-        controlledCamera.transform.position = Vector3.Lerp(controlledCamera.transform.position, desiredPosition, Time.deltaTime * positionSmooth);
         controlledCamera.transform.rotation = Quaternion.Slerp(controlledCamera.transform.rotation, desiredRotation, Time.deltaTime * rotationSmooth);
+    }
+
+    private Vector3 GetSmoothedFocusPoint(Vector3 targetFocusPoint)
+    {
+        if (!hasFocusPoint)
+        {
+            currentFocusPoint = targetFocusPoint;
+            switchStartFocusPoint = targetFocusPoint;
+            hasFocusPoint = true;
+            return currentFocusPoint;
+        }
+
+        if (switchBlendTimer < switchBlendDuration)
+        {
+            switchBlendTimer += Time.deltaTime;
+            float t = switchBlendDuration <= 0f ? 1f : Mathf.Clamp01(switchBlendTimer / switchBlendDuration);
+            currentFocusPoint = Vector3.Lerp(switchStartFocusPoint, targetFocusPoint, Mathf.SmoothStep(0f, 1f, t));
+            return currentFocusPoint;
+        }
+
+        currentFocusPoint = Vector3.Lerp(currentFocusPoint, targetFocusPoint, Time.deltaTime * rotationSmooth);
+        return currentFocusPoint;
+    }
+
+    private static Vector3 GetCameraFocusPoint(IntroPetAgent agent)
+    {
+        if (agent == null)
+        {
+            return Vector3.forward;
+        }
+
+        Bounds visualBounds;
+        if (TryGetVisualBounds(agent, out visualBounds))
+        {
+            float verticalBias = Mathf.Clamp(visualBounds.size.y * 0.08f, 0f, 0.12f);
+            return visualBounds.center + Vector3.up * verticalBias;
+        }
+
+        Transform target = agent != null ? agent.FocusTransform : null;
+        return target != null ? target.position : agent.transform.position;
+    }
+
+    private static bool TryGetVisualBounds(IntroPetAgent agent, out Bounds bounds)
+    {
+        bounds = new Bounds();
+        if (agent == null)
+        {
+            return false;
+        }
+
+        Renderer[] renderers = agent.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            bounds.Encapsulate(renderer.bounds);
+        }
+
+        return hasBounds;
     }
 
     private Vector3 BuildOrbitOffset(Vector3 baseOffset)

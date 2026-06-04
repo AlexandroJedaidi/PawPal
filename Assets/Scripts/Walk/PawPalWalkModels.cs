@@ -147,6 +147,7 @@ public sealed class PawPalWalkRoutePlan
     public List<PawPalWalkRouteEncounterData> EncounterPoints = new List<PawPalWalkRouteEncounterData>();
     public List<string> NodeIds = new List<string>();
     public List<string> EdgeIds = new List<string>();
+    public List<string> RequestedVisitNodeIds = new List<string>();
     public string GraphId;
     public string StartNodeId;
     public string EndNodeId;
@@ -198,6 +199,7 @@ public sealed class PawPalWalkSessionSaveData
     public List<PawPalWalkRouteEncounterData> EncounterPoints = new List<PawPalWalkRouteEncounterData>();
     public List<string> RouteNodeIds = new List<string>();
     public List<string> RouteEdgeIds = new List<string>();
+    public List<string> RequestedVisitNodeIds = new List<string>();
     public List<PawPalWalkLocationData> VisitedLocations = new List<PawPalWalkLocationData>();
     public List<PawPalWalkGeneratedEventState> GeneratedEvents = new List<PawPalWalkGeneratedEventState>();
 }

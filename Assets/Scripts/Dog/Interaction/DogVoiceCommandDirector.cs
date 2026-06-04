@@ -116,7 +116,7 @@ public sealed class DogVoiceCommandDirector : MonoBehaviour
         Vector3 approachPoint;
         if (TryResolveCameraApproachPoint(pet, camera, out approachPoint))
         {
-            yield return StartCoroutine(pet.MoveNear(approachPoint, CameraApproachTimeout, DogMovementPace.Trot));
+            yield return StartCoroutine(pet.MoveNear(approachPoint, CameraApproachTimeout, DogMovementPace.Run));
         }
 
         yield return StartCoroutine(pet.FaceTarget(camera.transform, CameraFaceDuration));
