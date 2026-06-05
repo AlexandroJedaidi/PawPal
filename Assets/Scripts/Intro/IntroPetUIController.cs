@@ -184,55 +184,46 @@ public sealed class IntroPetUIController : MonoBehaviour
 
     private void BuildSelectionCard()
     {
-        selectionCard = CreateCard(root, "SelectionCard", new Vector2(332f, 174f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
+        selectionCard = CreateCard(root, "SelectionCard", new Vector2(332f, 236f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
         selectionCardGroup = selectionCard.gameObject.GetComponent<CanvasGroup>();
         if (selectionCardGroup == null)
         {
             selectionCardGroup = selectionCard.gameObject.AddComponent<CanvasGroup>();
         }
 
-        CreateSelectionHeader(selectionCard);
         CreateWhistleButton(selectionCard);
 
         Image nameField = UiFactory.CreateImage("NameField", selectionCard, UiTheme.DogDetailsFieldFillSprite, Color.white);
         nameField.type = Image.Type.Sliced;
         nameField.preserveAspect = false;
-        Place(nameField.rectTransform, 75f, 34f, 182f, 24f);
+        Place(nameField.rectTransform, 75f, 20f, 182f, 24f);
 
         Image nameFieldBorder = UiFactory.CreateImage("NameFieldBorder", selectionCard, UiTheme.DogDetailsFieldOutlineSprite, SoftLine);
         nameFieldBorder.type = Image.Type.Sliced;
         nameFieldBorder.preserveAspect = false;
-        Place(nameFieldBorder.rectTransform, 75f, 34f, 182f, 24f);
+        Place(nameFieldBorder.rectTransform, 75f, 20f, 182f, 24f);
 
         nameLabel = CreateLabel(selectionCard, "NameLabel", "Buddy", 14, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        Place(nameLabel.rectTransform, 83f, 37f, 166f, 18f);
+        Place(nameLabel.rectTransform, 83f, 23f, 166f, 18f);
 
-        previousArrowRoot = CreateArrowButton(selectionCard, "PrevBreed", "UI/Figma/HomeMain/button_back", new Vector2(47f, 46f), true, delegate
+        previousArrowRoot = CreateArrowButton(selectionCard, "PrevBreed", "UI/Figma/HomeMain/button_back", new Vector2(47f, 32f), true, delegate
         {
             RaisePetStep(-1);
         });
-        nextArrowRoot = CreateArrowButton(selectionCard, "NextBreed", "UI/Figma/HomeMain/button_forward", new Vector2(285f, 46f), false, delegate
+        nextArrowRoot = CreateArrowButton(selectionCard, "NextBreed", "UI/Figma/HomeMain/button_forward", new Vector2(285f, 32f), false, delegate
         {
             RaisePetStep(1);
         });
 
-        descriptionLabel = CreateLabel(selectionCard, "DescriptionLabel", string.Empty, 12, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
+        CreateSelectionInfoRow(selectionCard, "TypeRow", "Type", out stageLabel, 58f, 18f);
+        CreateSelectionInfoRow(selectionCard, "BreedRow", "Breed", out breedLabel, 82f, 18f);
+        CreateSelectionInfoRow(selectionCard, "PersonalityRow", "Personality", out selectionPersonalityLabel, 106f, 18f);
+        CreateSelectionInfoRow(selectionCard, "AboutRow", "About", out descriptionLabel, 130f, 60f);
         descriptionLabel.textWrappingMode = TextWrappingModes.Normal;
+        descriptionLabel.maxVisibleLines = 3;
         descriptionLabel.overflowMode = TextOverflowModes.Ellipsis;
-        Place(descriptionLabel.rectTransform, 28f, 66f, 276f, 42f);
 
-        CreateLabel(selectionCard, "SelectionPersonalityCaption", "Personality", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(selectionCard.Find("SelectionPersonalityCaption") as RectTransform, 24f, 116f, 90f, 18f);
-
-        Image selectionPersonalityChip = UiFactory.CreateImage("SelectionPersonalityChip", selectionCard, UiTheme.RoundedFiveSprite, ChipFill);
-        selectionPersonalityChip.type = Image.Type.Sliced;
-        selectionPersonalityChip.preserveAspect = false;
-        Place(selectionPersonalityChip.rectTransform, 116f, 113f, 96f, 24f);
-
-        selectionPersonalityLabel = CreateLabel(selectionPersonalityChip.rectTransform, "SelectionPersonalityLabel", "Loyal", 12, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(selectionPersonalityLabel.rectTransform, 8f, 2f, 8f, 2f);
-
-        CreateContinueButton(selectionCard, "ContinueButton", "Continue", new Vector2(118f, 142f), new Vector2(96f, 24f), delegate
+        CreateContinueButton(selectionCard, "ContinueButton", "Continue", new Vector2(118f, 204f), new Vector2(96f, 24f), delegate
         {
             Action handler = ContinueRequested;
             if (handler != null)
@@ -242,23 +233,21 @@ public sealed class IntroPetUIController : MonoBehaviour
         });
     }
 
-    private void CreateSelectionHeader(RectTransform parent)
+    private static void CreateSelectionInfoRow(RectTransform parent, string rowName, string title, out TextMeshProUGUI valueLabel, float y, float valueHeight)
     {
-        Image stageChip = UiFactory.CreateImage("StageChip", parent, UiTheme.RoundedFiveSprite, ChipFill);
-        stageChip.type = Image.Type.Sliced;
-        stageChip.preserveAspect = false;
-        Place(stageChip.rectTransform, 80f, 8f, 68f, 20f);
+        const int fontSize = 12;
+        RectTransform rowRoot = UiFactory.CreateRect(rowName, parent);
+        Place(rowRoot, 24f, y, 292f, Mathf.Max(18f, valueHeight));
 
-        stageLabel = CreateLabel(stageChip.rectTransform, "StageLabel", "Adult", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(stageLabel.rectTransform, 6f, 2f, 6f, 2f);
+        TextMeshProUGUI titleLabel = CreateLabel(rowRoot, rowName + "Title", title, fontSize, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.TopLeft);
+        titleLabel.enableAutoSizing = false;
+        Place(titleLabel.rectTransform, 0f, 0f, 76f, 18f);
 
-        Image breedChip = UiFactory.CreateImage("BreedChip", parent, UiTheme.RoundedFiveSprite, ChipFill);
-        breedChip.type = Image.Type.Sliced;
-        breedChip.preserveAspect = false;
-        Place(breedChip.rectTransform, 156f, 8f, 98f, 20f);
-
-        breedLabel = CreateLabel(breedChip.rectTransform, "BreedLabel", "Labrador", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(breedLabel.rectTransform, 6f, 2f, 6f, 2f);
+        valueLabel = CreateLabel(rowRoot, rowName + "Value", string.Empty, fontSize, MutedText, UiTheme.NavRegularFont, TextAlignmentOptions.TopLeft);
+        valueLabel.enableAutoSizing = false;
+        valueLabel.textWrappingMode = TextWrappingModes.Normal;
+        valueLabel.overflowMode = TextOverflowModes.Ellipsis;
+        Place(valueLabel.rectTransform, 88f, 0f, 204f, valueHeight);
     }
 
     private void CreateWhistleButton(RectTransform parent)

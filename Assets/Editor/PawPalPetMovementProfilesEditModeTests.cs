@@ -57,15 +57,27 @@ public sealed class PawPalPetMovementProfilesEditModeTests
 
         Assert.AreEqual(0.24f, small.WalkSpeed, 0.0001f);
         Assert.AreEqual(0.78f, small.TrotSpeed, 0.0001f);
-        Assert.AreEqual(1.05f, small.RunSpeed, 0.0001f);
+        Assert.AreEqual(2.34f, small.RunSpeed, 0.0001f);
 
         Assert.AreEqual(0.52f, medium.WalkSpeed, 0.0001f);
         Assert.AreEqual(0.98f, medium.TrotSpeed, 0.0001f);
-        Assert.AreEqual(1.30f, medium.RunSpeed, 0.0001f);
+        Assert.AreEqual(2.94f, medium.RunSpeed, 0.0001f);
 
         Assert.AreEqual(0.66f, large.WalkSpeed, 0.0001f);
         Assert.AreEqual(1.18f, large.TrotSpeed, 0.0001f);
-        Assert.AreEqual(3.35f, large.RunSpeed, 0.0001f);
+        Assert.AreEqual(3.54f, large.RunSpeed, 0.0001f);
+    }
+
+    [Test]
+    public void RunSpeedIsTripleTrotSpeedForEverySizeClass()
+    {
+        PawPalPetMovementProfile small = PawPalPetMovementProfiles.Resolve("puppy_labrador", null, null, null);
+        PawPalPetMovementProfile medium = PawPalPetMovementProfiles.Resolve("cat_simple", null, null, null);
+        PawPalPetMovementProfile large = PawPalPetMovementProfiles.Resolve("husky", null, null, null);
+
+        Assert.AreEqual(small.TrotSpeed * 3f, small.RunSpeed, 0.0001f);
+        Assert.AreEqual(medium.TrotSpeed * 3f, medium.RunSpeed, 0.0001f);
+        Assert.AreEqual(large.TrotSpeed * 3f, large.RunSpeed, 0.0001f);
     }
 
     [Test]

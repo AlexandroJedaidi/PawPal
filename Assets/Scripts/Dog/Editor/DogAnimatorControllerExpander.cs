@@ -137,6 +137,12 @@ public static class DogAnimatorControllerExpander
             "Run_F_IP")
     };
 
+    private static readonly ControllerSpec BaseControllerSpec = new ControllerSpec(
+        BaseControllerTemplatePath,
+        "Assets/3rd Party Packs/Dogs (Red Deer)/Puppy/Puppy_Labrador/Puppy/FBX/Anim/Puppy_Labrador_anim_RM.fbx",
+        "Arm_Labrador",
+        "Run_F_RM");
+
     private static readonly StateSpec[] CommonStates =
     {
         new StateSpec("Idle1", "Idle_1", true),
@@ -153,7 +159,11 @@ public static class DogAnimatorControllerExpander
         new StateSpec("EatDrinkStart", "EatDrink_start", false),
         new StateSpec("EatLoop", "Eat_loop", true),
         new StateSpec("DrinkLoop", "Drink_loop", true),
-        new StateSpec("EatDrinkEnd", "EatDrink_end", false)
+        new StateSpec("EatDrinkEnd", "EatDrink_end", false),
+        new StateSpec(PawPalPetTurnAnimationUtility.TurnLeftStateName, "Turn_L_{Motion}", false),
+        new StateSpec(PawPalPetTurnAnimationUtility.TurnRightStateName, "Turn_R_{Motion}", false),
+        new StateSpec(PawPalPetTurnAnimationUtility.TurnLeft180StateName, "Turn_L180_{Motion}", false),
+        new StateSpec(PawPalPetTurnAnimationUtility.TurnRight180StateName, "Turn_R180_{Motion}", false)
     };
 
     [MenuItem(MenuPath)]
@@ -165,6 +175,11 @@ public static class DogAnimatorControllerExpander
     public static void ExpandAllControllers()
     {
         int changedControllerCount = 0;
+        if (ExpandController(BaseControllerSpec))
+        {
+            changedControllerCount++;
+        }
+
         for (int i = 0; i < ControllerSpecs.Length; i++)
         {
             if (ExpandController(ControllerSpecs[i]))
@@ -213,7 +228,7 @@ public static class DogAnimatorControllerExpander
         {
             StateSpec state = CommonStates[i];
             Vector3 position = new Vector3(620f, 20f + i * 60f, 0f);
-            changed |= EnsureState(stateMachine, state.StateName, spec.ClipPrefix + "|" + state.ClipSuffix, clipsByName, position);
+            changed |= EnsureState(stateMachine, state.StateName, spec.ClipPrefix + "|" + ResolveClipSuffix(state.ClipSuffix, spec), clipsByName, position);
         }
 
         if (changed)
@@ -222,6 +237,19 @@ public static class DogAnimatorControllerExpander
         }
 
         return changed;
+    }
+
+    private static string ResolveClipSuffix(string clipSuffix, ControllerSpec spec)
+    {
+        if (string.IsNullOrEmpty(clipSuffix))
+        {
+            return clipSuffix;
+        }
+
+        string motionSuffix = !string.IsNullOrEmpty(spec.RunSuffix) && spec.RunSuffix.EndsWith("_RM", System.StringComparison.Ordinal)
+            ? "RM"
+            : "IP";
+        return clipSuffix.Replace("{Motion}", motionSuffix);
     }
 
     private static Dictionary<string, AnimationClip> LoadClipsByName(string assetPath)

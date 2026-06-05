@@ -174,12 +174,11 @@ internal struct PawPalPetAutoTravelThresholdProfile
 
 public static class PawPalPetMovementProfiles
 {
+    private const float RunToTrotSpeedMultiplier = 3f;
     private const float MediumWalkSpeed = 0.52f;
     private const float MediumTrotSpeed = 0.98f;
-    private const float MediumRunSpeed = 1.30f;
     private const float LargeWalkSpeed = 0.66f;
     private const float LargeTrotSpeed = 1.18f;
-    private const float LargeRunSpeed = 3.35f;
     private const float MediumWalkAnimatorBaseline = 0.5f;
     private const float MediumTrotAnimatorBaseline = 0.78f;
     private const float MediumRunAnimatorBaseline = 1f;
@@ -187,18 +186,15 @@ public static class PawPalPetMovementProfiles
     private static readonly PawPalPetMovementProfile SmallProfile = BuildProfile(
         PawPalPetSizeClass.Small,
         0.24f,
-        0.78f,
-        1.05f);
+        0.78f);
     private static readonly PawPalPetMovementProfile MediumProfile = BuildProfile(
         PawPalPetSizeClass.Medium,
         MediumWalkSpeed,
-        MediumTrotSpeed,
-        MediumRunSpeed);
+        MediumTrotSpeed);
     private static readonly PawPalPetMovementProfile LargeProfile = BuildProfile(
         PawPalPetSizeClass.Large,
         LargeWalkSpeed,
-        LargeTrotSpeed,
-        LargeRunSpeed);
+        LargeTrotSpeed);
 
     public static PawPalPetMovementProfile DefaultProfile
     {
@@ -251,13 +247,13 @@ public static class PawPalPetMovementProfiles
         }
     }
 
-    private static PawPalPetMovementProfile BuildProfile(PawPalPetSizeClass sizeClass, float walkSpeed, float trotSpeed, float runSpeed)
+    private static PawPalPetMovementProfile BuildProfile(PawPalPetSizeClass sizeClass, float walkSpeed, float trotSpeed)
     {
         return BuildProfile(
             sizeClass,
             walkSpeed,
             trotSpeed,
-            runSpeed,
+            trotSpeed * RunToTrotSpeedMultiplier,
             MediumWalkAnimatorBaseline,
             MediumTrotAnimatorBaseline,
             MediumRunAnimatorBaseline);

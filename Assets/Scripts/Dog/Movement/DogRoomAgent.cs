@@ -195,6 +195,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float preMoveTurnSpeed = 180f;
     [SerializeField] private float preMoveMaxTurnTime = 1.1f;
     [SerializeField] private float preMoveTurnAngle = 8f;
+    [SerializeField] private float preMoveHalfTurnAngle = 135f;
+    [SerializeField] private float preMoveTurnCrossFadeDuration = 0.08f;
     [SerializeField] private float preMovePauseDuration = 0.12f;
     [SerializeField] private string locomotionStateName = "Locomotion";
     [SerializeField] private string runStateName = "RunForward";
@@ -411,6 +413,10 @@ public class DogRoomAgent : MonoBehaviour
     private float movementLockedUntil;
     private int locomotionStateHash;
     private int runStateHash;
+    private int turnLeftStateHash;
+    private int turnRightStateHash;
+    private int turnLeft180StateHash;
+    private int turnRight180StateHash;
     private int scratchStateHash;
     private int tailWagStateHash;
     private int barkStateHash;
@@ -460,6 +466,10 @@ public class DogRoomAgent : MonoBehaviour
     private Coroutine tugLoopAnimationRoutine;
     private bool tugLoopAnimationActive;
     private PlayableGraph directClipGraph;
+    private AnimationClipPlayable activeDirectLocomotionPlayable;
+    private AnimationClip activeDirectLocomotionClip;
+    private DogMovementPace activeDirectLocomotionPace;
+    private bool directLocomotionClipActive;
     private DogVocalContext vocalContext = DogVocalContext.Ambient;
     private float nextAllowedPantingTime;
     private float nextAllowedWhiningTime;
@@ -727,6 +737,7 @@ public class DogRoomAgent : MonoBehaviour
         ConfigureAgent();
         locomotionStateHash = ResolveAnimatorStateHash(locomotionStateName);
         runStateHash = ResolveAnimatorStateHash(runStateName);
+        ResolvePreMoveTurnStateHashes();
         ResolveOneShotStateHashes();
         ResolveNeedInteractionStateHashes();
         ResolveRestStateHashes();
@@ -947,6 +958,7 @@ public class DogRoomAgent : MonoBehaviour
         ConfigureAgent();
         locomotionStateHash = ResolveAnimatorStateHash(locomotionStateName);
         runStateHash = ResolveAnimatorStateHash(runStateName);
+        ResolvePreMoveTurnStateHashes();
         ResolveOneShotStateHashes();
         ResolveNeedInteractionStateHashes();
         ResolveRestStateHashes();
@@ -2572,6 +2584,36 @@ public class DogRoomAgent : MonoBehaviour
     }
 #endif
 
+    private void ResolvePreMoveTurnStateHashes()
+    {
+        turnLeftStateHash = ResolveAnimatorStateHash(BuildDogTurnStateCandidates(PawPalPetTurnClipKind.Left));
+        turnRightStateHash = ResolveAnimatorStateHash(BuildDogTurnStateCandidates(PawPalPetTurnClipKind.Right));
+        turnLeft180StateHash = ResolveAnimatorStateHash(BuildDogTurnStateCandidates(PawPalPetTurnClipKind.Left180));
+        turnRight180StateHash = ResolveAnimatorStateHash(BuildDogTurnStateCandidates(PawPalPetTurnClipKind.Right180));
+    }
+
+    private string[] BuildDogTurnStateCandidates(PawPalPetTurnClipKind turnKind)
+    {
+        string prefix = GetImportedClipPrefix();
+        string stateName = PawPalPetTurnAnimationUtility.GetStateName(turnKind);
+        string[] suffixes = PawPalPetTurnAnimationUtility.GetTurnClipSuffixes(false, turnKind);
+        if (suffixes.Length == 0)
+        {
+            return new[] { stateName };
+        }
+
+        string firstSuffix = suffixes[0];
+        string secondSuffix = suffixes.Length > 1 ? suffixes[1] : suffixes[0];
+        return new[]
+        {
+            stateName,
+            BuildPrefixedStateName(prefix, firstSuffix),
+            BuildPrefixedStateName(prefix, secondSuffix),
+            firstSuffix,
+            secondSuffix
+        };
+    }
+
     private void ResolveOneShotStateHashes()
     {
         scratchStateHash = ResolveAnimatorStateHash(scratchStateName);
@@ -3378,12 +3420,16 @@ public class DogRoomAgent : MonoBehaviour
 
         Quaternion initialLookRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
         float initialSignedAngle = Vector3.SignedAngle(transform.forward, direction.normalized, Vector3.up);
-        if (Mathf.Abs(initialSignedAngle) <= preMoveTurnAngle)
+        PawPalPetTurnClipKind turnKind = PawPalPetTurnAnimationUtility.ResolveTurnClipKind(
+            initialSignedAngle,
+            preMoveTurnAngle,
+            preMoveHalfTurnAngle);
+        if (turnKind == PawPalPetTurnClipKind.None)
         {
             yield break;
         }
 
-        BeginPreMoveTurnAnimation(GetTurnBlendDirection(initialSignedAngle));
+        BeginPreMoveTurnAnimation(GetTurnBlendDirection(initialSignedAngle), turnKind);
 
         float elapsed = 0f;
         while (elapsed < preMoveMaxTurnTime)
@@ -3678,15 +3724,16 @@ public class DogRoomAgent : MonoBehaviour
         animator.SetFloat(SpeedHash, animatorSpeedValue);
         animator.SetFloat(DirectionHash, 0f);
 
-        if (pace == DogMovementPace.Run && runStateHash != 0)
+        bool startedDirectLocomotion = TryStartDirectImportedLocomotion(pace);
+        if (!startedDirectLocomotion && pace == DogMovementPace.Run && runStateHash != 0)
         {
             animator.CrossFadeInFixedTime(runStateHash, locomotionCrossFadeDuration, BaseLayerIndex, 0f);
         }
-        else if (locomotionStateHash != 0)
+        else if (!startedDirectLocomotion && locomotionStateHash != 0)
         {
             animator.CrossFadeInFixedTime(locomotionStateHash, locomotionCrossFadeDuration, BaseLayerIndex, 0f);
         }
-        else if (!warnedMissingLocomotionState)
+        else if (!startedDirectLocomotion && !warnedMissingLocomotionState)
         {
             warnedMissingLocomotionState = true;
             Debug.LogWarning(name + " could not find Animator state '" + locomotionStateName + "'. Movement will still use Move/Speed/Direction parameters.");
@@ -3697,6 +3744,7 @@ public class DogRoomAgent : MonoBehaviour
         if (!acceptedDestination)
         {
             pathPrimedForWalk = false;
+            StopDirectImportedLocomotion();
             agent.ResetPath();
             SetNeutralIdle();
             animator.SetBool(MoveHash, false);
@@ -3756,9 +3804,159 @@ public class DogRoomAgent : MonoBehaviour
         MaybeLogSlideAnomaly(shouldMove, hasMoveIntent, hasWorldMotionAssist, velocity);
 
         IsMoving = shouldMove;
+        bool directLocomotionActive = TryUpdateDirectImportedLocomotion(CurrentPace, shouldMove);
         animator.SetBool(MoveHash, shouldMove);
         animator.SetFloat(SpeedHash, animatorSpeedValue);
         animator.SetFloat(DirectionHash, animatorDirectionValue);
+
+        if (directLocomotionActive)
+        {
+            animator.speed = 1f;
+        }
+    }
+
+    private bool TryUpdateDirectImportedLocomotion(DogMovementPace pace, bool shouldMove)
+    {
+#if UNITY_EDITOR
+        if (!shouldMove)
+        {
+            StopDirectImportedLocomotion();
+            return false;
+        }
+
+        if (animator == null)
+        {
+            return false;
+        }
+
+        if (isPlayingOneShotAnimation || isResting || isSleeping || tugLoopAnimationActive)
+        {
+            StopDirectImportedLocomotion();
+            return false;
+        }
+
+        if (!directLocomotionClipActive && directClipGraph.IsValid())
+        {
+            return false;
+        }
+
+        if (!TryStartDirectImportedLocomotion(pace))
+        {
+            return false;
+        }
+
+        TickDirectImportedLocomotionLoop();
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    private bool TryStartDirectImportedLocomotion(DogMovementPace pace)
+    {
+#if UNITY_EDITOR
+        AnimationClip clip;
+        if (!TryGetImportedLocomotionClip(pace, out clip) || clip == null)
+        {
+            StopDirectImportedLocomotion();
+            return false;
+        }
+
+        if (directLocomotionClipActive
+            && directClipGraph.IsValid()
+            && activeDirectLocomotionPlayable.IsValid()
+            && activeDirectLocomotionClip == clip
+            && activeDirectLocomotionPace == pace)
+        {
+            return true;
+        }
+
+        StopDirectClipGraph();
+
+        directClipGraph = PlayableGraph.Create(name + "_DirectDogLocomotionClip");
+        directClipGraph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+        AnimationPlayableOutput output = AnimationPlayableOutput.Create(directClipGraph, "DogLocomotionClip", animator);
+        activeDirectLocomotionPlayable = AnimationClipPlayable.Create(directClipGraph, clip);
+        activeDirectLocomotionPlayable.SetApplyFootIK(false);
+        activeDirectLocomotionPlayable.SetApplyPlayableIK(false);
+        activeDirectLocomotionPlayable.SetDuration(double.PositiveInfinity);
+        activeDirectLocomotionPlayable.SetDone(false);
+        activeDirectLocomotionPlayable.SetSpeed(1d);
+        output.SetSourcePlayable(activeDirectLocomotionPlayable);
+        directClipGraph.Play();
+
+        activeDirectLocomotionClip = clip;
+        activeDirectLocomotionPace = pace;
+        directLocomotionClipActive = true;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    private bool TryStartDirectImportedTurnClip(PawPalPetTurnClipKind turnKind)
+    {
+#if UNITY_EDITOR
+        AnimationClip clip;
+        if (!TryGetImportedTurnClip(turnKind, out clip) || clip == null)
+        {
+            return false;
+        }
+
+        StopDirectClipGraph();
+
+        directClipGraph = PlayableGraph.Create(name + "_DirectDogTurnClip");
+        directClipGraph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+        AnimationPlayableOutput output = AnimationPlayableOutput.Create(directClipGraph, "DogTurnClip", animator);
+        activeDirectLocomotionPlayable = AnimationClipPlayable.Create(directClipGraph, clip);
+        activeDirectLocomotionPlayable.SetApplyFootIK(false);
+        activeDirectLocomotionPlayable.SetApplyPlayableIK(false);
+        activeDirectLocomotionPlayable.SetDuration(clip.length);
+        activeDirectLocomotionPlayable.SetDone(false);
+        activeDirectLocomotionPlayable.SetSpeed(1d);
+        output.SetSourcePlayable(activeDirectLocomotionPlayable);
+        directClipGraph.Play();
+
+        activeDirectLocomotionClip = clip;
+        activeDirectLocomotionPace = CurrentPace;
+        directLocomotionClipActive = false;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    private void TickDirectImportedLocomotionLoop()
+    {
+#if UNITY_EDITOR
+        if (!directLocomotionClipActive
+            || activeDirectLocomotionClip == null
+            || !activeDirectLocomotionPlayable.IsValid())
+        {
+            return;
+        }
+
+        float clipLength = activeDirectLocomotionClip.length;
+        if (clipLength <= 0.001f)
+        {
+            return;
+        }
+
+        if (activeDirectLocomotionPlayable.GetTime() >= clipLength)
+        {
+            activeDirectLocomotionPlayable.SetTime(0d);
+        }
+#endif
+    }
+
+    private void StopDirectImportedLocomotion()
+    {
+        if (!directLocomotionClipActive)
+        {
+            return;
+        }
+
+        StopDirectClipGraph();
     }
 
     private void UpdateWalkingAudio()
@@ -4089,7 +4287,7 @@ public class DogRoomAgent : MonoBehaviour
         return true;
     }
 
-    private void BeginPreMoveTurnAnimation(float turnBlendDirection)
+    private void BeginPreMoveTurnAnimation(float turnBlendDirection, PawPalPetTurnClipKind turnKind)
     {
         if (animator == null)
         {
@@ -4104,7 +4302,20 @@ public class DogRoomAgent : MonoBehaviour
         animatorDirectionVelocity = 0f;
         UpdatePreMoveTurnAnimation();
 
-        if (locomotionStateHash != 0)
+        StopDirectImportedLocomotion();
+
+        int turnStateHash = GetPreMoveTurnStateHash(turnKind);
+        if (turnStateHash != 0)
+        {
+            animator.CrossFadeInFixedTime(turnStateHash, Mathf.Max(0f, preMoveTurnCrossFadeDuration), BaseLayerIndex, 0f);
+        }
+#if UNITY_EDITOR
+        else if (TryStartDirectImportedTurnClip(turnKind))
+        {
+            animator.speed = 1f;
+        }
+#endif
+        else if (locomotionStateHash != 0)
         {
             animator.CrossFadeInFixedTime(locomotionStateHash, locomotionCrossFadeDuration, BaseLayerIndex, 0f);
         }
@@ -4129,6 +4340,7 @@ public class DogRoomAgent : MonoBehaviour
         preMoveTurnBlendDirection = 0f;
         animatorDirectionValue = 0f;
         animatorDirectionVelocity = 0f;
+        StopDirectClipGraph();
 
         if (animator == null)
         {
@@ -4139,6 +4351,23 @@ public class DogRoomAgent : MonoBehaviour
         animator.SetFloat(SpeedHash, 0f);
         animator.SetBool(MoveHash, false);
         SetNeutralIdle();
+    }
+
+    private int GetPreMoveTurnStateHash(PawPalPetTurnClipKind turnKind)
+    {
+        switch (turnKind)
+        {
+            case PawPalPetTurnClipKind.Left:
+                return turnLeftStateHash;
+            case PawPalPetTurnClipKind.Right:
+                return turnRightStateHash;
+            case PawPalPetTurnClipKind.Left180:
+                return turnLeft180StateHash;
+            case PawPalPetTurnClipKind.Right180:
+                return turnRight180StateHash;
+            default:
+                return 0;
+        }
     }
 
     private float GetMovementTurnBlendDirection(Vector3 planarVelocity, bool hasMoveIntent)
@@ -6535,11 +6764,19 @@ public class DogRoomAgent : MonoBehaviour
     {
         if (!directClipGraph.IsValid())
         {
+            activeDirectLocomotionPlayable = default;
+            activeDirectLocomotionClip = null;
+            activeDirectLocomotionPace = DogMovementPace.Walk;
+            directLocomotionClipActive = false;
             return;
         }
 
         directClipGraph.Stop();
         directClipGraph.Destroy();
+        activeDirectLocomotionPlayable = default;
+        activeDirectLocomotionClip = null;
+        activeDirectLocomotionPace = DogMovementPace.Walk;
+        directLocomotionClipActive = false;
     }
 
     private bool TryGetImportedRestClip(string suffix, out AnimationClip clip)
@@ -6584,6 +6821,49 @@ public class DogRoomAgent : MonoBehaviour
         }
 
         return TryGetImportedClip(suffix, out clip);
+    }
+
+    private bool TryGetImportedLocomotionClip(DogMovementPace pace, out AnimationClip clip)
+    {
+        clip = null;
+        string[] suffixes = GetImportedForwardLocomotionClipSuffixes(pace);
+        for (int i = 0; i < suffixes.Length; i++)
+        {
+            if (TryGetImportedClip(suffixes[i], out clip))
+            {
+                return clip != null;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetImportedTurnClip(PawPalPetTurnClipKind turnKind, out AnimationClip clip)
+    {
+        clip = null;
+        string[] suffixes = PawPalPetTurnAnimationUtility.GetTurnClipSuffixes(false, turnKind);
+        for (int i = 0; i < suffixes.Length; i++)
+        {
+            if (TryGetImportedClip(suffixes[i], out clip))
+            {
+                return clip != null;
+            }
+        }
+
+        return false;
+    }
+
+    internal static string[] GetImportedForwardLocomotionClipSuffixes(DogMovementPace pace)
+    {
+        switch (pace)
+        {
+            case DogMovementPace.Run:
+                return new[] { "Run_F_RM", "Run_F_IP" };
+            case DogMovementPace.Trot:
+                return new[] { "Trot_F_RM", "Trot_F_IP" };
+            default:
+                return new[] { "Walk_F_RM", "Walk_F_IP" };
+        }
     }
 
     private bool TryGetImportedPettingClip(out AnimationClip clip)

@@ -83,11 +83,9 @@ public sealed class IntroPetSpawner : MonoBehaviour
 
         for (int i = 0; i < selections.Count; i++)
         {
-            Vector3 position = i < spawnPositions.Length
-                ? spawnPositions[i]
-                : SampleSpawnPosition(fieldBounds.center);
-            Quaternion rotation = Quaternion.Euler(0f, 180f + UnityEngine.Random.Range(-24f, 24f), 0f);
             IntroPetRuntimeSelection selection = selections[i];
+            Vector3 position = ResolveSpawnPosition(selection, i, spawnPositions);
+            Quaternion rotation = Quaternion.Euler(0f, 180f + UnityEngine.Random.Range(-24f, 24f), 0f);
             IntroPetSpawnStatus status;
             IntroPetAgent agent = CreateAgent(selection, agents.Count, position, rotation, out status);
             if (agent != null)
@@ -422,6 +420,40 @@ public sealed class IntroPetSpawner : MonoBehaviour
         }
 
         return candidates;
+    }
+
+    private Vector3 ResolveSpawnPosition(IntroPetRuntimeSelection selection, int index, Vector3[] spawnPositions)
+    {
+        Vector3 defaultPosition = index < spawnPositions.Length
+            ? spawnPositions[index]
+            : SampleSpawnPosition(fieldBounds.center);
+        IntroPetDefinition definition = selection != null ? selection.Definition : null;
+        string petId = definition != null ? definition.PetId : string.Empty;
+        if (string.IsNullOrWhiteSpace(petId))
+        {
+            return defaultPosition;
+        }
+
+        Vector3 center = fieldBounds.center;
+        Vector3 extents = fieldBounds.extents;
+
+        if (string.Equals(petId, "husky", StringComparison.OrdinalIgnoreCase))
+        {
+            return SampleSpawnPosition(new Vector3(
+                center.x,
+                fieldBounds.min.y,
+                center.z + extents.z * 0.04f));
+        }
+
+        if (string.Equals(petId, "corgi", StringComparison.OrdinalIgnoreCase))
+        {
+            return SampleSpawnPosition(new Vector3(
+                center.x + extents.x * 0.22f,
+                fieldBounds.min.y,
+                center.z + extents.z * 0.22f));
+        }
+
+        return defaultPosition;
     }
 
     private Vector3 SampleSpawnPosition(Vector3 candidate)

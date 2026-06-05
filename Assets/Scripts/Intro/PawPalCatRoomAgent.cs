@@ -55,6 +55,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     [SerializeField] private float rotationSpeed = 7.5f;
     [SerializeField] private float stoppingDistance = 0.05f;
     [SerializeField] private float preInteractionPause = 0.18f;
+    [SerializeField] private float preMoveTurnAngle = 8f;
+    [SerializeField] private float preMoveHalfTurnAngle = 135f;
+    [SerializeField] private float preMoveMaxTurnTime = 1.1f;
+    [SerializeField] private float preMoveTurnCrossFadeDuration = 0.08f;
 
     [Header("Ambient")]
     [SerializeField] private float toyInterestChance = 0.55f;
@@ -134,6 +138,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private int walkStateHash;
     private int trotStateHash;
     private int runStateHash;
+    private int turnLeftStateHash;
+    private int turnRightStateHash;
+    private int turnLeft180StateHash;
+    private int turnRight180StateHash;
     private int activeLocomotionStateHash;
     private string activeMovementContext = "Roam";
     private float nextMovementDebugLogAt;
@@ -143,6 +151,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private float lastObservedAnimatorNormalizedTime;
     private float lastObservedAnimatorProgressAt;
     private int interactionIdlePoseCursor;
+    private bool isPlayingPreMoveTurnAnimation;
 #if UNITY_EDITOR
     private PlayableGraph directLocomotionGraph;
     private AnimationClipPlayable activeDirectLocomotionPlayable;
@@ -733,6 +742,13 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return;
         }
 
+        if (isPlayingPreMoveTurnAnimation)
+        {
+            StopAgentMovement();
+            TickMovementDebug(false, "PreMoveTurn");
+            return;
+        }
+
         if (!isActiveAndEnabled || sessionData == null || socialPaused || trainingBusy)
         {
             if (!socialPausePoseApplied)
@@ -1221,8 +1237,6 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
                 safePoint = ClampToRoom(worldPosition);
             }
 
-            EnsureAgentMoving();
-            agent.ResetPath();
             float arrivalDistance = Mathf.Max(0.02f, reachedDistance);
             Vector3 startToTarget = safePoint - transform.position;
             startToTarget.y = 0f;
@@ -1236,6 +1250,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
                 yield break;
             }
 
+            StopAgentMovement();
+            SetMoving(false);
+            yield return TurnTowardDestination(safePoint);
+            EnsureAgentMoving();
+            agent.ResetPath();
             if (!agent.SetDestination(safePoint))
             {
                 wasLastTravelSuccessful = false;
@@ -1749,23 +1768,19 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         }
 
         waitingForRoamDestination = false;
-        EnsureAgentMoving();
         Vector2 offset = Random.insideUnitCircle * roamRadius;
         Vector3 destination = homePosition + new Vector3(offset.x, 0f, offset.y);
         destination = ClampToRoom(destination);
 
         Vector3 safePoint;
-        if (TryGetRoomSafePoint(destination, sampleRadius, out safePoint))
+        if (!TryGetRoomSafePoint(destination, sampleRadius, out safePoint))
         {
-            agent.SetDestination(safePoint);
-        }
-        else
-        {
-            agent.SetDestination(destination);
+            safePoint = destination;
         }
 
         SetMovePace(Random.value < 0.35f ? DogMovementPace.Trot : DogMovementPace.Walk);
         waitUntil = 0f;
+        StartCoroutine(CommitRoamDestinationAfterTurn(safePoint));
     }
 
     private void CacheAnimationStateHashes()
@@ -1787,6 +1802,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         walkStateHash = ResolveStateHash(GetCatLocomotionStateNames(DogMovementPace.Walk));
         trotStateHash = ResolveStateHash(GetCatLocomotionStateNames(DogMovementPace.Trot));
         runStateHash = ResolveStateHash(GetCatLocomotionStateNames(DogMovementPace.Run));
+        turnLeftStateHash = ResolveStateHash(GetCatTurnStateNames(PawPalPetTurnClipKind.Left));
+        turnRightStateHash = ResolveStateHash(GetCatTurnStateNames(PawPalPetTurnClipKind.Right));
+        turnLeft180StateHash = ResolveStateHash(GetCatTurnStateNames(PawPalPetTurnClipKind.Left180));
+        turnRight180StateHash = ResolveStateHash(GetCatTurnStateNames(PawPalPetTurnClipKind.Right180));
         if (sessionData != null && animator != null && animator.runtimeAnimatorController != null)
         {
             LogAnimationAuditOnce();
@@ -2478,6 +2497,136 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSpeed);
     }
 
+    private IEnumerator CommitRoamDestinationAfterTurn(Vector3 destination)
+    {
+        directMovementRoutineActive = true;
+        try
+        {
+            StopAgentMovement();
+            SetMoving(false);
+            yield return TurnTowardDestination(destination);
+
+            EnsureAgentMoving();
+            if (agent != null && agent.enabled && agent.isOnNavMesh)
+            {
+                agent.SetDestination(destination);
+            }
+        }
+        finally
+        {
+            directMovementRoutineActive = false;
+        }
+    }
+
+    private IEnumerator TurnTowardDestination(Vector3 destination)
+    {
+        Vector3 direction = destination - transform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= 0.001f)
+        {
+            yield break;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        float initialSignedAngle = Vector3.SignedAngle(transform.forward, direction.normalized, Vector3.up);
+        PawPalPetTurnClipKind turnKind = PawPalPetTurnAnimationUtility.ResolveTurnClipKind(
+            initialSignedAngle,
+            preMoveTurnAngle,
+            preMoveHalfTurnAngle);
+        if (turnKind == PawPalPetTurnClipKind.None)
+        {
+            yield break;
+        }
+
+        isPlayingPreMoveTurnAnimation = true;
+        activeLocomotionStateHash = 0;
+        StopDirectLocomotionPlayback();
+
+        bool playedTurnState = TryCrossFadeState(GetTurnStateHash(turnKind), preMoveTurnCrossFadeDuration);
+#if UNITY_EDITOR
+        if (!playedTurnState)
+        {
+            playedTurnState = TryPlayDirectTurnClip(turnKind);
+        }
+#endif
+
+        float elapsed = 0f;
+        float maxTurnTime = Mathf.Max(0.05f, preMoveMaxTurnTime);
+        float clipDuration = playedTurnState ? GetCurrentClipDurationOrDefault(maxTurnTime) : maxTurnTime;
+        float targetDuration = Mathf.Min(maxTurnTime, Mathf.Max(0.12f, clipDuration * 0.95f));
+        while (elapsed < targetDuration)
+        {
+            direction = destination - transform.position;
+            direction.y = 0f;
+            if (direction.sqrMagnitude <= 0.001f)
+            {
+                break;
+            }
+
+            targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Mathf.Clamp01(Time.deltaTime / Mathf.Max(0.01f, targetDuration - elapsed)));
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        direction = destination - transform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude > 0.001f)
+        {
+            transform.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        }
+
+        isPlayingPreMoveTurnAnimation = false;
+        StopDirectLocomotionPlayback();
+    }
+
+    private int GetTurnStateHash(PawPalPetTurnClipKind kind)
+    {
+        switch (kind)
+        {
+            case PawPalPetTurnClipKind.Left:
+                return turnLeftStateHash;
+            case PawPalPetTurnClipKind.Right:
+                return turnRightStateHash;
+            case PawPalPetTurnClipKind.Left180:
+                return turnLeft180StateHash;
+            case PawPalPetTurnClipKind.Right180:
+                return turnRight180StateHash;
+            default:
+                return 0;
+        }
+    }
+
+    private bool TryCrossFadeState(int stateHash, float crossFadeDuration)
+    {
+        if (animator == null || stateHash == 0)
+        {
+            return false;
+        }
+
+        StopDirectLocomotionPlayback();
+        activeLocomotionStateHash = 0;
+        animator.speed = 1f;
+        animator.CrossFadeInFixedTime(stateHash, Mathf.Max(0f, crossFadeDuration), 0, 0f);
+        return true;
+    }
+
+    private float GetCurrentClipDurationOrDefault(float defaultDuration)
+    {
+        if (animator == null)
+        {
+            return defaultDuration;
+        }
+
+        AnimatorClipInfo[] clips = animator.GetCurrentAnimatorClipInfo(0);
+        if (clips == null || clips.Length == 0 || clips[0].clip == null)
+        {
+            return defaultDuration;
+        }
+
+        return clips[0].clip.length > 0f ? clips[0].clip.length : defaultDuration;
+    }
+
     private bool ShouldUseLocomotion()
     {
         if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.isStopped)
@@ -2828,6 +2977,31 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         }
     }
 
+    private static string[] GetCatTurnStateNames(PawPalPetTurnClipKind kind)
+    {
+        string stateName = PawPalPetTurnAnimationUtility.GetStateName(kind);
+        string[] suffixes = PawPalPetTurnAnimationUtility.GetTurnClipSuffixes(true, kind);
+        if (suffixes.Length == 0)
+        {
+            return new[] { stateName };
+        }
+
+        string firstSuffix = suffixes[0];
+        string secondSuffix = suffixes.Length > 1 ? suffixes[1] : suffixes[0];
+        return new[]
+        {
+            stateName,
+            "CatSimple_" + firstSuffix,
+            "CatSimple_" + secondSuffix,
+            "Arm_Cat|" + firstSuffix,
+            "Arm_Cat|" + secondSuffix,
+            "Arm_Kitten|" + firstSuffix,
+            "Arm_Kitten|" + secondSuffix,
+            firstSuffix,
+            secondSuffix
+        };
+    }
+
     private static string[] GetCatBowlStartStateNames()
     {
         return new[] { "CatSimple_EatDrink_start", "Arm_Cat|EatDrink_start", "Arm_Kitten|EatDrink_start", "EatDrink_start" };
@@ -2849,6 +3023,132 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     }
 
 #if UNITY_EDITOR
+    private bool TryPlayDirectTurnClip(PawPalPetTurnClipKind kind)
+    {
+        AnimationClip clip = ResolveEditorTurnClip(kind);
+        if (clip == null)
+        {
+            StopDirectLocomotionPlayback();
+            return false;
+        }
+
+        return TryPlayDirectOneShotClip(clip, "CatTurn");
+    }
+
+    private bool TryPlayDirectOneShotClip(AnimationClip clip, string graphLabel)
+    {
+        if (clip == null || animator == null)
+        {
+            return false;
+        }
+
+        if (directLocomotionGraph.IsValid()
+            && activeDirectLocomotionPlayable.IsValid()
+            && activeDirectLocomotionClip == clip)
+        {
+            return true;
+        }
+
+        StopDirectLocomotionPlayback();
+        directLocomotionGraph = PlayableGraph.Create(name + "_" + graphLabel);
+        directLocomotionGraph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+        AnimationPlayableOutput output = AnimationPlayableOutput.Create(directLocomotionGraph, graphLabel, animator);
+        activeDirectLocomotionPlayable = AnimationClipPlayable.Create(directLocomotionGraph, clip);
+        activeDirectLocomotionPlayable.SetApplyFootIK(false);
+        activeDirectLocomotionPlayable.SetApplyPlayableIK(false);
+        activeDirectLocomotionPlayable.SetDuration(clip.length);
+        activeDirectLocomotionPlayable.SetDone(false);
+        activeDirectLocomotionPlayable.SetSpeed(1d);
+        output.SetSourcePlayable(activeDirectLocomotionPlayable);
+        directLocomotionGraph.Play();
+        activeDirectLocomotionClip = clip;
+        return true;
+    }
+
+    private AnimationClip ResolveEditorTurnClip(PawPalPetTurnClipKind kind)
+    {
+        Dictionary<string, AnimationClip> clips = ResolveEditorImportedClips("turn");
+        if (clips == null || clips.Count == 0)
+        {
+            return null;
+        }
+
+        PawPalPetAnimationEntry entry;
+        PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(
+            out entry,
+            sessionData != null && sessionData.Definition != null ? sessionData.Definition.PetId : null,
+            sessionData != null ? sessionData.BreedName : null,
+            name);
+
+        string prefix = entry != null ? entry.ImportedClipPrefix : string.Empty;
+        string[] suffixes = PawPalPetTurnAnimationUtility.GetTurnClipSuffixes(true, kind);
+        for (int i = 0; i < suffixes.Length; i++)
+        {
+            AnimationClip clip;
+            string suffix = suffixes[i];
+            if (!string.IsNullOrEmpty(prefix) && clips.TryGetValue(prefix + "|" + suffix, out clip) && clip != null)
+            {
+                return clip;
+            }
+
+            if (clips.TryGetValue(suffix, out clip) && clip != null)
+            {
+                return clip;
+            }
+        }
+
+        foreach (KeyValuePair<string, AnimationClip> candidate in clips)
+        {
+            for (int i = 0; i < suffixes.Length; i++)
+            {
+                string suffix = suffixes[i];
+                if (candidate.Value != null
+                    && (candidate.Key.EndsWith("|" + suffix, StringComparison.OrdinalIgnoreCase)
+                        || candidate.Key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return candidate.Value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private Dictionary<string, AnimationClip> ResolveEditorImportedClips(string purpose)
+    {
+        PawPalPetAnimationEntry entry;
+        if (!PawPalPetAnimationRegistry.TryResolveEntryFromRawValues(
+            out entry,
+            sessionData != null && sessionData.Definition != null ? sessionData.Definition.PetId : null,
+            sessionData != null ? sessionData.BreedName : null,
+            name))
+        {
+            LogAnimationMessageOnce(
+                "missing-registry-entry-" + purpose,
+                "PawPal cat animation audit: could not resolve a registry entry for '"
+                + DisplayName
+                + "' while resolving "
+                + purpose
+                + " clip playback.");
+            return null;
+        }
+
+        Dictionary<string, AnimationClip> clips = PawPalPetAnimationRegistry.GetEditorImportedClips(entry);
+        if (clips == null || clips.Count == 0)
+        {
+            LogAnimationMessageOnce(
+                "missing-imported-clips-" + purpose,
+                "PawPal cat animation audit: registry entry '"
+                + entry.CanonicalKey
+                + "' has no imported clips available for '"
+                + DisplayName
+                + "'.");
+            return null;
+        }
+
+        return clips;
+    }
+
     private IEnumerator PlayDirectEditorClip(AnimationClip clip, float duration, bool loop, string graphLabel)
     {
         if (clip == null || animator == null)
