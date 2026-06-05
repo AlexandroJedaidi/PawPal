@@ -11,6 +11,7 @@ public static class PawPalIntroSceneFlow
     public const string IntroScenePath = "Assets/Scenes/IntroPetSelection.unity";
     public const string HomeSceneName = "David_Test";
     public const string HomeScenePath = "Assets/Scenes/David_Test.unity";
+    private const string LoadingHomeBackgroundResourcePath = "UI/Downloaded/loading_home";
 
     public static bool IsIntroScene(Scene scene)
     {
@@ -30,6 +31,7 @@ public static class PawPalIntroSceneFlow
             new PawPalSceneTransitionRequest
             {
                 DisplayText = "Preparing your space",
+                BackgroundResourcePath = LoadingHomeBackgroundResourcePath,
                 WaitForExplicitReady = true,
                 MinimumPostLoadFrames = 2,
                 OnObscured = delegate

@@ -13,6 +13,8 @@ public static class PawPalWalkSceneFlow
     public const string HomeScenePath = "Assets/Scenes/David_Test.unity";
     public const string WalkSceneName = "Walking";
     public const string WalkScenePath = "Assets/Scenes/Walking.unity";
+    private const string LoadingHomeBackgroundResourcePath = "UI/Downloaded/loading_home";
+    private const string LoadingWalkBackgroundResourcePath = "UI/Downloaded/loading_walk";
 
     private static bool pendingShowHome;
     private static GameObject pendingWalkDogInstance;
@@ -35,6 +37,7 @@ public static class PawPalWalkSceneFlow
             new PawPalSceneTransitionRequest
             {
                 DisplayText = "Getting everything ready",
+                BackgroundResourcePath = LoadingWalkBackgroundResourcePath,
                 MinimumPostLoadFrames = 2,
                 OnObscured = delegate
                 {
@@ -79,6 +82,7 @@ public static class PawPalWalkSceneFlow
             new PawPalSceneTransitionRequest
             {
                 DisplayText = "Preparing your space",
+                BackgroundResourcePath = LoadingHomeBackgroundResourcePath,
                 MinimumPostLoadFrames = 2,
                 FallbackSceneName = HomeSceneName,
                 FallbackScenePath = HomeScenePath,

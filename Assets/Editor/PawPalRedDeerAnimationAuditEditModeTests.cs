@@ -61,14 +61,6 @@ public sealed class PawPalRedDeerAnimationAuditEditModeTests
     [Test]
     public void RedDeerRegistryProvidesTurnClipsForEveryPet()
     {
-        PawPalPetTurnClipKind[] turnKinds =
-        {
-            PawPalPetTurnClipKind.Left,
-            PawPalPetTurnClipKind.Right,
-            PawPalPetTurnClipKind.Left180,
-            PawPalPetTurnClipKind.Right180
-        };
-
         foreach (PawPalPetAnimationEntry entry in PawPalPetAnimationRegistry.GetAllEntries())
         {
             Assert.NotNull(entry);
@@ -76,6 +68,7 @@ public sealed class PawPalRedDeerAnimationAuditEditModeTests
             Assert.NotNull(clips, entry.CanonicalKey);
             Assert.IsNotEmpty(clips, entry.CanonicalKey);
 
+            PawPalPetTurnClipKind[] turnKinds = GetRequiredTurnKinds(entry);
             for (int turnIndex = 0; turnIndex < turnKinds.Length; turnIndex++)
             {
                 PawPalPetTurnClipKind turnKind = turnKinds[turnIndex];
@@ -85,6 +78,26 @@ public sealed class PawPalRedDeerAnimationAuditEditModeTests
                     entry.CanonicalKey + " is missing a " + turnKind + " turn clip.");
             }
         }
+    }
+
+    private static PawPalPetTurnClipKind[] GetRequiredTurnKinds(PawPalPetAnimationEntry entry)
+    {
+        if (entry != null && entry.Species == IntroPetSpecies.Cat)
+        {
+            return new[]
+            {
+                PawPalPetTurnClipKind.Left,
+                PawPalPetTurnClipKind.Right
+            };
+        }
+
+        return new[]
+        {
+            PawPalPetTurnClipKind.Left,
+            PawPalPetTurnClipKind.Right,
+            PawPalPetTurnClipKind.Left180,
+            PawPalPetTurnClipKind.Right180
+        };
     }
 
     [TestCase(4f, PawPalPetTurnClipKind.None)]
@@ -100,6 +113,16 @@ public sealed class PawPalRedDeerAnimationAuditEditModeTests
             135f);
 
         Assert.AreEqual(expectedKind, kind);
+    }
+
+    [TestCase(PawPalPetTurnClipKind.Left180, PawPalPetTurnClipKind.Left)]
+    [TestCase(PawPalPetTurnClipKind.Right180, PawPalPetTurnClipKind.Right)]
+    [TestCase(PawPalPetTurnClipKind.Left, PawPalPetTurnClipKind.Left)]
+    [TestCase(PawPalPetTurnClipKind.Right, PawPalPetTurnClipKind.Right)]
+    [TestCase(PawPalPetTurnClipKind.None, PawPalPetTurnClipKind.None)]
+    public void CatTurnSelectionUsesStandardTurnClips(PawPalPetTurnClipKind inputKind, PawPalPetTurnClipKind expectedKind)
+    {
+        Assert.AreEqual(expectedKind, PawPalPetTurnAnimationUtility.UseStandardTurnForCat(inputKind));
     }
 
     private static bool ContainsAnyClipSuffix(Dictionary<string, AnimationClip> clips, string[] suffixes)

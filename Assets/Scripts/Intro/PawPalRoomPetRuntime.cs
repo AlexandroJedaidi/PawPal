@@ -117,6 +117,11 @@ public sealed class PawPalRoomPetHandle
         get { return DogAgent != null ? DogAgent.IsPlayingOneShotAnimation : CatAgent != null && CatAgent.IsPlayingOneShotAnimation; }
     }
 
+    public bool IsMoving
+    {
+        get { return DogAgent != null ? DogAgent.IsMoving : CatAgent != null && CatAgent.IsMoving; }
+    }
+
     public bool HasHeldToy
     {
         get { return DogAgent != null ? DogAgent.HasHeldToy : CatAgent != null && CatAgent.HasHeldToy; }
@@ -563,6 +568,124 @@ public static class PawPalRoomPetRuntime
         }
 
         return root;
+    }
+
+    public static bool IsNearbyHeadAttentionStateEligible(
+        bool isValid,
+        bool isActiveInHierarchy,
+        bool isBusy,
+        bool isResting,
+        bool isSleeping,
+        bool isPlayingOneShot,
+        bool hasHeldToy,
+        bool isMoving)
+    {
+        return isValid
+            && isActiveInHierarchy
+            && !isBusy
+            && !isResting
+            && !isSleeping
+            && !isPlayingOneShot
+            && !hasHeldToy
+            && !isMoving;
+    }
+
+    public static bool IsEligibleForNearbyHeadAttention(PawPalRoomPetHandle pet)
+    {
+        Transform root = pet != null ? pet.RootTransform : null;
+        return IsNearbyHeadAttentionStateEligible(
+            pet != null && pet.IsValid,
+            root != null && root.gameObject.activeInHierarchy,
+            pet != null && pet.IsBusy,
+            pet != null && pet.IsResting,
+            pet != null && pet.IsSleeping,
+            pet != null && pet.IsPlayingOneShotAnimation,
+            pet != null && pet.HasHeldToy,
+            pet != null && pet.IsMoving);
+    }
+
+    public static bool TryFindNearbyHeadAttentionPet(
+        Transform observerRoot,
+        float radius,
+        out PawPalRoomPetHandle pet)
+    {
+        pet = null;
+        if (observerRoot == null || radius <= 0f)
+        {
+            return false;
+        }
+
+        float bestSqrDistance = float.PositiveInfinity;
+        DogRoomAgent[] dogs = UnityEngine.Object.FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
+        for (int i = 0; i < dogs.Length; i++)
+        {
+            TryConsiderNearbyHeadAttentionCandidate(
+                observerRoot,
+                new PawPalRoomPetHandle(dogs[i]),
+                radius,
+                ref bestSqrDistance,
+                ref pet);
+        }
+
+        PawPalCatRoomAgent[] cats = UnityEngine.Object.FindObjectsByType<PawPalCatRoomAgent>(FindObjectsSortMode.None);
+        for (int i = 0; i < cats.Length; i++)
+        {
+            TryConsiderNearbyHeadAttentionCandidate(
+                observerRoot,
+                new PawPalRoomPetHandle(cats[i]),
+                radius,
+                ref bestSqrDistance,
+                ref pet);
+        }
+
+        return pet != null;
+    }
+
+    public static float ResolveSignedHeadTiltAngle(float minAbsAngle, float maxAbsAngle, float normalizedMagnitude, bool tiltRight)
+    {
+        float minAngle = Mathf.Max(0f, Mathf.Min(minAbsAngle, maxAbsAngle));
+        float maxAngle = Mathf.Max(minAngle, Mathf.Max(minAbsAngle, maxAbsAngle));
+        float amount = Mathf.Lerp(minAngle, maxAngle, Mathf.Clamp01(normalizedMagnitude));
+        return tiltRight ? amount : -amount;
+    }
+
+    public static bool IsHeadTiltCooldownReady(float now, float nextAllowedTime)
+    {
+        return now >= nextAllowedTime;
+    }
+
+    private static void TryConsiderNearbyHeadAttentionCandidate(
+        Transform observerRoot,
+        PawPalRoomPetHandle candidate,
+        float radius,
+        ref float bestSqrDistance,
+        ref PawPalRoomPetHandle bestPet)
+    {
+        if (!IsEligibleForNearbyHeadAttention(candidate))
+        {
+            return;
+        }
+
+        Transform root = candidate.RootTransform;
+        if (root == null
+            || root == observerRoot
+            || root.IsChildOf(observerRoot)
+            || observerRoot.IsChildOf(root))
+        {
+            return;
+        }
+
+        Vector3 offset = root.position - observerRoot.position;
+        offset.y = 0f;
+        float sqrDistance = offset.sqrMagnitude;
+        float radiusSqr = radius * radius;
+        if (sqrDistance > radiusSqr || sqrDistance >= bestSqrDistance)
+        {
+            return;
+        }
+
+        bestSqrDistance = sqrDistance;
+        bestPet = candidate;
     }
 
     private static PawPalRoomPetHandle ResolveAnyPet()

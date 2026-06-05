@@ -112,6 +112,37 @@ public sealed class PawPalPetMovementProfilesEditModeTests
     }
 
     [Test]
+    public void NearbyHeadAttentionEligibilityRejectsSuppressedPetStates()
+    {
+        Assert.IsTrue(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, false, false, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(false, true, false, false, false, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, false, false, false, false, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, true, false, false, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, true, false, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, false, true, false, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, false, false, true, false, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, false, false, false, true, false));
+        Assert.IsFalse(PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(true, true, false, false, false, false, false, true));
+    }
+
+    [Test]
+    public void NearbyHeadTiltAngleSelectionStaysWithinSignedRange()
+    {
+        Assert.AreEqual(-20f, PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(20f, 30f, 0f, false), 0.0001f);
+        Assert.AreEqual(30f, PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(20f, 30f, 1f, true), 0.0001f);
+        Assert.AreEqual(25f, PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(30f, 20f, 0.5f, true), 0.0001f);
+        Assert.AreEqual(-30f, PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(20f, 30f, 2f, false), 0.0001f);
+    }
+
+    [Test]
+    public void NearbyHeadTiltCooldownRequiresAllowedTime()
+    {
+        Assert.IsFalse(PawPalRoomPetRuntime.IsHeadTiltCooldownReady(4.99f, 5f));
+        Assert.IsTrue(PawPalRoomPetRuntime.IsHeadTiltCooldownReady(5f, 5f));
+        Assert.IsTrue(PawPalRoomPetRuntime.IsHeadTiltCooldownReady(6f, 5f));
+    }
+
+    [Test]
     public void CatRoomAgentUsesResolvedMovementProfileForPaceAndKeepsAuthoredPlaybackSpeed()
     {
         GameObject root = new GameObject("CatAgentTest");

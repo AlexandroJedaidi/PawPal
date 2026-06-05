@@ -24,6 +24,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private const float PetAvoidancePadding = 0.05f;
     private const float PetAvoidanceRerouteSearchRadius = 0.55f;
     private const int PetAvoidanceRerouteCandidateCount = 12;
+    private const bool AllowToyPickup = false;
     private static readonly HashSet<string> LoggedAnimationMessages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<Transform> ClaimedToyTransforms = new HashSet<Transform>();
     private static readonly PawPalPhotoPoseId[] InteractionIdlePoses =
@@ -76,6 +77,22 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     [SerializeField] private Vector3 toyDropOffset = new Vector3(0f, 0.035f, 0.32f);
     [SerializeField] private float socialCooldown = 3.2f;
 
+    [Header("Nearby Pet Glances")]
+    [SerializeField] private bool lookAtNearbyPets = true;
+    [SerializeField] private float nearbyPetLookRadius = 1.75f;
+    [SerializeField, Range(0f, 1f)] private float nearbyPetLookChance = 0.55f;
+    [SerializeField] private float minNearbyPetLookDuration = 0.8f;
+    [SerializeField] private float maxNearbyPetLookDuration = 1.6f;
+    [SerializeField] private float nearbyPetScanInterval = 0.2f;
+    [SerializeField] private float maxNearbyPetHeadYaw = 40f;
+    [SerializeField, Range(0f, 1f)] private float nearbyPetHeadTiltChance = 0.35f;
+    [SerializeField] private float minNearbyPetHeadTiltAngle = 20f;
+    [SerializeField] private float maxNearbyPetHeadTiltAngle = 30f;
+    [SerializeField] private float minNearbyPetHeadTiltDuration = 0.45f;
+    [SerializeField] private float maxNearbyPetHeadTiltDuration = 0.9f;
+    [SerializeField] private float minNearbyPetHeadTiltCooldown = 5f;
+    [SerializeField] private float maxNearbyPetHeadTiltCooldown = 12f;
+
     [Header("Audio")]
     [SerializeField] private AudioClip vocalClip;
     [SerializeField, Range(0f, 1f)] private float vocalVolume = 0.78f;
@@ -109,6 +126,8 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private DogMovementPace currentPace = DogMovementPace.Walk;
     private bool externalWalkControl;
     private DogMovementPace externalWalkPace = DogMovementPace.Walk;
+    private Vector3 lastExternalWalkPosition;
+    private bool hasExternalWalkPosition;
     private Coroutine activeActionRoutine;
     private bool directMovementRoutineActive;
     private bool socialPausePoseApplied;
@@ -152,6 +171,15 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private float lastObservedAnimatorProgressAt;
     private int interactionIdlePoseCursor;
     private bool isPlayingPreMoveTurnAnimation;
+    private Transform nearbyPetLookTarget;
+    private float nearbyPetLookUntil;
+    private float nextNearbyPetScanAt;
+    private float nextNearbyPetHeadTiltTime;
+    private float nearbyPetHeadTiltStartedAt;
+    private float nearbyPetHeadTiltUntil;
+    private float requestedNearbyPetHeadTiltAngle;
+    private float requestedNearbyPetHeadTiltDuration;
+    private Quaternion appliedNearbyPetHeadTilt = Quaternion.identity;
 #if UNITY_EDITOR
     private PlayableGraph directLocomotionGraph;
     private AnimationClipPlayable activeDirectLocomotionPlayable;
@@ -393,10 +421,12 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             isSleeping = false;
             SetExternalWalkPace(externalWalkPace);
             socialPausePoseApplied = false;
+            ResetExternalWalkMotionSample();
             StopAgentMovement();
         }
         else
         {
+            hasExternalWalkPosition = false;
             StopAgentMovement();
             SetMoving(false);
             socialPausePoseApplied = false;
@@ -407,6 +437,28 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     {
         externalWalkPace = pace;
         SetMovePace(pace);
+    }
+
+    private void ResetExternalWalkMotionSample()
+    {
+        lastExternalWalkPosition = transform.position;
+        hasExternalWalkPosition = true;
+    }
+
+    private bool HasExternalWalkMotion()
+    {
+        Vector3 currentPosition = transform.position;
+        if (!hasExternalWalkPosition)
+        {
+            lastExternalWalkPosition = currentPosition;
+            hasExternalWalkPosition = true;
+            return false;
+        }
+
+        Vector3 planarDelta = currentPosition - lastExternalWalkPosition;
+        planarDelta.y = 0f;
+        lastExternalWalkPosition = currentPosition;
+        return Time.deltaTime > 0.0001f && planarDelta.sqrMagnitude > 0.0004f * Time.deltaTime * Time.deltaTime;
     }
 
     public bool TryGetRoomSafePoint(Vector3 candidate, float radius, out Vector3 point)
@@ -474,7 +526,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         }
 
         activeMovementContext = "Yield";
-        SetMoving(true);
+        SetMoving(ShouldUseLocomotion());
         return true;
     }
 
@@ -705,6 +757,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void OnDisable()
     {
+        ClearNearbyPetHeadGlance();
         directMovementRoutineActive = false;
         StopDirectLocomotionPlayback();
         activeLocomotionStateHash = 0;
@@ -714,6 +767,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void OnDestroy()
     {
+        ClearNearbyPetHeadGlance();
         StopDirectLocomotionPlayback();
         DropHeldToyImmediately();
         ReleaseClaimedToy();
@@ -733,7 +787,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             EnsureAgentMoving();
 
             SetMovePace(externalWalkPace);
-            SetMoving(true);
+            SetMoving(HasExternalWalkMotion());
             return;
         }
 
@@ -835,25 +889,37 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (interactionLookTarget == null || Time.time > interactionLookUntil || headTransform == null)
+        RemoveAppliedNearbyPetHeadTilt();
+        if (headTransform == null)
         {
             return;
         }
 
-        Vector3 lookPoint = interactionLookTarget.position;
-        Vector3 direction = lookPoint - headTransform.position;
-        if (direction.sqrMagnitude <= 0.0001f)
+        if (interactionLookTarget != null && Time.time <= interactionLookUntil)
         {
+            nearbyPetLookTarget = null;
+            nearbyPetLookUntil = 0f;
+            requestedNearbyPetHeadTiltDuration = 0f;
+            nearbyPetHeadTiltUntil = 0f;
+            Vector3 lookPoint = interactionLookTarget.position;
+            Vector3 direction = lookPoint - headTransform.position;
+            if (direction.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            if (socialPaused && !isPlayingOneShotAnimation)
+            {
+                FacePosition(lookPoint);
+                return;
+            }
+
+            ApplyHeadLookRotation(direction.normalized);
             return;
         }
 
-        if (socialPaused && !isPlayingOneShotAnimation)
-        {
-            FacePosition(lookPoint);
-            return;
-        }
-
-        ApplyHeadLookRotation(direction.normalized);
+        UpdateNearbyPetHeadGlance();
+        ApplyNearbyPetHeadTilt();
     }
 
     private void ApplyHeadLookRotation(Vector3 lookDirection)
@@ -867,6 +933,190 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         Quaternion delta = Quaternion.FromToRotation(aimAxis, lookDirection);
         Quaternion targetRotation = delta * headTransform.rotation;
         headTransform.rotation = Quaternion.Slerp(headTransform.rotation, targetRotation, Time.deltaTime * 5.5f);
+    }
+
+    private void UpdateNearbyPetHeadGlance()
+    {
+        if (!CanUseNearbyPetHeadGlance())
+        {
+            ClearNearbyPetHeadGlance();
+            return;
+        }
+
+        if (nearbyPetLookTarget != null && Time.time <= nearbyPetLookUntil)
+        {
+            Vector3 lookPoint;
+            if (TryGetNearbyPetLookPoint(nearbyPetLookTarget, out lookPoint))
+            {
+                Vector3 direction = lookPoint - headTransform.position;
+                if (direction.sqrMagnitude > 0.0001f && IsNearbyPetLookDirectionAllowed(direction))
+                {
+                    ApplyHeadLookRotation(direction.normalized);
+                    return;
+                }
+            }
+
+            nearbyPetLookTarget = null;
+            nearbyPetLookUntil = 0f;
+        }
+
+        if (Time.time < nextNearbyPetScanAt)
+        {
+            return;
+        }
+
+        nextNearbyPetScanAt = Time.time + Mathf.Max(0.02f, nearbyPetScanInterval);
+        if (Random.value > nearbyPetLookChance)
+        {
+            return;
+        }
+
+        PawPalRoomPetHandle pet;
+        if (!PawPalRoomPetRuntime.TryFindNearbyHeadAttentionPet(transform, nearbyPetLookRadius, out pet)
+            || pet == null
+            || pet.RootTransform == null)
+        {
+            return;
+        }
+
+        Vector3 targetPoint;
+        if (!TryGetNearbyPetLookPoint(pet.RootTransform, out targetPoint))
+        {
+            return;
+        }
+
+        Vector3 targetDirection = targetPoint - headTransform.position;
+        if (targetDirection.sqrMagnitude <= 0.0001f || !IsNearbyPetLookDirectionAllowed(targetDirection))
+        {
+            return;
+        }
+
+        nearbyPetLookTarget = pet.RootTransform;
+        nearbyPetLookUntil = Time.time + Random.Range(minNearbyPetLookDuration, maxNearbyPetLookDuration);
+        ApplyHeadLookRotation(targetDirection.normalized);
+        MaybeRequestNearbyPetHeadTilt();
+    }
+
+    private bool CanUseNearbyPetHeadGlance()
+    {
+        return lookAtNearbyPets
+            && headTransform != null
+            && !externalWalkControl
+            && !socialPaused
+            && !trainingBusy
+            && !isPlayingPreMoveTurnAnimation
+            && PawPalRoomPetRuntime.IsNearbyHeadAttentionStateEligible(
+                isActiveAndEnabled,
+                gameObject.activeInHierarchy,
+                IsBusy,
+                isResting,
+                isSleeping,
+                isPlayingOneShotAnimation,
+                HasHeldToy,
+                IsMoving);
+    }
+
+    private bool TryGetNearbyPetLookPoint(Transform petRoot, out Vector3 lookPoint)
+    {
+        lookPoint = Vector3.zero;
+        if (petRoot == null)
+        {
+            return false;
+        }
+
+        PawPalRoomPetHandle pet = PawPalRoomPetRuntime.ResolveFromTransform(petRoot);
+        if (!PawPalRoomPetRuntime.IsEligibleForNearbyHeadAttention(pet))
+        {
+            return false;
+        }
+
+        Transform focus = pet.FocusTransform != null ? pet.FocusTransform : pet.RootTransform;
+        if (focus == null)
+        {
+            return false;
+        }
+
+        Vector3 flatOffset = focus.position - transform.position;
+        flatOffset.y = 0f;
+        if (flatOffset.sqrMagnitude > nearbyPetLookRadius * nearbyPetLookRadius)
+        {
+            return false;
+        }
+
+        lookPoint = focus.position;
+        return true;
+    }
+
+    private bool IsNearbyPetLookDirectionAllowed(Vector3 direction)
+    {
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float yaw = Vector3.SignedAngle(transform.forward, direction.normalized, Vector3.up);
+        return Mathf.Abs(yaw) <= Mathf.Max(0f, maxNearbyPetHeadYaw);
+    }
+
+    private void MaybeRequestNearbyPetHeadTilt()
+    {
+        if (!PawPalRoomPetRuntime.IsHeadTiltCooldownReady(Time.time, nextNearbyPetHeadTiltTime)
+            || Random.value > nearbyPetHeadTiltChance)
+        {
+            return;
+        }
+
+        requestedNearbyPetHeadTiltAngle = PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(
+            minNearbyPetHeadTiltAngle,
+            maxNearbyPetHeadTiltAngle,
+            Random.value,
+            Random.value < 0.5f);
+        requestedNearbyPetHeadTiltDuration = Random.Range(minNearbyPetHeadTiltDuration, maxNearbyPetHeadTiltDuration);
+        nearbyPetHeadTiltStartedAt = Time.time;
+        nearbyPetHeadTiltUntil = nearbyPetHeadTiltStartedAt + Mathf.Max(0.1f, requestedNearbyPetHeadTiltDuration);
+        nextNearbyPetHeadTiltTime = Time.time + Random.Range(minNearbyPetHeadTiltCooldown, maxNearbyPetHeadTiltCooldown);
+    }
+
+    private void ApplyNearbyPetHeadTilt()
+    {
+        if (headTransform == null
+            || requestedNearbyPetHeadTiltDuration <= 0f
+            || Time.time >= nearbyPetHeadTiltUntil)
+        {
+            return;
+        }
+
+        float normalized = Mathf.Clamp01((Time.time - nearbyPetHeadTiltStartedAt) / requestedNearbyPetHeadTiltDuration);
+        float tiltAmount = Mathf.Sin(normalized * Mathf.PI) * requestedNearbyPetHeadTiltAngle;
+        if (Mathf.Abs(tiltAmount) <= 0.01f)
+        {
+            return;
+        }
+
+        appliedNearbyPetHeadTilt = Quaternion.AngleAxis(tiltAmount, Vector3.forward);
+        headTransform.localRotation *= appliedNearbyPetHeadTilt;
+    }
+
+    private void RemoveAppliedNearbyPetHeadTilt()
+    {
+        if (headTransform == null || appliedNearbyPetHeadTilt == Quaternion.identity)
+        {
+            appliedNearbyPetHeadTilt = Quaternion.identity;
+            return;
+        }
+
+        headTransform.localRotation *= Quaternion.Inverse(appliedNearbyPetHeadTilt);
+        appliedNearbyPetHeadTilt = Quaternion.identity;
+    }
+
+    private void ClearNearbyPetHeadGlance()
+    {
+        RemoveAppliedNearbyPetHeadTilt();
+        nearbyPetLookTarget = null;
+        nearbyPetLookUntil = 0f;
+        requestedNearbyPetHeadTiltDuration = 0f;
+        nearbyPetHeadTiltUntil = 0f;
     }
 
     private Vector3 GetBestHeadAimAxis()
@@ -1087,7 +1337,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return true;
         }
 
-        if (Time.time >= nextToyAttemptAt && Random.value < toyInterestChance * Time.deltaTime)
+        if (AllowToyPickup && Time.time >= nextToyAttemptAt && Random.value < toyInterestChance * Time.deltaTime)
         {
             Transform toy = FindToyTarget();
             if (toy != null)
@@ -1133,6 +1383,15 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private IEnumerator ToyRoutine(Transform toy)
     {
+        if (!AllowToyPickup)
+        {
+            activeActionRoutine = null;
+            activeMovementContext = "Roam";
+            nextToyAttemptAt = Time.time + Random.Range(2f, 4.5f);
+            PickNextDestination(false);
+            yield break;
+        }
+
         toy = ResolvePickupToyRoot(toy);
         if (!TryClaimToy(toy))
         {
@@ -2129,6 +2388,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private bool AttachToy(GameObject toy)
     {
+        if (!AllowToyPickup)
+        {
+            return false;
+        }
+
         if (toyAttach == null)
         {
             toyAttach = GetComponent<ToyAttach>();
@@ -2533,6 +2797,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             initialSignedAngle,
             preMoveTurnAngle,
             preMoveHalfTurnAngle);
+        turnKind = PawPalPetTurnAnimationUtility.UseStandardTurnForCat(turnKind);
         if (turnKind == PawPalPetTurnClipKind.None)
         {
             yield break;
@@ -2636,7 +2901,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
         if (agent.pathPending)
         {
-            return activeLocomotionStateHash != 0;
+            return false;
         }
 
         if (!agent.hasPath || float.IsInfinity(agent.remainingDistance))

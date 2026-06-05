@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using TMPro;
 using UnityEngine;
@@ -12,6 +13,7 @@ using UnityEditor.SceneManagement;
 public sealed class PawPalSceneTransitionRequest
 {
     public string DisplayText = "Loading...";
+    public string BackgroundResourcePath;
     public bool WaitForExplicitReady;
     public int MinimumPostLoadFrames = 2;
     public float FadeInDuration = 0.32f;
@@ -29,46 +31,23 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
     private const int OverlaySortingOrder = 4000;
     private const string DefaultLoadingText = "Preparing your space";
     private const string PawIconResourcePath = "UI/Icons/icon_paw_brand";
-    private const int TrailVisibleCount = 3;
-    private const float TrailLoopDuration = 5.2f;
-    private const float TrailSpacingNormalized = 0.09f;
-    private const float ProgressSmoothingSpeed = 0.9f;
-    private const float ProgressShimmerDegreesPerSecond = 56f;
-
-    private static readonly Vector2[] TrailNormalizedPositions =
-    {
-        new Vector2(0.50f, 0.92f),
-        new Vector2(0.72f, 0.90f),
-        new Vector2(0.88f, 0.78f),
-        new Vector2(0.92f, 0.58f),
-        new Vector2(0.90f, 0.34f),
-        new Vector2(0.78f, 0.14f),
-        new Vector2(0.50f, 0.08f),
-        new Vector2(0.22f, 0.14f),
-        new Vector2(0.10f, 0.34f),
-        new Vector2(0.08f, 0.58f),
-        new Vector2(0.12f, 0.78f),
-        new Vector2(0.28f, 0.90f)
-    };
+    private const float ProgressSmoothingSpeed = 3.75f;
+    private const float ProgressReadyEpsilon = 0.995f;
 
     private static PawPalSceneTransitionController instance;
     private static Sprite pawIconSprite;
+    private static readonly Dictionary<string, Sprite> backgroundSpritesByResourcePath = new Dictionary<string, Sprite>(StringComparer.Ordinal);
 
     private Canvas overlayCanvas;
     private CanvasGroup overlayGroup;
     private RectTransform overlayRoot;
+    private Image backgroundImage;
+    private AspectRatioFitter backgroundAspectFitter;
     private RectTransform contentRoot;
     private RectTransform progressClusterRoot;
-    private RectTransform progressShimmerRoot;
-    private RectTransform haloRoot;
-    private RectTransform accentHaloRoot;
-    private RectTransform trailRoot;
     private Image progressTrackImage;
     private Image progressFillImage;
-    private Image progressShimmerImage;
     private Image centerPawImage;
-    private Image[] trailPaws = new Image[0];
-    private RectTransform[] trailPawRects = new RectTransform[0];
     private TextMeshProUGUI loadingLabel;
     private bool transitionActive;
     private bool explicitReadyReceived = true;
@@ -118,6 +97,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             return false;
         }
 
+        loadOperation.allowSceneActivation = false;
         instance.transitionActive = true;
         instance.StartCoroutine(instance.RunSceneTransition(sceneName, preparedRequest, loadOperation));
         return true;
@@ -168,6 +148,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
     {
         PawPalSceneTransitionRequest prepared = request ?? new PawPalSceneTransitionRequest();
         prepared.DisplayText = string.IsNullOrWhiteSpace(prepared.DisplayText) ? DefaultLoadingText : prepared.DisplayText.Trim();
+        prepared.BackgroundResourcePath = string.IsNullOrWhiteSpace(prepared.BackgroundResourcePath) ? null : prepared.BackgroundResourcePath.Trim();
         prepared.MinimumPostLoadFrames = Mathf.Max(1, prepared.MinimumPostLoadFrames);
         prepared.FadeInDuration = Mathf.Max(0.01f, prepared.FadeInDuration);
         prepared.FadeOutDuration = Mathf.Max(0.01f, prepared.FadeOutDuration);
@@ -202,27 +183,9 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             return;
         }
 
-        float time = Time.unscaledTime;
-        float haloPulse = 0.5f + 0.5f * Mathf.Sin(time * 1.8f);
-        if (haloRoot != null)
-        {
-            haloRoot.localScale = Vector3.one * Mathf.Lerp(0.92f, 1.08f, haloPulse);
-        }
-
-        if (accentHaloRoot != null)
-        {
-            accentHaloRoot.localScale = Vector3.one * Mathf.Lerp(0.84f, 1.14f, 1f - haloPulse);
-        }
-
-        if (progressShimmerRoot != null)
-        {
-            progressShimmerRoot.localRotation = Quaternion.Euler(0f, 0f, -time * ProgressShimmerDegreesPerSecond);
-        }
-
         displayedProgress = Mathf.MoveTowards(displayedProgress, progressTarget, Time.unscaledDeltaTime * ProgressSmoothingSpeed);
         RefreshProgressVisuals();
         RefreshLoadingText();
-        RefreshTrailVisuals(time);
     }
 
     private IEnumerator RunSceneTransition(string sceneName, PawPalSceneTransitionRequest request, AsyncOperation loadOperation)
@@ -230,15 +193,17 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         explicitReadyReceived = !request.WaitForExplicitReady;
         visibleSinceUnscaledTime = Time.unscaledTime;
         displayedProgress = 0f;
-        progressTarget = 0.04f;
+        progressTarget = 0f;
         SetOverlayText(request.DisplayText);
+        SetOverlayBackground(request.BackgroundResourcePath);
         ShowOverlayImmediate();
 
         loadOperation.allowSceneActivation = false;
-        yield return FadeOverlay(1f, request.FadeInDuration);
+        yield return FadeOverlay(1f, request.FadeInDuration, loadOperation);
         InvokeOnObscured(request);
         yield return WaitForLoadReadiness(loadOperation);
-        progressTarget = Mathf.Max(progressTarget, 0.9f);
+        progressTarget = 1f;
+        yield return WaitForDisplayedProgress(ProgressReadyEpsilon);
         loadOperation.allowSceneActivation = true;
 
         while (!loadOperation.isDone)
@@ -248,7 +213,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
 
         for (int i = 0; i < request.MinimumPostLoadFrames; i++)
         {
-            progressTarget = Mathf.Max(progressTarget, 0.94f);
+            progressTarget = 1f;
             yield return null;
         }
 
@@ -257,7 +222,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             float timeoutAt = Time.unscaledTime + request.ExplicitReadyTimeoutSeconds;
             while (!explicitReadyReceived && Time.unscaledTime < timeoutAt)
             {
-                progressTarget = Mathf.Max(progressTarget, 0.97f);
+                progressTarget = 1f;
                 yield return null;
             }
 
@@ -269,6 +234,8 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
 
         yield return WaitForMinimumVisibility(request.MinimumVisibleDuration);
         progressTarget = 1f;
+        displayedProgress = 1f;
+        RefreshProgressVisuals();
         yield return FadeOverlay(0f, request.FadeOutDuration);
         FinishTransition();
     }
@@ -315,94 +282,30 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
             overlayGroup = gameObject.AddComponent<CanvasGroup>();
         }
 
-        Image background = UiFactory.CreateImage("Background", transform, UiTheme.WhiteSprite, Color.white);
-        background.type = Image.Type.Simple;
-        background.preserveAspect = false;
-        background.color = new Color32(255, 251, 244, 255);
-        UiFactory.Stretch(background.rectTransform, 0f, 0f, 0f, 0f);
+        backgroundImage = UiFactory.CreateImage("Background", transform, UiTheme.WhiteSprite, Color.white);
+        backgroundImage.type = Image.Type.Simple;
+        backgroundImage.preserveAspect = false;
+        backgroundImage.color = new Color32(255, 251, 244, 255);
+        UiFactory.Stretch(backgroundImage.rectTransform, 0f, 0f, 0f, 0f);
+        backgroundAspectFitter = backgroundImage.gameObject.AddComponent<AspectRatioFitter>();
+        backgroundAspectFitter.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;
+        backgroundAspectFitter.enabled = false;
 
-        RectTransform bloomLeft = UiFactory.CreateRect("BloomLeft", transform);
-        bloomLeft.anchorMin = new Vector2(0f, 1f);
-        bloomLeft.anchorMax = new Vector2(0f, 1f);
-        bloomLeft.pivot = new Vector2(0.5f, 0.5f);
-        bloomLeft.anchoredPosition = new Vector2(60f, -118f);
-        bloomLeft.sizeDelta = new Vector2(250f, 250f);
-        Image bloomLeftImage = bloomLeft.gameObject.AddComponent<Image>();
-        bloomLeftImage.sprite = UiTheme.CircleSprite;
-        bloomLeftImage.type = Image.Type.Simple;
-        bloomLeftImage.preserveAspect = false;
-        bloomLeftImage.color = new Color(1f, 0.86f, 0.78f, 0.22f);
-
-        RectTransform bloomRight = UiFactory.CreateRect("BloomRight", transform);
-        bloomRight.anchorMin = new Vector2(1f, 0f);
-        bloomRight.anchorMax = new Vector2(1f, 0f);
-        bloomRight.pivot = new Vector2(0.5f, 0.5f);
-        bloomRight.anchoredPosition = new Vector2(-48f, 126f);
-        bloomRight.sizeDelta = new Vector2(210f, 210f);
-        Image bloomRightImage = bloomRight.gameObject.AddComponent<Image>();
-        bloomRightImage.sprite = UiTheme.CircleSprite;
-        bloomRightImage.type = Image.Type.Simple;
-        bloomRightImage.preserveAspect = false;
-        bloomRightImage.color = new Color(1f, 0.92f, 0.86f, 0.18f);
-
-        trailRoot = UiFactory.CreateRect("TrailRoot", transform);
-        UiFactory.Stretch(trailRoot, 0f, 0f, 0f, 0f);
-
-        trailPaws = new Image[TrailVisibleCount];
-        trailPawRects = new RectTransform[TrailVisibleCount];
         Sprite pawSprite = ResolvePawSprite();
-        for (int i = 0; i < TrailVisibleCount; i++)
-        {
-            RectTransform trailPaw = UiFactory.CreateRect("TrailPaw_" + i, trailRoot);
-            trailPaw.anchorMin = new Vector2(0.5f, 0.5f);
-            trailPaw.anchorMax = new Vector2(0.5f, 0.5f);
-            trailPaw.pivot = new Vector2(0.5f, 0.5f);
-            trailPaw.sizeDelta = new Vector2(30f, 30f);
-
-            Image pawImage = trailPaw.gameObject.AddComponent<Image>();
-            pawImage.sprite = pawSprite;
-            pawImage.type = Image.Type.Simple;
-            pawImage.preserveAspect = true;
-            pawImage.color = new Color(0.92f, 0.60f, 0.49f, 0f);
-            trailPaws[i] = pawImage;
-            trailPawRects[i] = trailPaw;
-        }
 
         contentRoot = UiFactory.CreateRect("ContentRoot", transform);
         contentRoot.anchorMin = new Vector2(0.5f, 0.5f);
         contentRoot.anchorMax = new Vector2(0.5f, 0.5f);
         contentRoot.pivot = new Vector2(0.5f, 0.5f);
-        contentRoot.sizeDelta = new Vector2(272f, 276f);
+        contentRoot.sizeDelta = new Vector2(272f, 226f);
         contentRoot.anchoredPosition = new Vector2(0f, 0f);
-
-        haloRoot = UiFactory.CreateRect("Halo", contentRoot);
-        haloRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        haloRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        haloRoot.pivot = new Vector2(0.5f, 0.5f);
-        haloRoot.sizeDelta = new Vector2(170f, 170f);
-        Image haloImage = haloRoot.gameObject.AddComponent<Image>();
-        haloImage.sprite = UiTheme.CircleSprite;
-        haloImage.type = Image.Type.Simple;
-        haloImage.preserveAspect = false;
-        haloImage.color = new Color(1f, 0.91f, 0.85f, 0.28f);
-
-        accentHaloRoot = UiFactory.CreateRect("AccentHalo", contentRoot);
-        accentHaloRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        accentHaloRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        accentHaloRoot.pivot = new Vector2(0.5f, 0.5f);
-        accentHaloRoot.sizeDelta = new Vector2(132f, 132f);
-        Image accentHaloImage = accentHaloRoot.gameObject.AddComponent<Image>();
-        accentHaloImage.sprite = UiTheme.CircleSprite;
-        accentHaloImage.type = Image.Type.Simple;
-        accentHaloImage.preserveAspect = false;
-        accentHaloImage.color = new Color(1f, 1f, 1f, 0.54f);
 
         progressClusterRoot = UiFactory.CreateRect("ProgressClusterRoot", contentRoot);
         progressClusterRoot.anchorMin = new Vector2(0.5f, 0.5f);
         progressClusterRoot.anchorMax = new Vector2(0.5f, 0.5f);
         progressClusterRoot.pivot = new Vector2(0.5f, 0.5f);
         progressClusterRoot.sizeDelta = new Vector2(152f, 152f);
-        progressClusterRoot.anchoredPosition = new Vector2(0f, 20f);
+        progressClusterRoot.anchoredPosition = new Vector2(0f, 24f);
 
         RectTransform trackRoot = UiFactory.CreateRect("ProgressTrack", progressClusterRoot);
         trackRoot.anchorMin = new Vector2(0.5f, 0.5f);
@@ -430,21 +333,6 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         progressFillImage.preserveAspect = true;
         progressFillImage.color = new Color(0.89f, 0.47f, 0.38f, 1f);
 
-        progressShimmerRoot = UiFactory.CreateRect("ProgressShimmer", progressClusterRoot);
-        progressShimmerRoot.anchorMin = new Vector2(0.5f, 0.5f);
-        progressShimmerRoot.anchorMax = new Vector2(0.5f, 0.5f);
-        progressShimmerRoot.pivot = new Vector2(0.5f, 0.5f);
-        progressShimmerRoot.sizeDelta = new Vector2(152f, 152f);
-        progressShimmerImage = progressShimmerRoot.gameObject.AddComponent<Image>();
-        progressShimmerImage.sprite = UiTheme.CircleSprite;
-        progressShimmerImage.type = Image.Type.Filled;
-        progressShimmerImage.fillMethod = Image.FillMethod.Radial360;
-        progressShimmerImage.fillOrigin = (int)Image.Origin360.Top;
-        progressShimmerImage.fillClockwise = true;
-        progressShimmerImage.fillAmount = 0.14f;
-        progressShimmerImage.preserveAspect = true;
-        progressShimmerImage.color = new Color(1f, 1f, 1f, 0.24f);
-
         RectTransform innerCutout = UiFactory.CreateRect("InnerCutout", progressClusterRoot);
         innerCutout.anchorMin = new Vector2(0.5f, 0.5f);
         innerCutout.anchorMax = new Vector2(0.5f, 0.5f);
@@ -456,24 +344,13 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         innerCutoutImage.preserveAspect = true;
         innerCutoutImage.color = new Color32(255, 251, 244, 255);
 
-        RectTransform iconPlate = UiFactory.CreateRect("IconPlate", progressClusterRoot);
-        iconPlate.anchorMin = new Vector2(0.5f, 0.5f);
-        iconPlate.anchorMax = new Vector2(0.5f, 0.5f);
-        iconPlate.pivot = new Vector2(0.5f, 0.5f);
-        iconPlate.sizeDelta = new Vector2(86f, 86f);
-        Image iconPlateImage = iconPlate.gameObject.AddComponent<Image>();
-        iconPlateImage.sprite = UiTheme.CircleSprite;
-        iconPlateImage.type = Image.Type.Simple;
-        iconPlateImage.preserveAspect = true;
-        iconPlateImage.color = new Color(1f, 1f, 1f, 0.96f);
-
-        centerPawImage = UiFactory.CreateImage("CenterPaw", iconPlate, pawSprite, UiTheme.NavBrand);
+        centerPawImage = UiFactory.CreateImage("CenterPaw", progressClusterRoot, pawSprite, UiTheme.NavBrand);
         centerPawImage.type = Image.Type.Simple;
         centerPawImage.preserveAspect = true;
         centerPawImage.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         centerPawImage.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         centerPawImage.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        centerPawImage.rectTransform.sizeDelta = new Vector2(46f, 46f);
+        centerPawImage.rectTransform.sizeDelta = new Vector2(44f, 44f);
         centerPawImage.rectTransform.anchoredPosition = Vector2.zero;
 
         loadingLabel = UiFactory.CreateLabel(
@@ -498,10 +375,9 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
 
         RefreshProgressVisuals();
         RefreshLoadingText();
-        RefreshTrailVisuals(0f);
     }
 
-    private IEnumerator FadeOverlay(float targetAlpha, float duration)
+    private IEnumerator FadeOverlay(float targetAlpha, float duration, AsyncOperation loadOperation = null)
     {
         float startAlpha = overlayGroup != null ? overlayGroup.alpha : 0f;
         if (Mathf.Approximately(startAlpha, targetAlpha))
@@ -512,6 +388,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < duration)
         {
+            UpdateProgressTargetFromOperation(loadOperation);
             elapsed += Time.unscaledDeltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
             float eased = t * t * (3f - 2f * t);
@@ -533,7 +410,27 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
     {
         while (operation != null && operation.progress < 0.89f)
         {
-            progressTarget = Mathf.Max(progressTarget, Mathf.Lerp(0.08f, 0.86f, Mathf.Clamp01(operation.progress / 0.89f)));
+            UpdateProgressTargetFromOperation(operation);
+            yield return null;
+        }
+    }
+
+    private void UpdateProgressTargetFromOperation(AsyncOperation operation)
+    {
+        if (operation == null)
+        {
+            return;
+        }
+
+        progressTarget = Mathf.Clamp01(operation.progress / 0.9f);
+    }
+
+    private IEnumerator WaitForDisplayedProgress(float minimumProgress)
+    {
+        float targetProgress = Mathf.Clamp01(minimumProgress);
+        while (displayedProgress < targetProgress)
+        {
+            RefreshProgressVisuals();
             yield return null;
         }
     }
@@ -716,6 +613,44 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         return pawIconSprite != null ? pawIconSprite : UiTheme.CircleSprite;
     }
 
+    private static Sprite ResolveLoadingBackgroundSprite(string resourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(resourcePath))
+        {
+            return null;
+        }
+
+        Sprite sprite;
+        if (backgroundSpritesByResourcePath.TryGetValue(resourcePath, out sprite))
+        {
+            return sprite;
+        }
+
+        sprite = Resources.Load<Sprite>(resourcePath);
+        if (sprite != null)
+        {
+            backgroundSpritesByResourcePath[resourcePath] = sprite;
+            return sprite;
+        }
+
+        Texture2D texture = Resources.Load<Texture2D>(resourcePath);
+        if (texture == null)
+        {
+            Debug.LogWarning("PawPalSceneTransitionController could not load loading background at Resources path '" + resourcePath + "'.");
+            backgroundSpritesByResourcePath[resourcePath] = null;
+            return null;
+        }
+
+        sprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, texture.width, texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f);
+        sprite.name = texture.name + "_LoadingBackgroundSprite";
+        backgroundSpritesByResourcePath[resourcePath] = sprite;
+        return sprite;
+    }
+
     private static string SanitizeLoadingText(string message)
     {
         string resolved = string.IsNullOrWhiteSpace(message) ? DefaultLoadingText : message.Trim();
@@ -728,12 +663,6 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         if (progressFillImage != null)
         {
             progressFillImage.fillAmount = Mathf.Clamp01(displayedProgress);
-        }
-
-        if (progressShimmerImage != null)
-        {
-            float shimmerAlpha = Mathf.Lerp(0.18f, 0.34f, 1f - Mathf.Clamp01(displayedProgress));
-            progressShimmerImage.color = new Color(1f, 1f, 1f, shimmerAlpha);
         }
     }
 
@@ -748,50 +677,36 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         loadingLabel.text = baseLoadingText + new string('.', dotCount);
     }
 
-    private void RefreshTrailVisuals(float time)
+    private void SetOverlayBackground(string resourcePath)
     {
-        if (trailPaws == null || trailPawRects == null || trailPaws.Length == 0)
+        if (backgroundImage == null)
         {
             return;
         }
 
-        float headTravel = Mathf.Repeat(time / Mathf.Max(0.1f, TrailLoopDuration), 1f);
-        for (int i = 0; i < trailPaws.Length; i++)
+        Sprite backgroundSprite = ResolveLoadingBackgroundSprite(resourcePath);
+        if (backgroundSprite == null)
         {
-            Image paw = trailPaws[i];
-            RectTransform pawRect = i < trailPawRects.Length ? trailPawRects[i] : null;
-            if (paw == null || pawRect == null)
+            backgroundImage.sprite = UiTheme.WhiteSprite;
+            backgroundImage.color = new Color32(255, 251, 244, 255);
+            if (backgroundAspectFitter != null)
             {
-                continue;
+                backgroundAspectFitter.enabled = false;
             }
 
-            float travel = Mathf.Repeat(headTravel - (i * TrailSpacingNormalized), 1f);
-            Vector2 normalizedPosition = EvaluateTrailPosition(travel);
-            pawRect.anchorMin = normalizedPosition;
-            pawRect.anchorMax = normalizedPosition;
-            pawRect.anchoredPosition = Vector2.zero;
-
-            float intensity = 1f - (i / Mathf.Max(1f, TrailVisibleCount - 1f));
-            float alpha = Mathf.Lerp(0.18f, 0.92f, intensity);
-            float scale = Mathf.Lerp(0.82f, 1.1f, intensity);
-            paw.color = new Color(0.92f, 0.60f, 0.49f, alpha);
-            pawRect.localScale = Vector3.one * scale;
+            UiFactory.Stretch(backgroundImage.rectTransform, 0f, 0f, 0f, 0f);
+            return;
         }
-    }
 
-    private static Vector2 EvaluateTrailPosition(float normalizedTravel)
-    {
-        if (TrailNormalizedPositions == null || TrailNormalizedPositions.Length == 0)
+        backgroundImage.sprite = backgroundSprite;
+        backgroundImage.color = Color.white;
+        backgroundImage.preserveAspect = false;
+        UiFactory.Stretch(backgroundImage.rectTransform, 0f, 0f, 0f, 0f);
+        if (backgroundAspectFitter != null)
         {
-            return new Vector2(0.5f, 0.5f);
+            backgroundAspectFitter.aspectRatio = backgroundSprite.rect.width / Mathf.Max(1f, backgroundSprite.rect.height);
+            backgroundAspectFitter.enabled = true;
         }
-
-        float wrapped = Mathf.Repeat(normalizedTravel, 1f);
-        float segmentFloat = wrapped * TrailNormalizedPositions.Length;
-        int segmentIndex = Mathf.FloorToInt(segmentFloat) % TrailNormalizedPositions.Length;
-        int nextIndex = (segmentIndex + 1) % TrailNormalizedPositions.Length;
-        float segmentT = segmentFloat - Mathf.Floor(segmentFloat);
-        return Vector2.Lerp(TrailNormalizedPositions[segmentIndex], TrailNormalizedPositions[nextIndex], segmentT);
     }
 
     private void ShowOverlayImmediate()

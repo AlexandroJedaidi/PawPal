@@ -20,8 +20,6 @@ internal static class PawPalCatBaseControllerBuilder
         "CatSimple_Run_F_RM",
         PawPalPetTurnAnimationUtility.TurnLeftStateName,
         PawPalPetTurnAnimationUtility.TurnRightStateName,
-        PawPalPetTurnAnimationUtility.TurnLeft180StateName,
-        PawPalPetTurnAnimationUtility.TurnRight180StateName,
         "CatSimple_JumpPlace_RM",
         "CatSimple_Sit_start",
         "CatSimple_Sit_loop_1",
@@ -39,8 +37,6 @@ internal static class PawPalCatBaseControllerBuilder
         { "CatSimple_Run_F_RM", "Run_F_RM" },
         { PawPalPetTurnAnimationUtility.TurnLeftStateName, "Turn_L_IP" },
         { PawPalPetTurnAnimationUtility.TurnRightStateName, "Turn_R_IP" },
-        { PawPalPetTurnAnimationUtility.TurnLeft180StateName, "Turn180_L_IP" },
-        { PawPalPetTurnAnimationUtility.TurnRight180StateName, "Turn180_R_IP" },
         { "CatSimple_JumpPlace_RM", "JumpPlace_RM" },
         { "CatSimple_Sit_start", "Sit_start" },
         { "CatSimple_Sit_loop_1", "Sit_loop_1" },
@@ -221,8 +217,6 @@ internal static class PawPalCatBaseControllerBuilder
         AddState(stateMachine, "CatSimple_Run_F_RM", ResolveClip(clips, "Run_F_RM"));
         AddState(stateMachine, PawPalPetTurnAnimationUtility.TurnLeftStateName, ResolveClip(clips, "Turn_L_IP"));
         AddState(stateMachine, PawPalPetTurnAnimationUtility.TurnRightStateName, ResolveClip(clips, "Turn_R_IP"));
-        AddState(stateMachine, PawPalPetTurnAnimationUtility.TurnLeft180StateName, ResolveClip(clips, "Turn180_L_IP"));
-        AddState(stateMachine, PawPalPetTurnAnimationUtility.TurnRight180StateName, ResolveClip(clips, "Turn180_R_IP"));
         AddState(stateMachine, "CatSimple_JumpPlace_RM", ResolveClip(clips, "JumpPlace_RM"));
         AddState(stateMachine, "CatSimple_Sit_start", ResolveClip(clips, "Sit_start"));
         AddState(stateMachine, "CatSimple_Sit_loop_1", ResolveClip(clips, "Sit_loop_1"));

@@ -70,8 +70,6 @@ public sealed class PawPalIntroPetDefinitionsEditModeTests
             "CatSimple_Run_F_RM",
             PawPalPetTurnAnimationUtility.TurnLeftStateName,
             PawPalPetTurnAnimationUtility.TurnRightStateName,
-            PawPalPetTurnAnimationUtility.TurnLeft180StateName,
-            PawPalPetTurnAnimationUtility.TurnRight180StateName,
             "CatSimple_JumpPlace_RM",
             "CatSimple_Sit_start",
             "CatSimple_Sit_loop_1",

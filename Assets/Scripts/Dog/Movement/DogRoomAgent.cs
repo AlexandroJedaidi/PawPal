@@ -202,6 +202,7 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private string runStateName = "RunForward";
     [SerializeField] private float locomotionCrossFadeDuration = 0.12f;
     [SerializeField] private float locomotionLeadInDuration = 0.2f;
+    [SerializeField] private float locomotionStartGraceDuration = 0.28f;
 #pragma warning restore CS0414
 
     [Header("Personal Space")]
@@ -430,8 +431,8 @@ public class DogRoomAgent : MonoBehaviour
     private int eatDrinkEndStateHash;
     private int[] standingIdleStateHashes = new int[0];
     private bool pathPrimedForWalk;
-    private bool warnedMissingLocomotionState;
     private Coroutine releaseAgentRoutine;
+    private float locomotionIntentGraceUntil;
     private float nextAllowedCrowdingRepathTime;
     private bool isPlayingPreMoveTurnAnimation;
     private float preMoveTurnBlendDirection;
@@ -3598,13 +3599,7 @@ public class DogRoomAgent : MonoBehaviour
             return false;
         }
 
-        if (animator != null)
-        {
-            animator.SetInteger(IdleIndexHash, MovementIdleIndex);
-            animator.SetBool(MoveHash, true);
-            animatorSpeedValue = Mathf.Max(animatorSpeedValue, GetAnimatorSpeed(pace) * animatorSpeedScale * 0.7f);
-            animator.SetFloat(SpeedHash, animatorSpeedValue);
-        }
+        locomotionIntentGraceUntil = Time.time + Mathf.Max(0.05f, locomotionStartGraceDuration);
 
         return true;
     }
@@ -3717,27 +3712,14 @@ public class DogRoomAgent : MonoBehaviour
         pathPrimedForWalk = true;
         animatorDirectionValue = 0f;
         animatorDirectionVelocity = 0f;
-        animatorSpeedValue = GetAnimatorSpeed(pace) * animatorSpeedScale;
+        animatorSpeedValue = 0f;
         animatorSpeedVelocity = 0f;
-        animator.SetInteger(IdleIndexHash, MovementIdleIndex);
-        animator.SetBool(MoveHash, true);
-        animator.SetFloat(SpeedHash, animatorSpeedValue);
+        locomotionIntentGraceUntil = 0f;
+        StopDirectImportedLocomotion();
+        SetNeutralIdle();
+        animator.SetBool(MoveHash, false);
+        animator.SetFloat(SpeedHash, 0f);
         animator.SetFloat(DirectionHash, 0f);
-
-        bool startedDirectLocomotion = TryStartDirectImportedLocomotion(pace);
-        if (!startedDirectLocomotion && pace == DogMovementPace.Run && runStateHash != 0)
-        {
-            animator.CrossFadeInFixedTime(runStateHash, locomotionCrossFadeDuration, BaseLayerIndex, 0f);
-        }
-        else if (!startedDirectLocomotion && locomotionStateHash != 0)
-        {
-            animator.CrossFadeInFixedTime(locomotionStateHash, locomotionCrossFadeDuration, BaseLayerIndex, 0f);
-        }
-        else if (!startedDirectLocomotion && !warnedMissingLocomotionState)
-        {
-            warnedMissingLocomotionState = true;
-            Debug.LogWarning(name + " could not find Animator state '" + locomotionStateName + "'. Movement will still use Move/Speed/Direction parameters.");
-        }
 
         agent.isStopped = true;
         bool acceptedDestination = agent.SetDestination(destination);
@@ -3773,7 +3755,10 @@ public class DogRoomAgent : MonoBehaviour
 
         bool hasMoveIntent = HasMoveIntent();
         bool hasWorldMotionAssist = sampledPlanarWorldVelocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold;
-        bool shouldDriveLocomotion = hasMoveIntent || hasWorldMotionAssist;
+        bool velocityMoving = velocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold
+            || hasWorldMotionAssist;
+        bool hasFreshMovementIntent = hasMoveIntent && Time.time <= locomotionIntentGraceUntil;
+        bool shouldDriveLocomotion = velocityMoving || hasFreshMovementIntent;
         float targetSpeed = shouldDriveLocomotion ? currentAnimatorPaceSpeed : 0f;
 
         Vector3 effectiveVelocity = velocity.sqrMagnitude > 0.0001f ? velocity : sampledPlanarWorldVelocity;
@@ -3790,8 +3775,6 @@ public class DogRoomAgent : MonoBehaviour
             ref animatorDirectionVelocity,
             Mathf.Max(0.01f, animatorDirectionDampTime));
 
-        bool velocityMoving = velocity.sqrMagnitude > movingVelocityThreshold * movingVelocityThreshold
-            || hasWorldMotionAssist;
         bool shouldMove = shouldDriveLocomotion || velocityMoving || animatorSpeedValue > 0.08f;
 
         if (!hasLoggedShouldMoveState || lastLoggedShouldMoveState != shouldMove)
@@ -4413,7 +4396,7 @@ public class DogRoomAgent : MonoBehaviour
     {
         if (pathPrimedForWalk)
         {
-            return true;
+            return false;
         }
 
         if (agent == null || !agent.enabled || !agent.isOnNavMesh || agent.isStopped)
@@ -4423,7 +4406,7 @@ public class DogRoomAgent : MonoBehaviour
 
         if (agent.pathPending)
         {
-            return true;
+            return Time.time <= locomotionIntentGraceUntil;
         }
 
         if (!agent.hasPath)
@@ -8001,9 +7984,9 @@ public class DogRoomAgent : MonoBehaviour
         float duration = Mathf.Max(0f, locomotionLeadInDuration);
         while (elapsed < duration)
         {
-            animator.SetInteger(IdleIndexHash, MovementIdleIndex);
-            animator.SetBool(MoveHash, true);
-            animator.SetFloat(SpeedHash, GetAnimatorSpeed(CurrentPace) * animatorSpeedScale);
+            SetNeutralIdle();
+            animator.SetBool(MoveHash, false);
+            animator.SetFloat(SpeedHash, 0f);
             animator.SetFloat(DirectionHash, 0f);
 
             elapsed += Time.deltaTime;
@@ -8027,6 +8010,7 @@ public class DogRoomAgent : MonoBehaviour
 
         pathPrimedForWalk = false;
         agent.isStopped = false;
+        locomotionIntentGraceUntil = Time.time + Mathf.Max(0.05f, locomotionStartGraceDuration);
     }
 
     private void StartReleaseAgentRoutine()

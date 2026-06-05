@@ -18,7 +18,6 @@ public sealed class IntroPetUIController : MonoBehaviour
     private static readonly Color SoftLine = new Color32(238, 205, 190, 255);
     private static readonly Color MutedText = new Color32(137, 104, 92, 255);
     private static readonly Color SoftBlue = new Color32(57, 169, 226, 255);
-    private static readonly Color ChipFill = new Color32(255, 241, 232, 255);
 
     private RectTransform root;
     private RectTransform selectionCard;
@@ -33,8 +32,6 @@ public sealed class IntroPetUIController : MonoBehaviour
     private TextMeshProUGUI breedLabel;
     private TextMeshProUGUI descriptionLabel;
     private TextMeshProUGUI selectionPersonalityLabel;
-    private TextMeshProUGUI customizeStageLabel;
-    private TextMeshProUGUI customizeBreedLabel;
     private Image maleToggleFill;
     private Image femaleToggleFill;
     private TextMeshProUGUI maleToggleLabel;
@@ -141,16 +138,6 @@ public sealed class IntroPetUIController : MonoBehaviour
         if (selectionPersonalityLabel != null)
         {
             selectionPersonalityLabel.text = IntroPetFormatting.FormatPersonality(selection.Personality);
-        }
-
-        if (customizeStageLabel != null)
-        {
-            customizeStageLabel.text = lifeStage;
-        }
-
-        if (customizeBreedLabel != null)
-        {
-            customizeBreedLabel.text = breed;
         }
 
         RefreshGender(selection.Gender);
@@ -321,26 +308,10 @@ public sealed class IntroPetUIController : MonoBehaviour
 
     private void BuildCustomizeCard()
     {
-        customizeCard = CreateCard(root, "CustomizeCard", new Vector2(336f, 214f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
-
-        Image customizeStageChip = UiFactory.CreateImage("CustomizeStageChip", customizeCard, UiTheme.RoundedFiveSprite, ChipFill);
-        customizeStageChip.type = Image.Type.Sliced;
-        customizeStageChip.preserveAspect = false;
-        Place(customizeStageChip.rectTransform, 80f, 14f, 68f, 20f);
-
-        customizeStageLabel = CreateLabel(customizeStageChip.rectTransform, "CustomizeStageLabel", "Adult", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(customizeStageLabel.rectTransform, 6f, 2f, 6f, 2f);
-
-        Image customizeBreedChip = UiFactory.CreateImage("CustomizeBreedChip", customizeCard, UiTheme.RoundedFiveSprite, ChipFill);
-        customizeBreedChip.type = Image.Type.Sliced;
-        customizeBreedChip.preserveAspect = false;
-        Place(customizeBreedChip.rectTransform, 156f, 14f, 98f, 20f);
-
-        customizeBreedLabel = CreateLabel(customizeBreedChip.rectTransform, "CustomizeBreedLabel", "Labrador", 11, Primary, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
-        UiFactory.Stretch(customizeBreedLabel.rectTransform, 6f, 2f, 6f, 2f);
+        customizeCard = CreateCard(root, "CustomizeCard", new Vector2(336f, 184f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 24f));
 
         RectTransform inputRoot = UiFactory.CreateRect("NameInputRoot", customizeCard);
-        Place(inputRoot, 44f, 45f, 247f, 24f);
+        Place(inputRoot, 44f, 20f, 247f, 24f);
         Image inputFill = inputRoot.gameObject.AddComponent<Image>();
         inputFill.sprite = UiTheme.DogDetailsFieldFillSprite;
         inputFill.color = Color.white;
@@ -366,15 +337,15 @@ public sealed class IntroPetUIController : MonoBehaviour
         nameInput.onValueChanged.AddListener(HandleNameChanged);
 
         CreateLabel(customizeCard, "FurCaption", "Fur type:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
-        Place(customizeCard.Find("FurCaption") as RectTransform, 24f, 79f, 88f, 18f);
-        BuildFurButtons(customizeCard, 75f);
+        Place(customizeCard.Find("FurCaption") as RectTransform, 24f, 54f, 88f, 18f);
+        BuildFurButtons(customizeCard, 50f);
 
         CreateLabel(customizeCard, "GenderCaption", "Gender:", 13, PrimaryDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Left);
         RectTransform genderCaptionRoot = customizeCard.Find("GenderCaption") as RectTransform;
-        Place(genderCaptionRoot, 24f, 115f, 70f, 18f);
-        BuildGenderToggle(customizeCard, 109f);
+        Place(genderCaptionRoot, 24f, 90f, 70f, 18f);
+        BuildGenderToggle(customizeCard, 84f);
 
-        CreateStyledActionButton(customizeCard, "BackButton", "Back", new Vector2(42f, 180f), new Vector2(92f, 26f), new Color32(209, 209, 209, 255), Color.white, new Color(0f, 0f, 0f, 0.14f), delegate
+        CreateStyledActionButton(customizeCard, "BackButton", "Back", new Vector2(42f, 150f), new Vector2(92f, 26f), new Color32(209, 209, 209, 255), Color.white, new Color(0f, 0f, 0f, 0.14f), delegate
         {
             Action handler = BackRequested;
             if (handler != null)
@@ -383,7 +354,7 @@ public sealed class IntroPetUIController : MonoBehaviour
             }
         });
 
-        CreateStyledActionButton(customizeCard, "ConfirmButton", "Let's go home!", new Vector2(147f, 180f), new Vector2(142f, 26f), SoftBlue, Color.white, new Color(0f, 82f / 255f, 132f / 255f, 0.28f), delegate
+        CreateStyledActionButton(customizeCard, "ConfirmButton", "Let's go home!", new Vector2(147f, 150f), new Vector2(142f, 26f), SoftBlue, Color.white, new Color(0f, 82f / 255f, 132f / 255f, 0.28f), delegate
         {
             Action handler = ConfirmAccepted;
             if (handler != null)
@@ -501,7 +472,7 @@ public sealed class IntroPetUIController : MonoBehaviour
 
         const float startX = 114f;
         const float spacing = 6f;
-        const float startY = 75f;
+        const float startY = 50f;
         float currentX = startX;
         for (int i = 0; i < furButtonRoots.Length; i++)
         {

@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public enum DogCameraFocusPriority
@@ -17,6 +18,7 @@ public enum DogCameraFocusPriority
 public class DogCycleCamera : MonoBehaviour
 {
     private const float MinimumSmartAutoSwitchInterval = 12f;
+    private const float HomeSceneManualLookMaxYawRange = 120f;
     private static readonly List<RaycastResult> UiRaycastResults = new List<RaycastResult>();
     private static int dogSwitchLockCount;
 
@@ -37,7 +39,9 @@ public class DogCycleCamera : MonoBehaviour
     [SerializeField] private float touchLookSensitivity = 90f;
     [SerializeField] private float manualLookRotationSmooth = 3.5f;
     [SerializeField, Range(20f, 180f)] private float manualLookMaxYawRange = 160f;
+    [SerializeField, Range(20f, 180f)] private float introSelectionManualLookMaxYawRange = 160f;
     [SerializeField] private float manualPitchMin = -35f;
+    [SerializeField] private float introSelectionManualPitchMin = -10f;
     [SerializeField] private float manualPitchMax = 35f;
 
     [Header("Slow Zoom")]
@@ -97,10 +101,14 @@ public class DogCycleCamera : MonoBehaviour
     private float manualLookYaw;
     private float manualLookPitch;
     private float manualLookStartYaw;
+    private float introSelectionManualLookAnchorYaw;
+    private float homeSceneManualLookAnchorYaw;
     private float manualLookHoldUntil;
     private bool mouseDragActive;
     private int activeTouchFingerId = -1;
     private Vector2 lastManualPointerPosition;
+    private bool introSelectionManualLookAnchorValid;
+    private bool homeSceneManualLookAnchorValid;
     private bool zoomFocusActive;
     private bool photoModeActive;
     private DogRoomAgent photoModeDog;
@@ -222,6 +230,7 @@ public class DogCycleCamera : MonoBehaviour
         switchTimer = 0f;
         mouseDragActive = false;
         activeTouchFingerId = -1;
+        CaptureIntroSelectionManualLookAnchor();
         photoModeActive = false;
         photoModeDog = null;
         dogInteractionModeActive = false;
@@ -644,6 +653,7 @@ public class DogCycleCamera : MonoBehaviour
         }
 
         fixedPosition = transform.position;
+        CaptureHomeSceneManualLookAnchor();
         runtime = PawPalGameRuntime.Instance;
         RefreshDogsIfNeeded();
         SyncToRuntimeActiveDog(false);
@@ -1566,9 +1576,10 @@ public class DogCycleCamera : MonoBehaviour
     {
         bool continuingManualSession = IsManualLookActive();
         CaptureManualLookAnglesFromTransform();
+        manualLookPitch = ClampManualLookPitch(manualLookPitch);
         if (!continuingManualSession)
         {
-            manualLookStartYaw = manualLookYaw;
+            manualLookStartYaw = ResolveManualLookStartYaw(manualLookYaw);
         }
 
         manualLookYaw = ClampManualLookYaw(manualLookYaw);
@@ -1591,7 +1602,7 @@ public class DogCycleCamera : MonoBehaviour
         float appliedSensitivity = ResolvePointerSensitivity(delta, manualLookSensitivity, true);
         manualLookYaw += delta.x * appliedSensitivity;
         manualLookYaw = ClampManualLookYaw(manualLookYaw);
-        manualLookPitch = Mathf.Clamp(manualLookPitch - (delta.y * appliedSensitivity), manualPitchMin, manualPitchMax);
+        manualLookPitch = ClampManualLookPitch(manualLookPitch - (delta.y * appliedSensitivity));
         manualLookHoldUntil = Time.time + Mathf.Max(0f, manualLookHoldDuration);
         switchTimer = 0f;
     }
@@ -1640,10 +1651,97 @@ public class DogCycleCamera : MonoBehaviour
 
     private float ClampManualLookYaw(float candidateYaw)
     {
-        float halfRange = Mathf.Clamp(manualLookMaxYawRange, 20f, 180f) * 0.5f;
+        float maxYawRange = GetEffectiveManualLookMaxYawRange();
+        float halfRange = Mathf.Clamp(maxYawRange, 20f, 180f) * 0.5f;
         float deltaFromStart = Mathf.DeltaAngle(manualLookStartYaw, candidateYaw);
         float clampedDelta = Mathf.Clamp(deltaFromStart, -halfRange, halfRange);
         return manualLookStartYaw + clampedDelta;
+    }
+
+    private float GetEffectiveManualLookMaxYawRange()
+    {
+        if (ShouldUseIntroSelectionManualLookClamp())
+        {
+            return Mathf.Min(manualLookMaxYawRange, introSelectionManualLookMaxYawRange);
+        }
+
+        if (ShouldUseHomeSceneManualLookClamp())
+        {
+            return Mathf.Min(manualLookMaxYawRange, HomeSceneManualLookMaxYawRange);
+        }
+
+        return manualLookMaxYawRange;
+    }
+
+    private float ResolveManualLookStartYaw(float currentYaw)
+    {
+        if (ShouldUseIntroSelectionManualLookClamp())
+        {
+            if (!introSelectionManualLookAnchorValid)
+            {
+                introSelectionManualLookAnchorYaw = currentYaw;
+                introSelectionManualLookAnchorValid = true;
+            }
+
+            return introSelectionManualLookAnchorYaw;
+        }
+
+        if (ShouldUseHomeSceneManualLookClamp())
+        {
+            if (!homeSceneManualLookAnchorValid)
+            {
+                homeSceneManualLookAnchorYaw = currentYaw;
+                homeSceneManualLookAnchorValid = true;
+            }
+
+            return homeSceneManualLookAnchorYaw;
+        }
+
+        return currentYaw;
+    }
+
+    private void CaptureIntroSelectionManualLookAnchor()
+    {
+        if (!ShouldUseIntroSelectionManualLookClamp())
+        {
+            return;
+        }
+
+        introSelectionManualLookAnchorYaw = transform.rotation.eulerAngles.y;
+        introSelectionManualLookAnchorValid = true;
+    }
+
+    private void CaptureHomeSceneManualLookAnchor()
+    {
+        if (!ShouldUseHomeSceneManualLookClamp())
+        {
+            return;
+        }
+
+        homeSceneManualLookAnchorYaw = transform.rotation.eulerAngles.y;
+        homeSceneManualLookAnchorValid = true;
+    }
+
+    private float ClampManualLookPitch(float candidatePitch)
+    {
+        float effectiveMinPitch = ShouldUseIntroSelectionManualPitchClamp() ? Mathf.Max(manualPitchMin, introSelectionManualPitchMin) : manualPitchMin;
+        float effectiveMaxPitch = Mathf.Max(effectiveMinPitch, manualPitchMax);
+        return Mathf.Clamp(candidatePitch, effectiveMinPitch, effectiveMaxPitch);
+    }
+
+    private bool ShouldUseIntroSelectionManualPitchClamp()
+    {
+        return ShouldUseIntroSelectionManualLookClamp();
+    }
+
+    private bool ShouldUseIntroSelectionManualLookClamp()
+    {
+        return introSelectionMode && PawPalIntroSceneFlow.IsIntroScene(SceneManager.GetActiveScene());
+    }
+
+    private bool ShouldUseHomeSceneManualLookClamp()
+    {
+        return !introSelectionMode && PawPalIntroSceneFlow.IsHomeScene(SceneManager.GetActiveScene());
     }
 
     private bool IsManualLookActive()

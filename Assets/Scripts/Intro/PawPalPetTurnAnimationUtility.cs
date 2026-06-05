@@ -33,6 +33,19 @@ public static class PawPalPetTurnAnimationUtility
         return useHalfTurn ? PawPalPetTurnClipKind.Left180 : PawPalPetTurnClipKind.Left;
     }
 
+    public static PawPalPetTurnClipKind UseStandardTurnForCat(PawPalPetTurnClipKind kind)
+    {
+        switch (kind)
+        {
+            case PawPalPetTurnClipKind.Left180:
+                return PawPalPetTurnClipKind.Left;
+            case PawPalPetTurnClipKind.Right180:
+                return PawPalPetTurnClipKind.Right;
+            default:
+                return kind;
+        }
+    }
+
     public static string GetStateName(PawPalPetTurnClipKind kind)
     {
         switch (kind)

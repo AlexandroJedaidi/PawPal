@@ -39,7 +39,7 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float reactionHeadTiltDuration = 0.6f;
     [SerializeField, Range(0f, 1f)] private float reactionNeckTiltWeight = 0.4f;
 
-    [Header("Nearby Dog Glances")]
+    [Header("Nearby Pet Glances")]
     [SerializeField] private bool lookAtNearbyDogs = true;
     [SerializeField] private float nearbyDogLookRadius = 1.75f;
     [SerializeField, Range(0f, 1f)] private float nearbyDogLookChance = 0.55f;
@@ -52,6 +52,13 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField] private float nearbyDogScanInterval = 0.15f;
     [SerializeField] private Vector3 nearbyDogHeadLookOffset = Vector3.zero;
     [SerializeField] private Vector3 nearbyDogLookOffset = new Vector3(0f, 0.35f, 0f);
+    [SerializeField, Range(0f, 1f)] private float nearbyPetHeadTiltChance = 0.35f;
+    [SerializeField] private float minNearbyPetHeadTiltAngle = 20f;
+    [SerializeField] private float maxNearbyPetHeadTiltAngle = 30f;
+    [SerializeField] private float minNearbyPetHeadTiltDuration = 0.45f;
+    [SerializeField] private float maxNearbyPetHeadTiltDuration = 0.9f;
+    [SerializeField] private float minNearbyPetHeadTiltCooldown = 5f;
+    [SerializeField] private float maxNearbyPetHeadTiltCooldown = 12f;
 
     [Header("Social Dog Look")]
     [SerializeField] private bool holdSocialDogHeadLook = true;
@@ -90,6 +97,7 @@ public class DogCameraAttention : MonoBehaviour
     private bool walkCameraLookOverrideActive;
     private float walkCameraLookOverrideMaxYaw = 90f;
     private float nextNearbyDogScanTime;
+    private float nextNearbyPetHeadTiltTime;
     private Vector3 smoothedLookPoint;
     private Vector3 smoothedLookPointVelocity;
     private Transform smoothedLookTarget;
@@ -179,6 +187,7 @@ public class DogCameraAttention : MonoBehaviour
         activeLookTarget = null;
         headTiltStartedAt = 0f;
         headTiltUntil = 0f;
+        nextNearbyPetHeadTiltTime = 0f;
         requestedHeadTiltAngle = 0f;
         requestedHeadTiltDuration = 0f;
         appliedHeadTilt = Quaternion.identity;
@@ -266,6 +275,25 @@ public class DogCameraAttention : MonoBehaviour
         headTiltUntil = headTiltStartedAt + clampedDuration;
         requestedHeadTiltAngle = clampedAngle;
         requestedHeadTiltDuration = clampedDuration;
+    }
+
+    private void MaybeRequestNearbyPetHeadTilt(Transform nearbyPet)
+    {
+        if (nearbyPet == null
+            || !PawPalRoomPetRuntime.IsHeadTiltCooldownReady(Time.time, nextNearbyPetHeadTiltTime)
+            || Random.value > nearbyPetHeadTiltChance)
+        {
+            return;
+        }
+
+        float angle = PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(
+            minNearbyPetHeadTiltAngle,
+            maxNearbyPetHeadTiltAngle,
+            Random.value,
+            Random.value < 0.5f);
+        float duration = Random.Range(minNearbyPetHeadTiltDuration, maxNearbyPetHeadTiltDuration);
+        RequestHeadTilt(angle, duration);
+        nextNearbyPetHeadTiltTime = Time.time + Random.Range(minNearbyPetHeadTiltCooldown, maxNearbyPetHeadTiltCooldown);
     }
 
     public Transform GetOwnHeadLookTarget()
@@ -653,7 +681,7 @@ public class DogCameraAttention : MonoBehaviour
 
         if (activeTargetType == AttentionTargetType.NearbyDog)
         {
-            return activeLookTarget != null && CanLookAtNearbyDog(activeLookTarget, socialLookOverrideActive && activeLookTarget == socialLookTarget);
+            return activeLookTarget != null && CanLookAtNearbyPet(activeLookTarget, socialLookOverrideActive && activeLookTarget == socialLookTarget);
         }
 
         return false;
@@ -661,10 +689,11 @@ public class DogCameraAttention : MonoBehaviour
 
     private bool TryChooseLookTarget(out float lookDuration)
     {
-        if (lookAtNearbyDogs && Random.value <= nearbyDogLookChance && TryFindNearbyDog(out activeLookTarget))
+        if (lookAtNearbyDogs && Random.value <= nearbyDogLookChance && TryFindNearbyPet(out activeLookTarget))
         {
             activeTargetType = AttentionTargetType.NearbyDog;
             lookDuration = Random.Range(minNearbyDogLookDuration, maxNearbyDogLookDuration);
+            MaybeRequestNearbyPetHeadTilt(activeLookTarget);
             return true;
         }
 
@@ -676,10 +705,11 @@ public class DogCameraAttention : MonoBehaviour
             return true;
         }
 
-        if (lookAtNearbyDogs && TryFindNearbyDog(out activeLookTarget))
+        if (lookAtNearbyDogs && TryFindNearbyPet(out activeLookTarget))
         {
             activeTargetType = AttentionTargetType.NearbyDog;
             lookDuration = Random.Range(minNearbyDogLookDuration, maxNearbyDogLookDuration);
+            MaybeRequestNearbyPetHeadTilt(activeLookTarget);
             return true;
         }
 
@@ -689,42 +719,27 @@ public class DogCameraAttention : MonoBehaviour
         return false;
     }
 
-    private bool TryFindNearbyDog(out Transform target)
+    private bool TryFindNearbyPet(out Transform target)
     {
         target = null;
-        DogRoomAgent[] agents = FindObjectsByType<DogRoomAgent>(FindObjectsSortMode.None);
-        float bestDistance = float.PositiveInfinity;
-
-        for (int i = 0; i < agents.Length; i++)
+        PawPalRoomPetHandle pet;
+        if (!PawPalRoomPetRuntime.TryFindNearbyHeadAttentionPet(transform, nearbyDogLookRadius, out pet)
+            || pet == null
+            || pet.RootTransform == null)
         {
-            DogRoomAgent candidate = agents[i];
-            if (candidate == null || candidate == roomAgent || candidate.transform == transform)
-            {
-                continue;
-            }
-
-            if (!CanLookAtNearbyDog(candidate.transform, false))
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(transform.position, candidate.transform.position);
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                target = candidate.transform;
-            }
+            return false;
         }
 
-        return target != null;
+        target = pet.RootTransform;
+        return CanLookAtNearbyPet(target, false);
     }
 
     private bool CanLookAtNearbyDog(Transform otherDog)
     {
-        return CanLookAtNearbyDog(otherDog, false);
+        return CanLookAtNearbyPet(otherDog, false);
     }
 
-    private bool CanLookAtNearbyDog(Transform otherDog, bool socialOverride)
+    private bool CanLookAtNearbyPet(Transform otherDog, bool socialOverride)
     {
         if (otherDog == null || (!lookAtNearbyDogs && !socialOverride))
         {
@@ -747,6 +762,15 @@ public class DogCameraAttention : MonoBehaviour
             Vector3 velocity = agent.velocity;
             velocity.y = 0f;
             if (velocity.magnitude > bodyAssistVelocityLimit)
+            {
+                return false;
+            }
+        }
+
+        if (!socialOverride)
+        {
+            PawPalRoomPetHandle pet = PawPalRoomPetRuntime.ResolveFromTransform(otherDog);
+            if (!PawPalRoomPetRuntime.IsEligibleForNearbyHeadAttention(pet))
             {
                 return false;
             }
@@ -809,6 +833,13 @@ public class DogCameraAttention : MonoBehaviour
             return socialHeadLookTarget.position + nearbyDogHeadLookOffset;
         }
 
+        PawPalRoomPetHandle pet = PawPalRoomPetRuntime.ResolveFromTransform(otherDog);
+        Transform focusTransform = pet != null ? pet.FocusTransform : null;
+        if (focusTransform != null)
+        {
+            return focusTransform.position + nearbyDogHeadLookOffset;
+        }
+
         Transform headTarget = GetDogHeadLookTarget(otherDog);
         if (headTarget != null)
         {
@@ -865,15 +896,16 @@ public class DogCameraAttention : MonoBehaviour
         {
             nextNearbyDogScanTime = Time.time + Mathf.Max(0.02f, nearbyDogScanInterval);
             Transform nearbyDog;
-            proximityLookTarget = TryFindNearbyDog(out nearbyDog) ? nearbyDog : null;
+            proximityLookTarget = TryFindNearbyPet(out nearbyDog) ? nearbyDog : null;
         }
 
-        if (proximityLookTarget != null && CanLookAtNearbyDog(proximityLookTarget, false))
+        if (proximityLookTarget != null && CanLookAtNearbyPet(proximityLookTarget, false))
         {
             proximityLookOverrideActive = true;
             activeTargetType = AttentionTargetType.NearbyDog;
             activeLookTarget = proximityLookTarget;
             targetWeight = 1f;
+            MaybeRequestNearbyPetHeadTilt(proximityLookTarget);
             return;
         }
 
@@ -912,7 +944,7 @@ public class DogCameraAttention : MonoBehaviour
             return false;
         }
 
-        if (CanLookAtNearbyDog(socialLookTarget, true))
+        if (CanLookAtNearbyPet(socialLookTarget, true))
         {
             socialLookOverrideActive = true;
             activeTargetType = AttentionTargetType.NearbyDog;

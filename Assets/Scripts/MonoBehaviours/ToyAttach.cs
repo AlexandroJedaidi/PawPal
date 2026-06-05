@@ -78,6 +78,11 @@ public class ToyAttach : MonoBehaviour
             return false;
         }
 
+        if (GetComponentInParent<PawPalCatRoomAgent>() != null)
+        {
+            return false;
+        }
+
         ResolveMouthSocketIfNeeded();
         Transform carryAnchor = GetCarryAnchor();
         if (carryAnchor == null)
