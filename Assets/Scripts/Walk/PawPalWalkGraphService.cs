@@ -750,6 +750,23 @@ public static class PawPalWalkGraphService
         return true;
     }
 
+    public static bool TryAddSceneEncounterPointsToPlan(PawPalWalkingSceneBindings bindings, PawPalWalkRoutePlan plan)
+    {
+        if (plan == null)
+        {
+            return false;
+        }
+
+        if (!TryResolveGraph(bindings, out ResolvedGraph resolved, out _))
+        {
+            return false;
+        }
+
+        plan.EncounterPoints.Clear();
+        AddEncounterPointsToPlan(plan, resolved);
+        return true;
+    }
+
     private static bool TryFindConnectingEdge(PawPalWalkGraphSnapshot snapshot, string startNodeId, string endNodeId, out PawPalWalkGraphEdgeData edge, out bool reversePath)
     {
         edge = null;

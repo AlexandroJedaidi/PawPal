@@ -88,18 +88,8 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         }
 
         PawPalSceneTransitionRequest preparedRequest = PrepareRequest(request, scenePath);
-        string loadError;
-        AsyncOperation loadOperation = instance.TryStartSceneLoad(sceneName, scenePath, preparedRequest, out loadError);
-        if (loadOperation == null)
-        {
-            InvokeOnLoadStartFailed(preparedRequest);
-            Debug.LogError(loadError);
-            return false;
-        }
-
-        loadOperation.allowSceneActivation = false;
         instance.transitionActive = true;
-        instance.StartCoroutine(instance.RunSceneTransition(sceneName, preparedRequest, loadOperation));
+        instance.StartCoroutine(instance.RunSceneTransition(sceneName, scenePath, preparedRequest));
         return true;
     }
 
@@ -188,7 +178,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         RefreshLoadingText();
     }
 
-    private IEnumerator RunSceneTransition(string sceneName, PawPalSceneTransitionRequest request, AsyncOperation loadOperation)
+    private IEnumerator RunSceneTransition(string sceneName, string scenePath, PawPalSceneTransitionRequest request)
     {
         explicitReadyReceived = !request.WaitForExplicitReady;
         visibleSinceUnscaledTime = Time.unscaledTime;
@@ -196,11 +186,24 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         progressTarget = 0f;
         SetOverlayText(request.DisplayText);
         SetOverlayBackground(request.BackgroundResourcePath);
+        RefreshProgressVisuals();
         ShowOverlayImmediate();
 
-        loadOperation.allowSceneActivation = false;
-        yield return FadeOverlay(1f, request.FadeInDuration, loadOperation);
+        yield return FadeOverlay(1f, request.FadeInDuration);
         InvokeOnObscured(request);
+
+        string loadError;
+        AsyncOperation loadOperation = TryStartSceneLoad(sceneName, scenePath, request, out loadError);
+        if (loadOperation == null)
+        {
+            InvokeOnLoadStartFailed(request);
+            Debug.LogError(loadError);
+            yield return FadeOverlay(0f, request.FadeOutDuration);
+            FinishTransition();
+            yield break;
+        }
+
+        loadOperation.allowSceneActivation = false;
         yield return WaitForLoadReadiness(loadOperation);
         progressTarget = 1f;
         yield return WaitForDisplayedProgress(ProgressReadyEpsilon);
@@ -316,7 +319,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         progressTrackImage.sprite = UiTheme.CircleSprite;
         progressTrackImage.type = Image.Type.Simple;
         progressTrackImage.preserveAspect = true;
-        progressTrackImage.color = new Color(0.93f, 0.80f, 0.74f, 0.50f);
+        progressTrackImage.color = new Color(0.93f, 0.80f, 0.74f, 0.18f);
 
         RectTransform fillRoot = UiFactory.CreateRect("ProgressFill", progressClusterRoot);
         fillRoot.anchorMin = new Vector2(0.5f, 0.5f);
@@ -430,6 +433,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         float targetProgress = Mathf.Clamp01(minimumProgress);
         while (displayedProgress < targetProgress)
         {
+            displayedProgress = Mathf.MoveTowards(displayedProgress, progressTarget, Time.unscaledDeltaTime * ProgressSmoothingSpeed);
             RefreshProgressVisuals();
             yield return null;
         }
@@ -745,6 +749,7 @@ public sealed class PawPalSceneTransitionController : MonoBehaviour
         explicitReadyReceived = true;
         progressTarget = 0f;
         displayedProgress = 0f;
+        RefreshProgressVisuals();
         HideOverlayImmediate();
     }
 

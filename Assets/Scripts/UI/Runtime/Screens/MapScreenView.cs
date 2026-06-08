@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -73,8 +74,6 @@ public class MapScreenView : AppScreenViewBase
     private static readonly Color32 CtaBlueDark = new Color32(0, 118, 177, 255);
     private static readonly Color32 White = new Color32(255, 255, 255, 255);
     private static readonly Color32 FlagOutline = new Color32(163, 163, 163, 255);
-    private static readonly Color32 WalkGreen = new Color32(37, 199, 63, 255);
-    private static readonly Color32 WalkGreenDark = new Color32(20, 167, 47, 255);
     private static readonly Color32 EncounterCoral = new Color32(234, 130, 108, 255);
     private static readonly Color32 TransparentHit = new Color32(255, 255, 255, 1);
     private static readonly Vector2 SelectorArrowSize = new Vector2(16f, 24f);
@@ -150,11 +149,16 @@ public class MapScreenView : AppScreenViewBase
     private RectTransform socialChatRoot;
     private RectTransform socialAddFriendRoot;
     private RectTransform socialEnterClubRoot;
+    private PawPalAgilityTrialSelectionOverlay agilityTrialOverlay;
     private TextMeshProUGUI competitionDogNameLabel;
     private MapMode currentMode;
     private ResponsiveFigmaFrameLayout frameLayout;
     private MapWalkPlannerController walkPlanner;
+    private WalkStaminaButtonView baseWalkButton;
+    private WalkStaminaButtonView plannerWalkButton;
     private Coroutine quickWalkRoutine;
+    private string lockedWalkDogId = string.Empty;
+    private float walkPlannerPreviewCost;
 
     protected override bool UseScreenContainer
     {
@@ -167,6 +171,7 @@ public class MapScreenView : AppScreenViewBase
         if (runtime != null)
         {
             runtime.StateChanged += HandleRuntimeStateChanged;
+            CaptureLockedWalkDog(runtime);
         }
 
         if (exactFrame != null)
@@ -257,29 +262,9 @@ public class MapScreenView : AppScreenViewBase
 
     private void BuildBaseState(RectTransform parent)
     {
-        CreateBackgroundImage(parent, "MapMainBackground", "UI/Figma/Map/map_main_background", -46f, 0f, 524f, 786f);
+        CreateBackgroundImage(parent, "MapMainBackground", "UI/Figma/Map/walking_map", -46f, 0f, 524f, 786f);
 
-        CreateLocationHotspot(parent, "CompetitionCenter", 76f, 130f, 175f, 86f, "Competition\ncenter", "icon_trophy_brand", 36f, delegate
-        {
-            SetMode(MapMode.CompetitionCenter);
-        });
-
-        CreateLocationHotspot(parent, "Kennel", 36f, 240f, 76f, 64f, "Kennel", "icon_kennel_brand", 26f, delegate
-        {
-            OpenKennelIntroScene();
-        });
-
-        CreateLocationHotspot(parent, "DogPark", 137.5f, 375f, 88f, 64f, "Dog park", "icon_park_brand", 30f, delegate
-        {
-            Debug.Log("Map dog park transition is not defined in the provided Figma states.");
-        });
-
-        CreateLocationHotspot(parent, "HomeHotspot", 35f, 628f, 67f, 64f, "Home", "icon_home_brand", 30f, delegate
-        {
-            shell.ShowScreen(AppScreenId.Home);
-        });
-
-        CreateWalkButton(parent, 11f, 699f, delegate
+        baseWalkButton = CreateWalkButton(parent, 11f, 699f, delegate
         {
             SetMode(MapMode.Walk);
         });
@@ -292,20 +277,11 @@ public class MapScreenView : AppScreenViewBase
 
     private void BuildWalkState(RectTransform parent)
     {
-        CreateBackgroundImage(parent, "WalkBackground", "UI/Figma/Map/map_walk_background", -65f, 0f, 524f, 786f);
-
-        CreateLocationHotspot(parent, "WalkHomeHotspot", 43f, 593f, 67f, 64f, "Home", "icon_home_brand", 30f, delegate
-        {
-            shell.ShowScreen(AppScreenId.Home);
-        });
-
-        CreateLocationHotspot(parent, "WalkParkHotspot", 118f, 292f, 88f, 64f, "Dog park", "icon_park_brand", 30f, delegate
-        {
-            Debug.Log("Map dog park transition is not defined in the provided Figma states.");
-        });
-
-        CreateBackgroundImage(parent, "WalkSmallSign", "UI/Figma/Map/walk_small_sign", 135f, 381f, 57f, 13f);
+        CreateBackgroundImage(parent, "WalkBackground", "UI/Figma/Map/walking_map", -46f, 0f, 524f, 786f);
+        plannerWalkButton = CreateWalkButton(parent, 11f, 699f, null);
         walkPlanner = parent.gameObject.AddComponent<MapWalkPlannerController>();
+        walkPlanner.SetLockedDogId(lockedWalkDogId);
+        walkPlanner.PlanPreviewChanged += HandleWalkPlanPreviewChanged;
         walkPlanner.Initialize(shell, sprites, delegate
         {
             SetMode(MapMode.Base);
@@ -421,8 +397,8 @@ public class MapScreenView : AppScreenViewBase
         CreateNameSelector(panel, 20f, 105f, 310f);
         CreateSectionLineHeader(panel, "Competitions", 0f, 141f, 350f, 131.509f);
 
-        CreateCompetitionRow(panel, "ObedienceRow", 0f, 174f, "Obedience", "Level: Beginner (1/4)", true);
-        CreateCompetitionRow(panel, "AgilityRow", 0f, 226f, "Agility (coming soon)", null, false);
+        CreateCompetitionRow(panel, "ObedienceRow", 0f, 174f, "Obedience Trial", "Beginner / Amateur", true);
+        CreateCompetitionRow(panel, "AgilityRow", 0f, 226f, "Agility Trial", "Practice first", true);
         CreateCompetitionRow(panel, "DiscRow", 0f, 278f, "Disc (coming soon)", null, false);
         CreateCompetitionRow(panel, "StyleRow", 0f, 330f, "Style (coming soon)", null, false);
     }
@@ -629,12 +605,19 @@ public class MapScreenView : AppScreenViewBase
         ApplyRootSize(kennelReleaseRoot, frameHeight);
         ApplyRootSize(overlayLayer, frameHeight);
 
-        SetNodeY(baseRoot, "HomeHotspot", visibleHeight - 64f - 94f);
         SetNodeY(baseRoot, "WalkButton", visibleHeight - 73f - 14f);
         SetNodeY(baseRoot, "SocialButton", visibleHeight - 55f - 23f);
 
-        SetNodeY(walkRoot, "WalkHomeHotspot", visibleHeight - 64f - 129f);
         SetNodeY(walkRoot, "WalkButton", visibleHeight - 73f - 14f);
+        if (baseWalkButton != null)
+        {
+            baseWalkButton.ApplyLayout(1f);
+        }
+
+        if (plannerWalkButton != null)
+        {
+            plannerWalkButton.ApplyLayout(1f);
+        }
 
         SetBackgroundHeight(baseRoot, "MapMainBackground", frameHeight);
         SetBackgroundHeight(walkRoot, "WalkBackground", frameHeight);
@@ -694,6 +677,11 @@ public class MapScreenView : AppScreenViewBase
     private void SetMode(MapMode mode)
     {
         currentMode = mode;
+        EnsureLockedWalkDogSelected(PawPalGameRuntime.Instance);
+        if (mode != MapMode.Walk)
+        {
+            HandleWalkPlanPreviewChanged(0f);
+        }
 
         if (baseRoot != null)
         {
@@ -762,6 +750,16 @@ public class MapScreenView : AppScreenViewBase
         SetMode(currentMode == MapMode.SocialEnterClub ? MapMode.Social : MapMode.SocialEnterClub);
     }
 
+    private void ShowAgilityTrialOverlay()
+    {
+        if (overlayLayer == null)
+        {
+            return;
+        }
+
+        agilityTrialOverlay = PawPalAgilityTrialSelectionOverlay.Show(overlayLayer);
+    }
+
     private void CreateLocationHotspot(RectTransform parent, string name, float x, float y, float width, float height, string labelText, string iconName, float iconSize, UnityEngine.Events.UnityAction onClick)
     {
         RectTransform root = CreateNode(name, parent, x, y, width, height);
@@ -817,59 +815,12 @@ public class MapScreenView : AppScreenViewBase
         inner.rectTransform.anchoredPosition = Vector2.zero;
     }
 
-    private void CreateWalkButton(RectTransform parent, float x, float y, UnityEngine.Events.UnityAction onClick)
+    private WalkStaminaButtonView CreateWalkButton(RectTransform parent, float x, float y, UnityEngine.Events.UnityAction onClick)
     {
         RectTransform root = CreateNode("WalkButton", parent, x, y, 73f, 73f);
-        if (onClick != null)
-        {
-            UiFactory.AddButton(root.gameObject, onClick);
-        }
-
-        Image outerFill = UiFactory.CreateImage("OuterFill", root, UiTheme.CircleSprite, White);
-        outerFill.type = Image.Type.Simple;
-        outerFill.preserveAspect = false;
-        UiFactory.Stretch(outerFill.rectTransform, 0f, 0f, 0f, 0f);
-
-        Image outerRing = UiFactory.CreateImage("OuterRing", root, UiTheme.CircleOutlineSprite, WalkGreen);
-        outerRing.type = Image.Type.Simple;
-        outerRing.preserveAspect = false;
-        outerRing.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        outerRing.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        outerRing.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        outerRing.rectTransform.sizeDelta = new Vector2(73f, 73f);
-        outerRing.rectTransform.anchoredPosition = Vector2.zero;
-
-        Shadow shadow = root.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = new Color(0f, 0f, 0f, 0.25f);
-        shadow.effectDistance = new Vector2(0f, -2f);
-        shadow.useGraphicAlpha = true;
-
-        Image innerFill = UiFactory.CreateImage("InnerFill", root, UiTheme.CircleSprite, White);
-        innerFill.type = Image.Type.Simple;
-        innerFill.preserveAspect = false;
-        innerFill.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        innerFill.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        innerFill.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        innerFill.rectTransform.sizeDelta = new Vector2(61f, 61f);
-        innerFill.rectTransform.anchoredPosition = Vector2.zero;
-
-        Image accent = UiFactory.CreateImage("Accent", root, UiTheme.CircleSprite, Coral);
-        accent.type = Image.Type.Simple;
-        accent.preserveAspect = false;
-        accent.rectTransform.anchorMin = new Vector2(0f, 0f);
-        accent.rectTransform.anchorMax = new Vector2(0f, 0f);
-        accent.rectTransform.pivot = new Vector2(0f, 0f);
-        accent.rectTransform.sizeDelta = new Vector2(14f, 14f);
-        accent.rectTransform.anchoredPosition = new Vector2(8f, 8f);
-
-        Image icon = UiFactory.CreateImage("Icon", root, sprites.GetIcon("icon_activity_brand"), Coral);
-        icon.type = Image.Type.Simple;
-        icon.preserveAspect = true;
-        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.sizeDelta = new Vector2(53f, 53f);
-        icon.rectTransform.anchoredPosition = Vector2.zero;
+        WalkStaminaButtonView button = root.gameObject.AddComponent<WalkStaminaButtonView>();
+        button.Initialize(sprites, onClick);
+        return button;
     }
 
     private void CreateSocialButton(RectTransform parent, float x, float y, UnityEngine.Events.UnityAction onClick)
@@ -1015,8 +966,11 @@ public class MapScreenView : AppScreenViewBase
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         if (runtime == null)
         {
+            RefreshWalkButtons(null);
             return;
         }
+
+        EnsureLockedWalkDogSelected(runtime);
 
         if (competitionDogNameLabel != null)
         {
@@ -1027,6 +981,82 @@ public class MapScreenView : AppScreenViewBase
         if (walkPlanner != null)
         {
             walkPlanner.RefreshRuntimeState();
+        }
+
+        RefreshWalkButtons(runtime);
+    }
+
+    private void CaptureLockedWalkDog(PawPalGameRuntime runtime)
+    {
+        PawPalDogState activeDog = runtime != null ? runtime.ActiveDog : null;
+        lockedWalkDogId = activeDog != null ? activeDog.Id : string.Empty;
+        if (walkPlanner != null)
+        {
+            walkPlanner.SetLockedDogId(lockedWalkDogId);
+        }
+    }
+
+    private void EnsureLockedWalkDogSelected(PawPalGameRuntime runtime)
+    {
+        if (runtime == null || string.IsNullOrEmpty(lockedWalkDogId))
+        {
+            return;
+        }
+
+        PawPalDogState activeDog = runtime.ActiveDog;
+        if (activeDog != null && string.Equals(activeDog.Id, lockedWalkDogId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        runtime.SelectDogById(lockedWalkDogId, false);
+    }
+
+    private PawPalDogState ResolveLockedWalkDog(PawPalGameRuntime runtime)
+    {
+        if (runtime == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(lockedWalkDogId))
+        {
+            IReadOnlyList<PawPalDogState> dogs = runtime.Dogs;
+            for (int i = 0; i < dogs.Count; i++)
+            {
+                PawPalDogState dog = dogs[i];
+                if (dog != null && string.Equals(dog.Id, lockedWalkDogId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return dog;
+                }
+            }
+        }
+
+        return runtime.ActiveDog;
+    }
+
+    private void HandleWalkPlanPreviewChanged(float previewCost)
+    {
+        walkPlannerPreviewCost = Mathf.Max(0f, previewCost);
+        RefreshWalkButtons(PawPalGameRuntime.Instance);
+    }
+
+    private void RefreshWalkButtons(PawPalGameRuntime runtime)
+    {
+        PawPalDogState lockedDog = ResolveLockedWalkDog(runtime);
+        PawPalWalkStaminaSnapshot stamina = runtime != null
+            ? runtime.GetWalkStaminaSnapshot(lockedDog)
+            : new PawPalWalkStaminaSnapshot();
+        float previewCost = currentMode == MapMode.Walk ? walkPlannerPreviewCost : 0f;
+
+        if (baseWalkButton != null)
+        {
+            baseWalkButton.SetStamina(stamina.Current, stamina.Max, previewCost);
+        }
+
+        if (plannerWalkButton != null)
+        {
+            plannerWalkButton.SetStamina(stamina.Current, stamina.Max, previewCost);
         }
     }
 
@@ -1104,7 +1134,23 @@ public class MapScreenView : AppScreenViewBase
 
         CreateActionButton(row, "EnterButton", "Enter", 284f, 8f, 61f, enabled, delegate
         {
-            Debug.Log("Competition center enter flow is unresolved in the provided Figma states.");
+            if (string.Equals(title, "Obedience Trial", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!PawPalObedienceTrialSceneFlow.LoadTrialScene())
+                {
+                    Debug.LogWarning("Competition center could not load the Obedience Trial scene.");
+                }
+
+                return;
+            }
+
+            if (string.Equals(title, "Agility Trial", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowAgilityTrialOverlay();
+                return;
+            }
+
+            Debug.Log("Competition center enter flow is unresolved for '" + title + "'.");
         });
     }
 

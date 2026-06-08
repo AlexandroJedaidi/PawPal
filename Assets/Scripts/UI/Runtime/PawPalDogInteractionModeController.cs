@@ -72,6 +72,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private const float InteractionFaceCameraDuration = 0.4f;
     private const float InteractionFaceCameraMaxWaitSeconds = 6f;
     private const float InteractionLookRefreshIntervalSeconds = 0.2f;
+    private const float InteractionHeadTiltMinAngle = 20f;
+    private const float InteractionHeadTiltMaxAngle = 30f;
+    private const float InteractionHeadTiltMinDuration = 1.9f;
+    private const float InteractionHeadTiltMaxDuration = 2.4f;
+    private const float InteractionHeadTiltFirstDelayMin = 1.1f;
+    private const float InteractionHeadTiltFirstDelayMax = 2.6f;
+    private const float InteractionHeadTiltCooldownMin = 4.5f;
+    private const float InteractionHeadTiltCooldownMax = 8.5f;
+    private const float InteractionHeadTiltChance = 0.65f;
     private const float CatCameraApproachDistance = 1.05f;
     private const float CatCameraApproachNearDistance = 0.82f;
     private const float CatCameraApproachFarDistance = 1.28f;
@@ -110,6 +119,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private float lastActivityTime;
     private float nextPettingRewardTime;
     private float nextInteractionLookRefreshTime;
+    private float nextInteractionHeadTiltTime;
     private float nextTugRewardTime;
     private float ignoreGestureUntil;
     private float tugStartedAt;
@@ -126,6 +136,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
     private int pettingPointerId = -2;
     private int tugPointerId = -1;
     private int completedTugRounds;
+    private int lastInteractionHeadTiltSign;
+    private int repeatedInteractionHeadTiltSideCount;
     private string pendingExitReason = "unknown";
     private Vector2 lastPettingScreenPosition;
 
@@ -180,6 +192,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         HandleContinuousPettingInput();
         HandleToyTugInput();
         RefreshInteractionCameraLookIfNeeded();
+        TryRequestPassiveInteractionHeadTilt();
         float remaining = timeoutSeconds - (Time.unscaledTime - lastActivityTime);
         if (view != null)
         {
@@ -251,7 +264,10 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         tugRoundCounted = false;
         completedTugRounds = 0;
         tugStartedAt = 0f;
+        lastInteractionHeadTiltSign = 0;
+        repeatedInteractionHeadTiltSideCount = 0;
         interactionModeEnteredAt = Time.unscaledTime;
+        ScheduleNextPassiveInteractionHeadTilt(InteractionHeadTiltFirstDelayMin, InteractionHeadTiltFirstDelayMax);
         ResetActivity();
 
         PawPalGameRuntime runtime = modeOptions.PreviewOnly ? null : PawPalGameRuntime.Instance;
@@ -377,9 +393,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             if (resolvedPet != null && resolvedPet.IsValid)
             {
                 PawPalRoomPetHandle previousPet = activePet;
+                DogRoomAgent previousDog = activeDog;
                 if (activeDog != resolvedPet.DogAgent)
                 {
                     ApplyInteractionVocalContext(activeDog, DogVocalContext.Ambient);
+                }
+
+                if (previousDog != null && previousDog != resolvedPet.DogAgent)
+                {
+                    previousDog.EndInteractionIdleLoop();
                 }
 
                 if (previousPet != null
@@ -395,6 +417,7 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
                 if (dogCamera != null && activeDog != null)
                 {
                     dogCamera.EnterDogInteractionMode(activeDog);
+                    activeDog.BeginInteractionIdleLoop();
                 }
                 else if (activeDog == null)
                 {
@@ -475,12 +498,15 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
 
         bool exitingCatInteraction = activeDog == null;
         active = false;
+        nextInteractionHeadTiltTime = 0f;
         tugActive = false;
         tugRoundCounted = false;
         tugPointerId = -1;
         CancelContinuousPettingTracking();
         completedTugRounds = 0;
         tugStartedAt = 0f;
+        lastInteractionHeadTiltSign = 0;
+        repeatedInteractionHeadTiltSideCount = 0;
         if (attemptRoutine != null)
         {
             StopCoroutine(attemptRoutine);
@@ -520,6 +546,11 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         if (activePet != null && activePet.IsValid)
         {
             activePet.StopHeldToyTugAnimation();
+            if (activeDog != null)
+            {
+                activeDog.EndInteractionIdleLoop();
+            }
+
             if (activeDog == null)
             {
                 if (activePet.CatAgent != null)
@@ -1464,6 +1495,8 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
             {
                 attention.RequestCameraAttention(Mathf.Max(2f, timeoutSeconds));
             }
+
+            dog.BeginInteractionIdleLoop();
         }
 
         faceCameraRoutine = null;
@@ -1505,6 +1538,124 @@ public sealed class PawPalDogInteractionModeController : MonoBehaviour
         {
             activePet.CatAgent.RequestInteractionCameraLook(interactionCamera.transform, Mathf.Max(0.4f, InteractionLookRefreshIntervalSeconds * 2f));
         }
+    }
+
+    private void TryRequestPassiveInteractionHeadTilt()
+    {
+        if (!active
+            || activePet == null
+            || !activePet.IsValid
+            || Time.unscaledTime < nextInteractionHeadTiltTime)
+        {
+            return;
+        }
+
+        if (!CanUsePassiveInteractionHeadTilt())
+        {
+            ScheduleNextPassiveInteractionHeadTilt(0.45f, 1.1f);
+            return;
+        }
+
+        ScheduleNextPassiveInteractionHeadTilt(InteractionHeadTiltCooldownMin, InteractionHeadTiltCooldownMax);
+        if (UnityEngine.Random.value > InteractionHeadTiltChance)
+        {
+            return;
+        }
+
+        float angle = PawPalRoomPetRuntime.ResolveSignedHeadTiltAngle(
+            InteractionHeadTiltMinAngle,
+            InteractionHeadTiltMaxAngle,
+            UnityEngine.Random.value,
+            ResolvePassiveInteractionHeadTiltRight());
+        float duration = UnityEngine.Random.Range(InteractionHeadTiltMinDuration, InteractionHeadTiltMaxDuration);
+
+        if (activeDog != null)
+        {
+            DogCameraAttention attention = ResolveDogAttention(activeDog);
+            if (attention != null)
+            {
+                attention.RequestHeadTilt(angle, duration);
+            }
+
+            return;
+        }
+
+        if (activePet.CatAgent != null)
+        {
+            activePet.CatAgent.RequestInteractionHeadTilt(angle, duration);
+        }
+    }
+
+    private bool CanUsePassiveInteractionHeadTilt()
+    {
+        if (activePet == null
+            || !activePet.IsValid
+            || activePet.IsMoving
+            || activePet.IsResting
+            || activePet.IsSleeping
+            || activePet.HasHeldToy
+            || tugActive
+            || petInteractionRoutine != null
+            || attemptRoutine != null)
+        {
+            return false;
+        }
+
+        if (activePet.IsPlayingOneShotAnimation
+            && (activeDog == null || !activeDog.IsPlayingInteractionIdleVariation))
+        {
+            return false;
+        }
+
+        if (activeDog != null)
+        {
+            if (activeDog.IsPreparingToMove || !activeDog.CanOverlayInteractionHeadTilt)
+            {
+                return false;
+            }
+
+            DogCameraAttention attention = ResolveDogAttention(activeDog);
+            if (attention != null && attention.IsHeadTiltActive)
+            {
+                return false;
+            }
+        }
+        else if (activePet.CatAgent != null
+            && (activePet.CatAgent.IsInteractionHeadTiltActive || !activePet.CatAgent.CanOverlayInteractionHeadTilt))
+        {
+            return false;
+        }
+
+        return Time.unscaledTime - interactionModeEnteredAt >= InteractionHeadTiltFirstDelayMin;
+    }
+
+    private bool ResolvePassiveInteractionHeadTiltRight()
+    {
+        int sign = UnityEngine.Random.value < 0.5f ? -1 : 1;
+        if (sign == lastInteractionHeadTiltSign)
+        {
+            repeatedInteractionHeadTiltSideCount++;
+        }
+        else
+        {
+            repeatedInteractionHeadTiltSideCount = 1;
+        }
+
+        if (repeatedInteractionHeadTiltSideCount > 2)
+        {
+            sign *= -1;
+            repeatedInteractionHeadTiltSideCount = 1;
+        }
+
+        lastInteractionHeadTiltSign = sign;
+        return sign > 0;
+    }
+
+    private void ScheduleNextPassiveInteractionHeadTilt(float minDelay, float maxDelay)
+    {
+        nextInteractionHeadTiltTime = Time.unscaledTime + UnityEngine.Random.Range(
+            Mathf.Max(0.1f, minDelay),
+            Mathf.Max(Mathf.Max(0.1f, minDelay), maxDelay));
     }
 
     private void FocusCatInteractionCamera()

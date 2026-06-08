@@ -20,6 +20,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private const float InteractionIdleMinSeconds = 2.2f;
     private const float InteractionIdleMaxSeconds = 4.1f;
     private const float InteractionIdleBusyRetrySeconds = 0.18f;
+    private const float InteractionIdleHeadTiltSettleSeconds = 0.45f;
     private const float PetAvoidanceRepathInterval = 0.28f;
     private const float PetAvoidancePadding = 0.05f;
     private const float PetAvoidanceRerouteSearchRadius = 0.55f;
@@ -29,12 +30,9 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private static readonly HashSet<Transform> ClaimedToyTransforms = new HashSet<Transform>();
     private static readonly PawPalPhotoPoseId[] InteractionIdlePoses =
     {
-        PawPalPhotoPoseId.Idle2,
-        PawPalPhotoPoseId.Idle3,
         PawPalPhotoPoseId.Idle1,
-        PawPalPhotoPoseId.Idle4,
-        PawPalPhotoPoseId.Idle6,
-        PawPalPhotoPoseId.Idle7
+        PawPalPhotoPoseId.Idle2,
+        PawPalPhotoPoseId.Idle3
     };
 
     [Header("Room Roaming")]
@@ -90,6 +88,8 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     [SerializeField] private float maxNearbyPetHeadTiltAngle = 30f;
     [SerializeField] private float minNearbyPetHeadTiltDuration = 0.45f;
     [SerializeField] private float maxNearbyPetHeadTiltDuration = 0.9f;
+    [SerializeField] private float nearbyPetHeadTiltRampDuration = 0.45f;
+    [SerializeField] private float nearbyPetHeadTiltHoldDuration = 1f;
     [SerializeField] private float minNearbyPetHeadTiltCooldown = 5f;
     [SerializeField] private float maxNearbyPetHeadTiltCooldown = 12f;
 
@@ -169,7 +169,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private int lastObservedAnimatorStateHash;
     private float lastObservedAnimatorNormalizedTime;
     private float lastObservedAnimatorProgressAt;
-    private int interactionIdlePoseCursor;
+    private int lastInteractionIdlePoseIndex = -1;
+    private int repeatedInteractionIdlePoseCount;
+    private int activeInteractionIdleStateHash;
+    private float interactionIdleSettledAt;
     private bool isPlayingPreMoveTurnAnimation;
     private Transform nearbyPetLookTarget;
     private float nearbyPetLookUntil;
@@ -179,7 +182,6 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private float nearbyPetHeadTiltUntil;
     private float requestedNearbyPetHeadTiltAngle;
     private float requestedNearbyPetHeadTiltDuration;
-    private Quaternion appliedNearbyPetHeadTilt = Quaternion.identity;
 #if UNITY_EDITOR
     private PlayableGraph directLocomotionGraph;
     private AnimationClipPlayable activeDirectLocomotionPlayable;
@@ -229,6 +231,16 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     public bool IsPlayingOneShotAnimation
     {
         get { return isPlayingOneShotAnimation; }
+    }
+
+    public bool IsInteractionHeadTiltActive
+    {
+        get { return requestedNearbyPetHeadTiltDuration > 0f && Time.time < nearbyPetHeadTiltUntil; }
+    }
+
+    public bool CanOverlayInteractionHeadTilt
+    {
+        get { return interactionIdleRoutine == null || Time.time >= interactionIdleSettledAt; }
     }
 
     public bool CanJoinSocialInteraction
@@ -394,6 +406,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             PauseForSocial(false);
         }
 
+        lastInteractionIdlePoseIndex = -1;
+        repeatedInteractionIdlePoseCount = 0;
+        activeInteractionIdleStateHash = 0;
+        interactionIdleSettledAt = 0f;
         if (interactionIdleRoutine == null)
         {
             interactionIdleRoutine = StartCoroutine(InteractionIdleLoopRoutine());
@@ -407,6 +423,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             StopCoroutine(interactionIdleRoutine);
             interactionIdleRoutine = null;
         }
+
+        lastInteractionIdlePoseIndex = -1;
+        repeatedInteractionIdlePoseCount = 0;
+        activeInteractionIdleStateHash = 0;
+        interactionIdleSettledAt = 0f;
     }
 
     public void SetExternalWalkControl(bool enabled)
@@ -579,6 +600,18 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
         interactionLookTarget = target;
         interactionLookUntil = Mathf.Max(interactionLookUntil, Time.time + Mathf.Max(0.1f, duration));
+    }
+
+    public void RequestInteractionHeadTilt(float angleDegrees, float duration)
+    {
+        float clampedDuration = Mathf.Max(GetMinimumHeadTiltDuration(), duration);
+        float clampedAngle = Mathf.Abs(angleDegrees) > 0.01f ? angleDegrees : minNearbyPetHeadTiltAngle;
+        nearbyPetLookTarget = null;
+        nearbyPetLookUntil = 0f;
+        requestedNearbyPetHeadTiltAngle = clampedAngle;
+        requestedNearbyPetHeadTiltDuration = clampedDuration;
+        nearbyPetHeadTiltStartedAt = Time.time;
+        nearbyPetHeadTiltUntil = nearbyPetHeadTiltStartedAt + clampedDuration;
     }
 
     public bool TryPlayPettingReaction()
@@ -889,7 +922,6 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
 
     private void LateUpdate()
     {
-        RemoveAppliedNearbyPetHeadTilt();
         if (headTransform == null)
         {
             return;
@@ -899,8 +931,6 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         {
             nearbyPetLookTarget = null;
             nearbyPetLookUntil = 0f;
-            requestedNearbyPetHeadTiltDuration = 0f;
-            nearbyPetHeadTiltUntil = 0f;
             Vector3 lookPoint = interactionLookTarget.position;
             Vector3 direction = lookPoint - headTransform.position;
             if (direction.sqrMagnitude <= 0.0001f)
@@ -911,10 +941,12 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             if (socialPaused && !isPlayingOneShotAnimation)
             {
                 FacePosition(lookPoint);
+                ApplyNearbyPetHeadTilt();
                 return;
             }
 
             ApplyHeadLookRotation(direction.normalized);
+            ApplyNearbyPetHeadTilt();
             return;
         }
 
@@ -1072,9 +1104,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             maxNearbyPetHeadTiltAngle,
             Random.value,
             Random.value < 0.5f);
-        requestedNearbyPetHeadTiltDuration = Random.Range(minNearbyPetHeadTiltDuration, maxNearbyPetHeadTiltDuration);
+        requestedNearbyPetHeadTiltDuration = Mathf.Max(
+            GetMinimumHeadTiltDuration(),
+            Random.Range(minNearbyPetHeadTiltDuration, maxNearbyPetHeadTiltDuration));
         nearbyPetHeadTiltStartedAt = Time.time;
-        nearbyPetHeadTiltUntil = nearbyPetHeadTiltStartedAt + Mathf.Max(0.1f, requestedNearbyPetHeadTiltDuration);
+        nearbyPetHeadTiltUntil = nearbyPetHeadTiltStartedAt + requestedNearbyPetHeadTiltDuration;
         nextNearbyPetHeadTiltTime = Time.time + Random.Range(minNearbyPetHeadTiltCooldown, maxNearbyPetHeadTiltCooldown);
     }
 
@@ -1087,32 +1121,57 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return;
         }
 
-        float normalized = Mathf.Clamp01((Time.time - nearbyPetHeadTiltStartedAt) / requestedNearbyPetHeadTiltDuration);
-        float tiltAmount = Mathf.Sin(normalized * Mathf.PI) * requestedNearbyPetHeadTiltAngle;
+        float tiltAmount = CalculateHeadTiltAmount(
+            Time.time - nearbyPetHeadTiltStartedAt,
+            requestedNearbyPetHeadTiltDuration,
+            requestedNearbyPetHeadTiltAngle);
         if (Mathf.Abs(tiltAmount) <= 0.01f)
         {
             return;
         }
 
-        appliedNearbyPetHeadTilt = Quaternion.AngleAxis(tiltAmount, Vector3.forward);
-        headTransform.localRotation *= appliedNearbyPetHeadTilt;
+        Quaternion headTilt = Quaternion.AngleAxis(tiltAmount, GetBestHeadAimAxis());
+        headTransform.rotation = headTilt * headTransform.rotation;
     }
 
-    private void RemoveAppliedNearbyPetHeadTilt()
+    private float CalculateHeadTiltAmount(float elapsed, float duration, float targetAngle)
     {
-        if (headTransform == null || appliedNearbyPetHeadTilt == Quaternion.identity)
+        float rampDuration = Mathf.Max(0.05f, nearbyPetHeadTiltRampDuration);
+        float holdDuration = Mathf.Max(1f, nearbyPetHeadTiltHoldDuration);
+        float totalDuration = Mathf.Max(GetMinimumHeadTiltDuration(), duration);
+        float rampOutStart = totalDuration - rampDuration;
+
+        float weight;
+        if (elapsed < rampDuration)
         {
-            appliedNearbyPetHeadTilt = Quaternion.identity;
-            return;
+            weight = SmoothStep01(elapsed / rampDuration);
+        }
+        else if (elapsed < rampOutStart)
+        {
+            weight = 1f;
+        }
+        else
+        {
+            weight = 1f - SmoothStep01((elapsed - rampOutStart) / rampDuration);
         }
 
-        headTransform.localRotation *= Quaternion.Inverse(appliedNearbyPetHeadTilt);
-        appliedNearbyPetHeadTilt = Quaternion.identity;
+        return targetAngle * Mathf.Clamp01(weight);
+    }
+
+    private float GetMinimumHeadTiltDuration()
+    {
+        return Mathf.Max(0.05f, nearbyPetHeadTiltRampDuration) * 2f
+            + Mathf.Max(1f, nearbyPetHeadTiltHoldDuration);
+    }
+
+    private static float SmoothStep01(float value)
+    {
+        float t = Mathf.Clamp01(value);
+        return t * t * (3f - 2f * t);
     }
 
     private void ClearNearbyPetHeadGlance()
     {
-        RemoveAppliedNearbyPetHeadTilt();
         nearbyPetLookTarget = null;
         nearbyPetLookUntil = 0f;
         requestedNearbyPetHeadTiltDuration = 0f;
@@ -1669,7 +1728,7 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     {
         while (true)
         {
-            if (!socialPaused || trainingBusy || isPlayingOneShotAnimation || activeActionRoutine != null || IsMoving)
+            if (!CanSwitchInteractionIdlePose())
             {
                 yield return new WaitForSeconds(InteractionIdleBusyRetrySeconds);
                 continue;
@@ -1678,10 +1737,17 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             PlayPassiveInteractionIdlePose(NextInteractionIdlePose());
 
             float waitDuration = Random.Range(InteractionIdleMinSeconds, InteractionIdleMaxSeconds);
+            float minimumWaitDuration = Mathf.Max(waitDuration, GetActiveInteractionIdleCycleDuration() * 0.95f);
             float waitUntilTime = Time.time + waitDuration;
-            while (Time.time < waitUntilTime)
+            float minimumWaitUntilTime = Time.time + minimumWaitDuration;
+            while (Time.time < minimumWaitUntilTime || !IsActiveInteractionIdleAtCleanSwitchPoint())
             {
-                if (!socialPaused || trainingBusy || isPlayingOneShotAnimation || activeActionRoutine != null || IsMoving)
+                if (!CanSwitchInteractionIdlePose())
+                {
+                    break;
+                }
+
+                if (Time.time >= waitUntilTime + Mathf.Max(0.6f, GetActiveInteractionIdleCycleDuration()))
                 {
                     break;
                 }
@@ -1691,6 +1757,16 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         }
     }
 
+    private bool CanSwitchInteractionIdlePose()
+    {
+        return socialPaused
+            && !trainingBusy
+            && !isPlayingOneShotAnimation
+            && activeActionRoutine == null
+            && !IsMoving
+            && !IsInteractionHeadTiltActive;
+    }
+
     private PawPalPhotoPoseId NextInteractionIdlePose()
     {
         if (InteractionIdlePoses == null || InteractionIdlePoses.Length == 0)
@@ -1698,9 +1774,69 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return PawPalPhotoPoseId.Idle2;
         }
 
-        int index = Mathf.Abs(interactionIdlePoseCursor) % InteractionIdlePoses.Length;
-        interactionIdlePoseCursor++;
-        return InteractionIdlePoses[index];
+        int startIndex = Random.Range(0, InteractionIdlePoses.Length);
+        int selectedIndex = -1;
+        for (int i = 0; i < InteractionIdlePoses.Length; i++)
+        {
+            int candidateIndex = (startIndex + i) % InteractionIdlePoses.Length;
+            if (candidateIndex == lastInteractionIdlePoseIndex && repeatedInteractionIdlePoseCount >= 2)
+            {
+                continue;
+            }
+
+            if (!CanResolvePassiveInteractionIdlePose(InteractionIdlePoses[candidateIndex]))
+            {
+                continue;
+            }
+
+            selectedIndex = candidateIndex;
+            break;
+        }
+
+        if (selectedIndex < 0)
+        {
+            for (int i = 0; i < InteractionIdlePoses.Length; i++)
+            {
+                if (CanResolvePassiveInteractionIdlePose(InteractionIdlePoses[i]))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (selectedIndex < 0)
+        {
+            return PawPalPhotoPoseId.Idle2;
+        }
+
+        if (selectedIndex == lastInteractionIdlePoseIndex)
+        {
+            repeatedInteractionIdlePoseCount++;
+        }
+        else
+        {
+            repeatedInteractionIdlePoseCount = 1;
+        }
+
+        lastInteractionIdlePoseIndex = selectedIndex;
+        return InteractionIdlePoses[selectedIndex];
+    }
+
+    private bool CanResolvePassiveInteractionIdlePose(PawPalPhotoPoseId poseId)
+    {
+        string suffix = GetPhotoStandingIdleClipSuffix(poseId);
+        string[] stateNames = GetCatPhotoStandingIdleStateNames(suffix);
+        if (ResolveStateHash(stateNames) != 0)
+        {
+            return true;
+        }
+
+#if UNITY_EDITOR
+        return ResolveEditorClipByNames(suffix, stateNames) != null;
+#else
+        return false;
+#endif
     }
 
     private bool PlayPassiveInteractionIdlePose(PawPalPhotoPoseId poseId)
@@ -1716,8 +1852,10 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             if (!IsAnimatorInOrTransitioningTo(stateHash))
             {
                 animator.CrossFadeInFixedTime(stateHash, 0.12f, 0, 0f);
+                interactionIdleSettledAt = Time.time + InteractionIdleHeadTiltSettleSeconds;
             }
 
+            activeInteractionIdleStateHash = stateHash;
             return true;
         }
 
@@ -1727,12 +1865,62 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             AnimationClip clip = ResolveEditorClipByNames(suffix, stateNames);
             if (clip != null && TryPlayDirectLoopingClip(clip, "CatInteractionIdle"))
             {
+                interactionIdleSettledAt = Time.time + InteractionIdleHeadTiltSettleSeconds;
+                activeInteractionIdleStateHash = 0;
                 return true;
             }
         }
 #endif
 
-        return TryCrossFadeToStableIdle();
+        bool playedFallback = TryCrossFadeToStableIdle();
+        if (playedFallback)
+        {
+            interactionIdleSettledAt = Time.time + InteractionIdleHeadTiltSettleSeconds;
+            activeInteractionIdleStateHash = neutralIdleStateHash != 0 ? neutralIdleStateHash : idle2StateHash;
+        }
+
+        return playedFallback;
+    }
+
+    private float GetActiveInteractionIdleCycleDuration()
+    {
+#if UNITY_EDITOR
+        if (activeDirectLocomotionClip != null)
+        {
+            return Mathf.Max(0.05f, activeDirectLocomotionClip.length);
+        }
+#endif
+
+        return Mathf.Max(0.05f, GetCurrentClipDurationOrDefault(InteractionIdleMinSeconds));
+    }
+
+    private bool IsActiveInteractionIdleAtCleanSwitchPoint()
+    {
+#if UNITY_EDITOR
+        if (activeDirectLocomotionClip != null && activeDirectLocomotionPlayable.IsValid())
+        {
+            float clipLength = Mathf.Max(0.05f, activeDirectLocomotionClip.length);
+            float normalized = (float)(activeDirectLocomotionPlayable.GetTime() / clipLength);
+            float directLoopProgress = normalized - Mathf.Floor(normalized);
+            return directLoopProgress >= 0.92f || directLoopProgress <= 0.04f;
+        }
+#endif
+
+        if (animator == null || animator.IsInTransition(0))
+        {
+            return false;
+        }
+
+        AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
+        if (activeInteractionIdleStateHash != 0
+            && state.fullPathHash != activeInteractionIdleStateHash
+            && state.shortNameHash != activeInteractionIdleStateHash)
+        {
+            return true;
+        }
+
+        float loopProgress = state.normalizedTime - Mathf.Floor(state.normalizedTime);
+        return loopProgress >= 0.92f || loopProgress <= 0.04f;
     }
 
     private static string GetPhotoStandingIdleClipSuffix(PawPalPhotoPoseId poseId)
@@ -1765,8 +1953,23 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         return new[]
         {
             "CatSimple_" + suffix,
+            "CatFat_" + suffix,
+            "CatStray_" + suffix,
+            "KittenSimple_" + suffix,
+            "Cat_Simple_" + suffix,
+            "Cat_Fat_" + suffix,
+            "CatStray_" + suffix.Replace("_", string.Empty),
+            "KittenSimple_" + suffix.Replace("_", string.Empty),
             "Arm_Cat|" + suffix,
             "Arm_Kitten|" + suffix,
+            "CatSimple|" + suffix,
+            "CatFat|" + suffix,
+            "CatStray|" + suffix,
+            "KittenSimple|" + suffix,
+            "Cat_Simple_anim_IP|" + suffix,
+            "CatFat_anim_IP|" + suffix,
+            "CatStray_anim_IP|" + suffix,
+            "KittenSimple_anim_IP|" + suffix,
             suffix,
             suffix.Replace("_", string.Empty)
         };
@@ -3576,10 +3779,18 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
         string[] idleClipNames =
         {
             "CatSimple_Idle_2",
+            "CatFat_Idle_2",
+            "CatStray_Idle_2",
+            "KittenSimple_Idle_2",
             "Arm_Cat|Idle_2",
+            "Arm_Kitten|Idle_2",
             "Idle_2",
             "CatSimple_Idle_1",
+            "CatFat_Idle_1",
+            "CatStray_Idle_1",
+            "KittenSimple_Idle_1",
             "Arm_Cat|Idle_1",
+            "Arm_Kitten|Idle_1",
             "Idle_1"
         };
 

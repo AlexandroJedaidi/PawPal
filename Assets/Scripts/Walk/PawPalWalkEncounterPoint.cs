@@ -11,6 +11,9 @@ public sealed class PawPalWalkEncounterTemplate
     [TextArea(2, 4)] public string BodyText;
     public string RewardItemId;
     public string EncounterDogName;
+    public IntroPetSpecies VisitorSpecies = IntroPetSpecies.Dog;
+    public string VisitorPetDefinitionKey;
+    public string VisitorDisplayName;
     public PawPalWalkStopType StopType = PawPalWalkStopType.Sniff;
     [Min(0.01f)] public float Weight = 1f;
     public bool OneShotPerSession = true;

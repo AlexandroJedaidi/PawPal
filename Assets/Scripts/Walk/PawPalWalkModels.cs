@@ -167,6 +167,9 @@ public sealed class PawPalWalkGeneratedEventState
     public string DisplayName;
     public string BodyText;
     public string RewardItemId;
+    public IntroPetSpecies VisitorSpecies;
+    public string VisitorPetDefinitionKey;
+    public string VisitorDisplayName;
     public string SourceEncounterPointId;
     public string SourceNodeId;
     public string EventTemplateId;

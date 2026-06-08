@@ -25,6 +25,39 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
     [SerializeField, Min(0f)] private float endHoldDuration = 1f;
     [SerializeField, Min(0.01f)] private float cameraFollowSmoothTime = 0.12f;
     [SerializeField, Min(0f)] private float minimumRemainingDistanceForStop = 2.25f;
+    [Header("Present Encounter")]
+    [SerializeField] private GameObject presentEncounterPrefab;
+    [SerializeField] private string editorPresentPrefabAssetPath = "Assets/3rd Party Packs/Presents/Sample Scene/Prefabs/present_02.prefab";
+    [SerializeField] private string editorPresentModelAssetPath = "Assets/3rd Party Packs/Presents/Models/present_02.fbx";
+    [SerializeField, Min(0.25f)] private float presentRunOffscreenDistance = 4.5f;
+    [SerializeField, Min(0.25f)] private float presentApproachDistanceFromCamera = 1.15f;
+    [SerializeField, Min(0.05f)] private float presentCinematicRunSpeed = 2.2f;
+    [SerializeField, Min(0.05f)] private float presentCinematicApproachSpeed = 1.4f;
+    [SerializeField] private Vector3 presentLocalPosition = new Vector3(0f, 0.0064f, 0.0279f);
+    [SerializeField] private Vector3 presentLocalScale = new Vector3(0.08f, 0.08f, 0.08f);
+    [SerializeField] private Vector3 presentLocalEulerAngles = new Vector3(0f, 187.255f, 0f);
+    [Header("Pet Encounter")]
+    [SerializeField] private Vector3 petEncounterCameraOffset = new Vector3(0f, 1.15f, -3.2f);
+    [SerializeField] private Vector3 petEncounterLookAtOffset = new Vector3(0f, 0.55f, 0f);
+    [SerializeField, Min(0.5f)] private float petEncounterVisitorSpawnDistance = 3.2f;
+    [SerializeField, Min(0.25f)] private float petEncounterMeetDistance = 1.25f;
+    [SerializeField, Min(0.5f)] private float petEncounterVisitorExitDistance = 3.5f;
+    [SerializeField, Min(0.05f)] private float petEncounterRunSpeed = 1.75f;
+    [SerializeField] private Vector2 petEncounterInteractionDurationRange = new Vector2(5f, 10f);
+    [SerializeField] private string[] petEncounterVisitorDefinitionKeys =
+    {
+        "dog_toyterrier",
+        "dog_beagle",
+        "cat_simple",
+        "cat_chubby"
+    };
+    [SerializeField, TextArea(2, 4)] private string[] petEncounterAdviceTexts =
+    {
+        "City walks are full of new smells. Let your pet pause sometimes so every route feels familiar.",
+        "Friendly greetings are easier when the leash stays loose and both pets have room to look away.",
+        "Some streets are busiest near corners. A calm pace helps your pet notice bikes, doors, and other walkers.",
+        "Short, happy encounters can build confidence without making the walk feel too crowded."
+    };
 
     public Transform SpawnPoint => spawnPoint;
     public PawPalWalkGraph Graph => graph;
@@ -36,6 +69,34 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
     public float EndHoldDuration => Mathf.Max(0f, endHoldDuration);
     public float CameraFollowSmoothTime => Mathf.Max(0.01f, cameraFollowSmoothTime);
     public float MinimumRemainingDistanceForStop => Mathf.Max(0f, minimumRemainingDistanceForStop);
+    public GameObject PresentEncounterPrefab => presentEncounterPrefab;
+    public string EditorPresentPrefabAssetPath => editorPresentPrefabAssetPath;
+    public string EditorPresentModelAssetPath => editorPresentModelAssetPath;
+    public float PresentRunOffscreenDistance => Mathf.Max(0.25f, presentRunOffscreenDistance);
+    public float PresentApproachDistanceFromCamera => Mathf.Max(0.25f, presentApproachDistanceFromCamera);
+    public float PresentCinematicRunSpeed => Mathf.Max(0.05f, presentCinematicRunSpeed);
+    public float PresentCinematicApproachSpeed => Mathf.Max(0.05f, presentCinematicApproachSpeed);
+    public Vector3 PresentLocalPosition => presentLocalPosition;
+    public Vector3 PresentLocalScale => presentLocalScale == Vector3.zero ? new Vector3(0.08f, 0.08f, 0.08f) : presentLocalScale;
+    public Vector3 PresentLocalEulerAngles => presentLocalEulerAngles;
+    public Vector3 PetEncounterCameraOffset => petEncounterCameraOffset;
+    public Vector3 PetEncounterLookAtOffset => petEncounterLookAtOffset;
+    public float PetEncounterVisitorSpawnDistance => Mathf.Max(0.5f, petEncounterVisitorSpawnDistance);
+    public float PetEncounterMeetDistance => Mathf.Max(0.25f, petEncounterMeetDistance);
+    public float PetEncounterVisitorExitDistance => Mathf.Max(0.5f, petEncounterVisitorExitDistance);
+    public float PetEncounterRunSpeed => Mathf.Max(0.05f, petEncounterRunSpeed);
+    public string[] PetEncounterVisitorDefinitionKeys => petEncounterVisitorDefinitionKeys;
+    public string[] PetEncounterAdviceTexts => petEncounterAdviceTexts;
+
+    public Vector2 PetEncounterInteractionDurationRange
+    {
+        get
+        {
+            float min = Mathf.Max(0.25f, petEncounterInteractionDurationRange.x);
+            float max = Mathf.Max(min, petEncounterInteractionDurationRange.y);
+            return new Vector2(min, max);
+        }
+    }
 
     public Vector2 PauseIntervalRange
     {
@@ -290,6 +351,14 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
         runSpeedMultiplier = Mathf.Max(0.1f, runSpeedMultiplier);
         cameraFollowSmoothTime = Mathf.Max(0.01f, cameraFollowSmoothTime);
         minimumRemainingDistanceForStop = Mathf.Max(0f, minimumRemainingDistanceForStop);
+        presentRunOffscreenDistance = Mathf.Max(0.25f, presentRunOffscreenDistance);
+        presentApproachDistanceFromCamera = Mathf.Max(0.25f, presentApproachDistanceFromCamera);
+        presentCinematicRunSpeed = Mathf.Max(0.05f, presentCinematicRunSpeed);
+        presentCinematicApproachSpeed = Mathf.Max(0.05f, presentCinematicApproachSpeed);
+        if (presentLocalScale == Vector3.zero)
+        {
+            presentLocalScale = new Vector3(0.08f, 0.08f, 0.08f);
+        }
 
         if (routeMarkers != null)
         {

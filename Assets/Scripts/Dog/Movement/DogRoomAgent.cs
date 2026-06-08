@@ -132,6 +132,12 @@ public class DogRoomAgent : MonoBehaviour
         "Idle_6",
         "Idle_7"
     };
+    private static readonly string[] InteractionModeIdleSuffixes =
+    {
+        "Idle_1",
+        "Idle_2",
+        "Idle_3"
+    };
     private static readonly string[] ImportedPettingClipSuffixes =
     {
         "Petting",
@@ -233,6 +239,12 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private int sitIdleIndex = 3;
     [SerializeField] private int idleResetIndex = 1;
     [SerializeField] private float socialIdleDuration = 2.25f;
+    [SerializeField] private float minInteractionIdleVariationDuration = 2.2f;
+    [SerializeField] private float maxInteractionIdleVariationDuration = 3.4f;
+    [SerializeField] private float minInteractionIdleVariationGap = 0.25f;
+    [SerializeField] private float maxInteractionIdleVariationGap = 0.6f;
+    [SerializeField] private float interactionIdleBusyRetrySeconds = 0.25f;
+    [SerializeField] private float interactionIdleHeadTiltSettleSeconds = 0.55f;
     [SerializeField] private float barkIdleDuration = 0.9f;
     [SerializeField] private float locomotionSettleDuration = 0.3f;
     [SerializeField] private float sitEndRecoveryDuration = 1.15f;
@@ -457,8 +469,11 @@ public class DogRoomAgent : MonoBehaviour
     private bool needsSleepWakeBeforeMovement;
     private bool isPlayingOneShotAnimation;
     private bool isToyRoutineActive;
+    private bool interactionIdleLoopActive;
+    private bool isPlayingInteractionIdleVariation;
     private bool pendingInterruptedToyMovementRecovery;
     private Coroutine fetchRoutine;
+    private Coroutine interactionIdleRoutine;
     private float nextAllowedBallBounceAudioTime;
     private DogCycleCamera resolvedDogCamera;
     private int activeFetchCameraFocusId;
@@ -466,6 +481,7 @@ public class DogRoomAgent : MonoBehaviour
     private int activeToyPairCameraFocusId;
     private Coroutine tugLoopAnimationRoutine;
     private bool tugLoopAnimationActive;
+    private DogCameraAttention cachedInteractionIdleAttention;
     private PlayableGraph directClipGraph;
     private AnimationClipPlayable activeDirectLocomotionPlayable;
     private AnimationClip activeDirectLocomotionClip;
@@ -488,6 +504,9 @@ public class DogRoomAgent : MonoBehaviour
     private bool hasSampledWorldPosition;
     private uint movementCommandGeneration = 1;
     private bool activeTravelAvoidanceSuppressed;
+    private float interactionIdleSettledAt;
+    private int lastInteractionIdleVariationIndex = -1;
+    private int repeatedInteractionIdleVariationCount;
     private ObstacleAvoidanceType suppressedActiveTravelAvoidanceType;
     private int suppressedActiveTravelAvoidancePriority;
     private float cachedNavigationFootprintRadius = -1f;
@@ -524,6 +543,11 @@ public class DogRoomAgent : MonoBehaviour
     public bool IsResting => isResting;
     public bool IsSleeping => isSleeping;
     public bool IsPlayingOneShotAnimation => isPlayingOneShotAnimation;
+    public bool IsPlayingInteractionIdleVariation => isPlayingInteractionIdleVariation;
+    public bool CanOverlayInteractionHeadTilt
+    {
+        get { return !isPlayingInteractionIdleVariation || Time.time >= interactionIdleSettledAt; }
+    }
     public bool HasHeldToy => heldToy != null || (toyAttach != null && toyAttach.HasToy);
     public bool CanJoinSocialInteraction => !IsBusy
         && !socialPaused
@@ -1344,6 +1368,7 @@ public class DogRoomAgent : MonoBehaviour
 
     public void StartRoaming()
     {
+        EndInteractionIdleLoop();
         if (roamRoutine != null)
         {
             StopCoroutine(roamRoutine);
@@ -1393,12 +1418,53 @@ public class DogRoomAgent : MonoBehaviour
         StopAgent();
     }
 
+    public void BeginInteractionIdleLoop()
+    {
+        if (!isActiveAndEnabled || IsCatPresentation())
+        {
+            return;
+        }
+
+        interactionIdleLoopActive = true;
+        repeatedInteractionIdleVariationCount = 0;
+        lastInteractionIdleVariationIndex = -1;
+        if (interactionIdleRoutine == null)
+        {
+            interactionIdleRoutine = StartCoroutine(InteractionIdleLoopRoutine());
+        }
+    }
+
+    public void EndInteractionIdleLoop()
+    {
+        interactionIdleLoopActive = false;
+        repeatedInteractionIdleVariationCount = 0;
+        lastInteractionIdleVariationIndex = -1;
+        interactionIdleSettledAt = 0f;
+        if (interactionIdleRoutine != null)
+        {
+            StopCoroutine(interactionIdleRoutine);
+            interactionIdleRoutine = null;
+        }
+
+        if (isPlayingInteractionIdleVariation)
+        {
+            StopDirectClipGraph();
+            isPlayingOneShotAnimation = false;
+            SetNeutralIdle();
+        }
+
+        isPlayingInteractionIdleVariation = false;
+        interactionIdleSettledAt = 0f;
+    }
+
     public bool PrepareForPlayerInteraction(bool preserveHeldToy)
     {
         if (!isActiveAndEnabled)
         {
             return false;
         }
+
+        EndInteractionIdleLoop();
 
         bool shouldStandAfterWake = isResting
             || isSleeping
@@ -7310,6 +7376,11 @@ public class DogRoomAgent : MonoBehaviour
 
     private IEnumerator PlayPhotoStandingIdle(string suffix, float duration)
     {
+        yield return PlayPhotoStandingIdle(suffix, duration, true);
+    }
+
+    private IEnumerator PlayPhotoStandingIdle(string suffix, float duration, bool loopImportedClip)
+    {
         if (string.IsNullOrEmpty(suffix))
         {
             yield break;
@@ -7318,7 +7389,7 @@ public class DogRoomAgent : MonoBehaviour
         AnimationClip clip;
         if (TryGetImportedStandingIdleClip(suffix, out clip))
         {
-            yield return PlayImportedStandingIdleClip(clip, duration, true, GetImportedStandingIdleAudioClip(suffix));
+            yield return PlayImportedStandingIdleClip(clip, duration, loopImportedClip, GetImportedStandingIdleAudioClip(suffix));
             yield break;
         }
 
@@ -7458,6 +7529,135 @@ public class DogRoomAgent : MonoBehaviour
 
         int idleIndex = Random.value < 0.5f ? tailWagIdleIndex : scratchIdleIndex;
         yield return PlaySocialIdle(idleIndex, duration);
+    }
+
+    private IEnumerator InteractionIdleLoopRoutine()
+    {
+        while (interactionIdleLoopActive)
+        {
+            if (!CanPlayInteractionIdleVariation())
+            {
+                yield return new WaitForSeconds(Mathf.Max(0.05f, interactionIdleBusyRetrySeconds));
+                continue;
+            }
+
+            string idleSuffix = ResolveNextInteractionIdleVariationSuffix();
+            if (string.IsNullOrEmpty(idleSuffix))
+            {
+                yield return new WaitForSeconds(Mathf.Max(0.05f, interactionIdleBusyRetrySeconds));
+                continue;
+            }
+
+            float targetSpacing = Random.Range(
+                Mathf.Max(0.5f, minInteractionIdleVariationDuration),
+                Mathf.Max(Mathf.Max(0.5f, minInteractionIdleVariationDuration), maxInteractionIdleVariationDuration));
+            float idleStartedAt = Time.time;
+
+            isPlayingInteractionIdleVariation = true;
+            interactionIdleSettledAt = Time.time + Mathf.Max(0.05f, interactionIdleHeadTiltSettleSeconds);
+            yield return PlayPhotoStandingIdle(idleSuffix, 0.05f, false);
+            isPlayingInteractionIdleVariation = false;
+            interactionIdleSettledAt = 0f;
+
+            float gap = Random.Range(
+                Mathf.Max(0.05f, minInteractionIdleVariationGap),
+                Mathf.Max(Mathf.Max(0.05f, minInteractionIdleVariationGap), maxInteractionIdleVariationGap));
+            float remainingSpacing = Mathf.Max(0f, targetSpacing - (Time.time - idleStartedAt));
+            yield return new WaitForSeconds(Mathf.Max(gap, remainingSpacing));
+        }
+
+        interactionIdleRoutine = null;
+        isPlayingInteractionIdleVariation = false;
+    }
+
+    private bool CanPlayInteractionIdleVariation()
+    {
+        return interactionIdleLoopActive
+            && isActiveAndEnabled
+            && animator != null
+            && socialPaused
+            && !IsMoving
+            && !IsPreparingToMove
+            && !isResting
+            && !isSleeping
+            && !isPlayingOneShotAnimation
+            && !IsInteractionHeadTiltActiveForIdle()
+            && !isToyRoutineActive
+            && !tugLoopAnimationActive
+            && tugLoopAnimationRoutine == null
+            && !HasHeldToy;
+    }
+
+    private bool IsInteractionHeadTiltActiveForIdle()
+    {
+        DogCameraAttention attention = ResolveInteractionIdleAttention();
+        return attention != null && attention.IsHeadTiltActive;
+    }
+
+    private DogCameraAttention ResolveInteractionIdleAttention()
+    {
+        if (cachedInteractionIdleAttention == null)
+        {
+            cachedInteractionIdleAttention = GetComponentInChildren<DogCameraAttention>(true);
+        }
+
+        return cachedInteractionIdleAttention;
+    }
+
+    private string ResolveNextInteractionIdleVariationSuffix()
+    {
+        if (InteractionModeIdleSuffixes == null || InteractionModeIdleSuffixes.Length == 0)
+        {
+            return null;
+        }
+
+        int startIndex = Random.Range(0, InteractionModeIdleSuffixes.Length);
+        int selectedIndex = -1;
+        for (int i = 0; i < InteractionModeIdleSuffixes.Length; i++)
+        {
+            int candidateIndex = (startIndex + i) % InteractionModeIdleSuffixes.Length;
+            if (candidateIndex == lastInteractionIdleVariationIndex && repeatedInteractionIdleVariationCount >= 2)
+            {
+                continue;
+            }
+
+            if (!CanPlayPhotoStandingIdle(InteractionModeIdleSuffixes[candidateIndex]))
+            {
+                continue;
+            }
+
+            selectedIndex = candidateIndex;
+            break;
+        }
+
+        if (selectedIndex < 0)
+        {
+            for (int i = 0; i < InteractionModeIdleSuffixes.Length; i++)
+            {
+                if (CanPlayPhotoStandingIdle(InteractionModeIdleSuffixes[i]))
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (selectedIndex < 0)
+        {
+            return null;
+        }
+
+        if (selectedIndex == lastInteractionIdleVariationIndex)
+        {
+            repeatedInteractionIdleVariationCount++;
+        }
+        else
+        {
+            repeatedInteractionIdleVariationCount = 1;
+        }
+
+        lastInteractionIdleVariationIndex = selectedIndex;
+        return InteractionModeIdleSuffixes[selectedIndex];
     }
 
     private int GetStandingIdleOptionCount()

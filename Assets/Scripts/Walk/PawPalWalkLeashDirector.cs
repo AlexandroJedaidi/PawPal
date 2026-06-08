@@ -49,10 +49,11 @@ public sealed class PawPalWalkLeashDirector : MonoBehaviour
     private Coroutine reactionRoutine;
     private Coroutine timedIdleRoutine;
     private bool routeProgressBlockedByReaction;
+    private bool encounterPaused;
     private DogMovementPace lastAppliedPace = (DogMovementPace)(-1);
 
-    public bool BlocksRouteProgress => routeProgressBlockedByReaction || timedIdleRoutine != null;
-    public bool IsPlayingPetOneShot => reactionRoutine != null || timedIdleRoutine != null;
+    public bool BlocksRouteProgress => encounterPaused || routeProgressBlockedByReaction || timedIdleRoutine != null;
+    public bool IsPlayingPetOneShot => encounterPaused || reactionRoutine != null || timedIdleRoutine != null;
     public DogMovementPace CurrentPace => ResolveCurrentPace();
 
     public float RouteSpeedMultiplier
@@ -104,10 +105,38 @@ public sealed class PawPalWalkLeashDirector : MonoBehaviour
         ApplyCurrentPace(true);
     }
 
+    public void SetEncounterPaused(bool paused)
+    {
+        if (encounterPaused == paused)
+        {
+            return;
+        }
+
+        encounterPaused = paused;
+        if (encounterPaused)
+        {
+            runBurstUntil = 0f;
+            nextReactionAllowedAt = Time.time + gestureSettings.ReactionCooldown;
+            ApplyStoppedPace();
+        }
+        else
+        {
+            ScheduleNextTimedIdle(false);
+            ScheduleNextCameraLook();
+            ApplyCurrentPace(true);
+        }
+    }
+
     private void Update()
     {
         if (walkController == null || animator == null)
         {
+            return;
+        }
+
+        if (encounterPaused)
+        {
+            ApplyStoppedPace();
             return;
         }
 

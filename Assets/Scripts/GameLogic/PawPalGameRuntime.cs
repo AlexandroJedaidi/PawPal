@@ -132,6 +132,7 @@ public sealed class PawPalDogState
     public int Speed;
     public int Focus;
     public float NewDogWhinyHoursRemaining;
+    public PawPalObedienceTrialProgress ObedienceTrialProgress = new PawPalObedienceTrialProgress();
 
     public float GetNeed(PawPalDogNeed need)
     {
@@ -1368,7 +1369,9 @@ public sealed class PawPalSaveData
     public List<PawPalOwnedItemState> OwnedItems = new List<PawPalOwnedItemState>();
     public List<PawPalDogEquipmentState> DogEquipment = new List<PawPalDogEquipmentState>();
     public List<PawPalDailyTaskState> DailyTasks = new List<PawPalDailyTaskState>();
+    public List<PawPalAgilityPetProgressState> AgilityProgress = new List<PawPalAgilityPetProgressState>();
     public PawPalWalkSessionSaveData ActiveWalkSession;
+    public PawPalAgilityTrialSessionSaveData ActiveAgilityTrialSession;
     public int ActiveDogIndex;
     public long NextDailyResetUtcTicks;
     public int LastProcessedTrainerMilestoneLevel;
@@ -1420,6 +1423,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private readonly List<PawPalDogEquipmentState> dogEquipment = new List<PawPalDogEquipmentState>();
     private readonly List<PawPalPointPackageDefinition> pointPackages = new List<PawPalPointPackageDefinition>();
     private readonly List<PawPalDailyTaskState> dailyTasks = new List<PawPalDailyTaskState>();
+    private readonly List<PawPalAgilityPetProgressState> agilityProgress = new List<PawPalAgilityPetProgressState>();
     private readonly Dictionary<PawPalPlayerActionType, int> actionProgress = new Dictionary<PawPalPlayerActionType, int>();
     private readonly Dictionary<string, PawPalCatalogItemDefinition> catalogById = new Dictionary<string, PawPalCatalogItemDefinition>(StringComparer.Ordinal);
     private readonly Dictionary<string, PawPalOwnedItemState> ownedItemById = new Dictionary<string, PawPalOwnedItemState>(StringComparer.Ordinal);
@@ -1442,6 +1446,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     private int shopRevision;
     private DateTime nextDailyResetUtc;
     private PawPalWalkSessionSaveData activeWalkSession;
+    private PawPalAgilityTrialSessionSaveData activeAgilityTrialSession;
 
     public static PawPalGameRuntime Instance
     {
@@ -1540,6 +1545,16 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     public PawPalWalkSessionSaveData ActiveWalkSession
     {
         get { return activeWalkSession; }
+    }
+
+    public PawPalAgilityTrialSessionSaveData ActiveAgilityTrialSession
+    {
+        get { return activeAgilityTrialSession; }
+    }
+
+    public IReadOnlyList<PawPalAgilityPetProgressState> AgilityProgress
+    {
+        get { return agilityProgress; }
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -2568,6 +2583,162 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         return result;
     }
 
+    public PawPalAgilityPetProgressState GetAgilityProgress(string dogId)
+    {
+        return EnsureAgilityProgress(dogId);
+    }
+
+    public PawPalAgilityLevelProgressState GetAgilityLevelProgress(string dogId, PawPalAgilityLevelId levelId)
+    {
+        PawPalAgilityPetProgressState progress = EnsureAgilityProgress(dogId);
+        return progress != null ? EnsureAgilityLevelProgress(progress, levelId) : null;
+    }
+
+    public PawPalAgilityEntryStatus GetAgilityEntryStatus(string dogId, PawPalAgilityLevelId levelId)
+    {
+        PawPalAgilityEntryStatus status = new PawPalAgilityEntryStatus();
+        PawPalDogState dog = FindDogState(dogId);
+        if (dog == null)
+        {
+            status.PracticeMessage = "Choose a pet first.";
+            status.ScoredMessage = "Choose a pet first.";
+            return status;
+        }
+
+        PawPalAgilityTrialConfig config = PawPalAgilityTrialConfig.LoadOrCreateDefault();
+        PawPalAgilityLevelDefinition level = config.GetLevel(levelId);
+        if (level == null)
+        {
+            status.PracticeMessage = "Agility Trial is not configured.";
+            status.ScoredMessage = "Agility Trial is not configured.";
+            return status;
+        }
+
+        PawPalAgilityPetProgressState petProgress = EnsureAgilityProgress(dogId);
+        status.CanPractice = true;
+        status.PracticeMessage = "Practice is free.";
+
+        if (!IsAgilityLevelUnlocked(petProgress, levelId, config))
+        {
+            status.ScoredMessage = levelId == PawPalAgilityLevelId.Beginner
+                ? "Complete basic practice first."
+                : "Earn Silver or Gold in the previous level.";
+            return status;
+        }
+
+        if (trainerState.BasicCurrency < level.EntryFeeBasicCurrency)
+        {
+            status.ScoredMessage = "Not enough Basic currency.";
+            return status;
+        }
+
+        status.CanStartScored = true;
+        status.ScoredMessage = "Entry fee: " + level.EntryFeeBasicCurrency;
+        return status;
+    }
+
+    public bool TryStartAgilityTrial(string dogId, PawPalAgilityLevelId levelId, PawPalAgilityTrialMode mode, string returnSceneName, out string failureMessage)
+    {
+        failureMessage = string.Empty;
+        PawPalDogState dog = FindDogState(dogId);
+        if (dog == null)
+        {
+            failureMessage = "Choose a pet first.";
+            return false;
+        }
+
+        PawPalAgilityTrialConfig config = PawPalAgilityTrialConfig.LoadOrCreateDefault();
+        PawPalAgilityLevelDefinition level = config.GetLevel(levelId);
+        if (level == null)
+        {
+            failureMessage = "Agility Trial is not configured.";
+            return false;
+        }
+
+        PawPalAgilityEntryStatus status = GetAgilityEntryStatus(dog.Id, levelId);
+        if (mode == PawPalAgilityTrialMode.Scored)
+        {
+            if (!status.CanStartScored)
+            {
+                failureMessage = status.ScoredMessage;
+                return false;
+            }
+
+            trainerState.BasicCurrency = Mathf.Max(0, trainerState.BasicCurrency - Mathf.Max(0, level.EntryFeeBasicCurrency));
+        }
+        else if (!status.CanPractice)
+        {
+            failureMessage = status.PracticeMessage;
+            return false;
+        }
+
+        activeAgilityTrialSession = new PawPalAgilityTrialSessionSaveData
+        {
+            SelectedDogId = dog.Id,
+            LevelId = levelId,
+            Mode = mode,
+            ReturnSceneName = string.IsNullOrEmpty(returnSceneName) ? PawPalWalkSceneFlow.HomeSceneName : returnSceneName,
+            EntryFeeBasicCurrency = mode == PawPalAgilityTrialMode.Scored ? Mathf.Max(0, level.EntryFeeBasicCurrency) : 0,
+            StartedUtcTicks = DateTime.UtcNow.Ticks
+        };
+
+        CommitState(true, false, false);
+        return true;
+    }
+
+    public void CancelActiveAgilityTrial()
+    {
+        if (activeAgilityTrialSession == null)
+        {
+            return;
+        }
+
+        activeAgilityTrialSession = null;
+        CommitState(true, false, false);
+    }
+
+    public PawPalAgilityTrialResult CompleteActiveAgilityTrial(PawPalAgilityRunStats runStats)
+    {
+        PawPalAgilityTrialResult result = new PawPalAgilityTrialResult();
+        if (activeAgilityTrialSession == null)
+        {
+            result.Summary = "No active Agility Trial.";
+            return result;
+        }
+
+        PawPalAgilityTrialSessionSaveData session = activeAgilityTrialSession;
+        PawPalDogState dog = FindDogState(session.SelectedDogId);
+        if (dog == null)
+        {
+            dog = ActiveDog;
+        }
+
+        PawPalAgilityTrialConfig config = PawPalAgilityTrialConfig.LoadOrCreateDefault();
+        PawPalAgilityLevelDefinition level = config.GetLevel(session.LevelId);
+        PawPalAgilityConditionSnapshot condition = PawPalAgilityScoringService.BuildConditionSnapshot(dog);
+        result = PawPalAgilityScoringService.CalculateResult(level, runStats, condition, session.Mode);
+
+        if (dog != null)
+        {
+            ApplyAgilityConditionCost(dog, level, session.Mode);
+        }
+
+        if (dog != null && session.Mode == PawPalAgilityTrialMode.Practice && result.PracticeCompleted)
+        {
+            PawPalAgilityPetProgressState progress = EnsureAgilityProgress(dog.Id);
+            progress.BasicPracticeComplete = true;
+            EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Beginner).Unlocked = true;
+        }
+        else if (dog != null && session.Mode == PawPalAgilityTrialMode.Scored)
+        {
+            ApplyAgilityScoredResult(dog, level, config, result);
+        }
+
+        activeAgilityTrialSession = null;
+        CommitState(true, false, true);
+        return result;
+    }
+
     public void TrainActiveDog()
     {
         PawPalDogState dog = ActiveDog;
@@ -2974,6 +3145,57 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         }
     }
 
+    public bool TrySpendBasicCurrency(int amount)
+    {
+        if (amount <= 0)
+        {
+            return true;
+        }
+
+        if (trainerState.BasicCurrency < amount)
+        {
+            return false;
+        }
+
+        trainerState.BasicCurrency -= amount;
+        CommitState(true, false, true);
+        return true;
+    }
+
+    public void GrantBasicCurrency(int amount)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        trainerState.BasicCurrency += amount;
+        trainerState.TotalBasicCurrencyEarned += amount;
+        CommitState(true, false, true);
+    }
+
+    public void RecordObedienceTrialResult(PawPalObedienceTrialMedal medal)
+    {
+        trainerState.CompetitionsParticipated++;
+        switch (medal)
+        {
+            case PawPalObedienceTrialMedal.Gold:
+                trainerState.CompetitionsWonFirst++;
+                break;
+            case PawPalObedienceTrialMedal.Silver:
+                trainerState.CompetitionsWonSecond++;
+                break;
+            case PawPalObedienceTrialMedal.Bronze:
+                trainerState.CompetitionsWonThird++;
+                break;
+        }
+    }
+
+    public void CommitObedienceTrialProgress()
+    {
+        CommitState(true, false, true);
+    }
+
     public void LoadProfile()
     {
         string savePath = GetSavePath();
@@ -3084,14 +3306,17 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         dogEquipment.Clear();
         pointPackages.Clear();
         dailyTasks.Clear();
+        agilityProgress.Clear();
         actionProgress.Clear();
         catalogById.Clear();
         ownedItemById.Clear();
         dogEquipmentByDogId.Clear();
         temporaryIntroDogIds.Clear();
         activeWalkSession = null;
+        activeAgilityTrialSession = null;
 
         dogs.Add(BuildStarterDog());
+        EnsureAllAgilityProgress();
         BuildCatalog();
         ValidateCatalogDefinitions();
         BuildPointPackages();
@@ -3970,7 +4195,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Mathf.Lerp(0.10f, 0.16f, distance01),
             Mathf.Lerp(0.08f, 0.12f, distance01),
             Mathf.Lerp(0.05f, 0.09f, distance01));
-        SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.04f), out _, out _);
+        float walkCurrentStamina;
+        float walkMaxStamina;
+        SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, 0.04f), out walkCurrentStamina, out walkMaxStamina);
 
         PawPalDogWalkData walkData = dog.WalkData;
         walkData.TotalWalksCompleted++;
@@ -4018,6 +4245,240 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             PreviousMaxStamina = ActiveDog != null && ActiveDog.WalkData != null ? ActiveDog.WalkData.MaxWalkStamina : DefaultMaxWalkStamina,
             NewMaxStamina = ActiveDog != null && ActiveDog.WalkData != null ? ActiveDog.WalkData.MaxWalkStamina : DefaultMaxWalkStamina
         };
+    }
+
+    private PawPalAgilityPetProgressState EnsureAgilityProgress(string dogId)
+    {
+        if (string.IsNullOrWhiteSpace(dogId))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < agilityProgress.Count; i++)
+        {
+            PawPalAgilityPetProgressState progress = agilityProgress[i];
+            if (progress != null && string.Equals(progress.DogId, dogId, StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureAllAgilityLevelProgress(progress);
+                return progress;
+            }
+        }
+
+        PawPalAgilityPetProgressState created = new PawPalAgilityPetProgressState { DogId = dogId };
+        EnsureAllAgilityLevelProgress(created);
+        agilityProgress.Add(created);
+        return created;
+    }
+
+    private void EnsureAllAgilityProgress()
+    {
+        for (int i = 0; i < dogs.Count; i++)
+        {
+            PawPalDogState dog = dogs[i];
+            if (dog != null && !IsTemporaryIntroDogId(dog.Id))
+            {
+                EnsureAgilityProgress(dog.Id);
+            }
+        }
+    }
+
+    private static void EnsureAllAgilityLevelProgress(PawPalAgilityPetProgressState progress)
+    {
+        if (progress == null)
+        {
+            return;
+        }
+
+        EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Beginner);
+        EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Amateur);
+        EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Pro);
+        EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Master);
+        EnsureAgilityLevelProgress(progress, PawPalAgilityLevelId.Champion);
+    }
+
+    private static PawPalAgilityLevelProgressState EnsureAgilityLevelProgress(PawPalAgilityPetProgressState progress, PawPalAgilityLevelId levelId)
+    {
+        if (progress == null)
+        {
+            return null;
+        }
+
+        if (progress.Levels == null)
+        {
+            progress.Levels = new List<PawPalAgilityLevelProgressState>();
+        }
+
+        for (int i = 0; i < progress.Levels.Count; i++)
+        {
+            PawPalAgilityLevelProgressState level = progress.Levels[i];
+            if (level != null && level.LevelId == levelId)
+            {
+                return level;
+            }
+        }
+
+        PawPalAgilityLevelProgressState created = new PawPalAgilityLevelProgressState { LevelId = levelId };
+        progress.Levels.Add(created);
+        return created;
+    }
+
+    private static bool IsAgilityLevelUnlocked(PawPalAgilityPetProgressState progress, PawPalAgilityLevelId levelId, PawPalAgilityTrialConfig config)
+    {
+        if (progress == null)
+        {
+            return false;
+        }
+
+        if (levelId == PawPalAgilityLevelId.Beginner)
+        {
+            return progress.BasicPracticeComplete || EnsureAgilityLevelProgress(progress, levelId).Unlocked;
+        }
+
+        PawPalAgilityLevelProgressState levelProgress = EnsureAgilityLevelProgress(progress, levelId);
+        if (levelProgress.Unlocked)
+        {
+            return true;
+        }
+
+        PawPalAgilityLevelId previousLevel = GetPreviousAgilityLevel(levelId);
+        PawPalAgilityLevelProgressState previousProgress = EnsureAgilityLevelProgress(progress, previousLevel);
+        PawPalAgilityLevelDefinition level = config != null ? config.GetLevel(levelId) : null;
+        PawPalAgilityMedal requiredMedal = level != null ? level.RequiredPreviousMedal : PawPalAgilityMedal.Silver;
+        return GetAgilityMedalRank(previousProgress.BestMedal) >= GetAgilityMedalRank(requiredMedal);
+    }
+
+    private static PawPalAgilityLevelId GetPreviousAgilityLevel(PawPalAgilityLevelId levelId)
+    {
+        switch (levelId)
+        {
+            case PawPalAgilityLevelId.Amateur:
+                return PawPalAgilityLevelId.Beginner;
+            case PawPalAgilityLevelId.Pro:
+                return PawPalAgilityLevelId.Amateur;
+            case PawPalAgilityLevelId.Master:
+                return PawPalAgilityLevelId.Pro;
+            case PawPalAgilityLevelId.Champion:
+                return PawPalAgilityLevelId.Master;
+            default:
+                return PawPalAgilityLevelId.Beginner;
+        }
+    }
+
+    private static int GetAgilityMedalRank(PawPalAgilityMedal medal)
+    {
+        switch (medal)
+        {
+            case PawPalAgilityMedal.Gold:
+                return 3;
+            case PawPalAgilityMedal.Silver:
+                return 2;
+            case PawPalAgilityMedal.Bronze:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    private void ApplyAgilityScoredResult(
+        PawPalDogState dog,
+        PawPalAgilityLevelDefinition level,
+        PawPalAgilityTrialConfig config,
+        PawPalAgilityTrialResult result)
+    {
+        if (dog == null || level == null || result == null)
+        {
+            return;
+        }
+
+        PawPalAgilityPetProgressState progress = EnsureAgilityProgress(dog.Id);
+        PawPalAgilityLevelProgressState levelProgress = EnsureAgilityLevelProgress(progress, level.LevelId);
+        trainerState.CompetitionsParticipated++;
+
+        if (result.Medal == PawPalAgilityMedal.None)
+        {
+            return;
+        }
+
+        levelProgress.TimesCompleted++;
+        if (result.Score > levelProgress.BestScore)
+        {
+            levelProgress.BestScore = result.Score;
+        }
+
+        if (levelProgress.BestTimeSeconds <= 0.001f || result.ElapsedSeconds < levelProgress.BestTimeSeconds)
+        {
+            levelProgress.BestTimeSeconds = result.ElapsedSeconds;
+        }
+
+        if (GetAgilityMedalRank(result.Medal) > GetAgilityMedalRank(levelProgress.BestMedal))
+        {
+            levelProgress.BestMedal = result.Medal;
+        }
+
+        int previousReward = PawPalAgilityScoringService.GetRewardForMedal(level, levelProgress.RewardedMedal);
+        int newReward = PawPalAgilityScoringService.GetRewardForMedal(level, result.Medal);
+        int rewardDelta = Mathf.Max(0, newReward - previousReward);
+        if (rewardDelta > 0)
+        {
+            trainerState.BasicCurrency += rewardDelta;
+            trainerState.TotalBasicCurrencyEarned += rewardDelta;
+            result.BasicCurrencyReward = rewardDelta;
+            levelProgress.RewardedMedal = result.Medal;
+        }
+
+        if (result.Medal == PawPalAgilityMedal.Gold)
+        {
+            trainerState.CompetitionsWonFirst++;
+        }
+        else if (result.Medal == PawPalAgilityMedal.Silver)
+        {
+            trainerState.CompetitionsWonSecond++;
+        }
+        else if (result.Medal == PawPalAgilityMedal.Bronze)
+        {
+            trainerState.CompetitionsWonThird++;
+        }
+
+        if (GetAgilityMedalRank(result.Medal) >= GetAgilityMedalRank(PawPalAgilityMedal.Silver)
+            && config != null
+            && config.HasNextLevel(level.LevelId))
+        {
+            PawPalAgilityLevelId nextLevel = config.GetNextLevel(level.LevelId);
+            PawPalAgilityLevelProgressState nextProgress = EnsureAgilityLevelProgress(progress, nextLevel);
+            if (!nextProgress.Unlocked)
+            {
+                nextProgress.Unlocked = true;
+                result.UnlockedNextLevel = true;
+            }
+        }
+    }
+
+    private static void ApplyAgilityConditionCost(PawPalDogState dog, PawPalAgilityLevelDefinition level, PawPalAgilityTrialMode mode)
+    {
+        if (dog == null)
+        {
+            return;
+        }
+
+        float staminaRatio = level != null ? level.StaminaCostRatio : 0.08f;
+        if (mode == PawPalAgilityTrialMode.Practice)
+        {
+            staminaRatio *= 0.5f;
+        }
+
+        float currentStamina;
+        float maxStamina;
+        SpendDogStamina(dog, GetDogStaminaCostFromRatio(dog, staminaRatio), out currentStamina, out maxStamina);
+        dog.ModifyNeed(PawPalDogNeed.Activity, mode == PawPalAgilityTrialMode.Practice ? 0.08f : 0.14f);
+        dog.ModifyNeed(PawPalDogNeed.Water, mode == PawPalAgilityTrialMode.Practice ? -0.03f : -0.06f);
+        dog.ModifyNeed(PawPalDogNeed.Food, mode == PawPalAgilityTrialMode.Practice ? -0.02f : -0.04f);
+        dog.ModifyNeed(PawPalDogNeed.Hygiene, mode == PawPalAgilityTrialMode.Practice ? -0.03f : -0.05f);
+        dog.Mood01 = Mathf.Clamp01(dog.Mood01 + (mode == PawPalAgilityTrialMode.Practice ? 0.03f : 0.06f));
+        AddDogBondXp(dog, mode == PawPalAgilityTrialMode.Practice ? 2 : 5);
+        if (mode == PawPalAgilityTrialMode.Scored && dog.Speed < 10)
+        {
+            dog.ModifyStat(PawPalDogStatType.Speed, 1);
+        }
     }
 
     private PawPalDogState FindDogState(string dogId)
@@ -4621,6 +5082,9 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         saveData.ActiveWalkSession = activeWalkSession != null && IsTemporaryIntroDogId(activeWalkSession.SelectedDogId)
             ? null
             : CloneWalkSession(activeWalkSession);
+        saveData.ActiveAgilityTrialSession = activeAgilityTrialSession != null && IsTemporaryIntroDogId(activeAgilityTrialSession.SelectedDogId)
+            ? null
+            : PawPalAgilitySaveUtility.CloneSession(activeAgilityTrialSession);
 
         for (int i = 0; i < dogs.Count; i++)
         {
@@ -4664,6 +5128,15 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         for (int i = 0; i < dailyTasks.Count; i++)
         {
             saveData.DailyTasks.Add(CloneDailyTaskState(dailyTasks[i]));
+        }
+
+        for (int i = 0; i < agilityProgress.Count; i++)
+        {
+            PawPalAgilityPetProgressState progress = agilityProgress[i];
+            if (progress != null && !IsTemporaryIntroDogId(progress.DogId))
+            {
+                saveData.AgilityProgress.Add(PawPalAgilitySaveUtility.ClonePetProgress(progress));
+            }
         }
 
         for (int i = 0; i < pendingUnsupportedTrainerMilestoneLevels.Count; i++)
@@ -4731,6 +5204,20 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         bool migratedDogProfiles = EnsureDogProfiles();
         bool migratedTrickData = EnsureAllTrickData();
         bool backfilledDogNeeds = BackfillIdenticalDogNeedsIfNeeded();
+        agilityProgress.Clear();
+        if (saveData.AgilityProgress != null)
+        {
+            for (int i = 0; i < saveData.AgilityProgress.Count; i++)
+            {
+                PawPalAgilityPetProgressState progress = PawPalAgilitySaveUtility.ClonePetProgress(saveData.AgilityProgress[i]);
+                if (progress != null && !string.IsNullOrWhiteSpace(progress.DogId))
+                {
+                    agilityProgress.Add(progress);
+                }
+            }
+        }
+
+        EnsureAllAgilityProgress();
 
         ownedItems.Clear();
         ownedItemById.Clear();
@@ -4784,6 +5271,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         RestoreTrainerMilestoneState(saveData);
         EnsureDailyTasksPresent(false);
         activeWalkSession = CloneWalkSession(saveData.ActiveWalkSession);
+        activeAgilityTrialSession = PawPalAgilitySaveUtility.CloneSession(saveData.ActiveAgilityTrialSession);
         bool canceledUnfinishedWalkSession = CancelLoadedUnfinishedWalkSession();
 
         activeDogIndex = Mathf.Clamp(saveData.ActiveDogIndex, 0, Mathf.Max(0, dogs.Count - 1));
@@ -4992,7 +5480,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Mobility = source.Mobility,
             Speed = source.Speed,
             Focus = source.Focus,
-            NewDogWhinyHoursRemaining = source.NewDogWhinyHoursRemaining
+            NewDogWhinyHoursRemaining = source.NewDogWhinyHoursRemaining,
+            ObedienceTrialProgress = PawPalObedienceTrialDatabase.CloneProgress(source.ObedienceTrialProgress)
         };
     }
 

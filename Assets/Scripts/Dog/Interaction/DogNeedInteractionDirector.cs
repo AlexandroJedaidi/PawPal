@@ -34,6 +34,8 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 
     [Header("Placement")]
     [SerializeField] private float spawnDistanceFromCamera = 1f;
+    [SerializeField] private float foodBowlSpawnY = 0.052f;
+    [SerializeField] private float waterBowlSpawnY = 0.062f;
     [SerializeField] private float groundRayHeight = 3f;
     [SerializeField] private float groundRayDistance = 8f;
     [SerializeField] private float bowlFloorPadding = 0.025f;
@@ -180,7 +182,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
 
             activeBowl = Instantiate(bowlPrefab);
             activeBowl.name = bowlPrefab.name;
-            PositionBowl(activeBowl, pet);
+            PositionBowl(activeBowl, pet, need);
 
             DogCycleCamera resolvedDogCamera = ResolveDogCamera();
             if (resolvedDogCamera != null && pet.RootTransform != null)
@@ -246,7 +248,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         return PawPalRoomPetRuntime.ResolveActivePet();
     }
 
-    private void PositionBowl(GameObject bowl, PawPalRoomPetHandle pet)
+    private void PositionBowl(GameObject bowl, PawPalRoomPetHandle pet, PawPalDogNeed need)
     {
         Vector3 requestedPosition = ResolveCameraSpawnPosition(pet);
         Vector3 roomPoint;
@@ -256,6 +258,7 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         }
 
         Vector3 floorPosition = ResolveFloorPosition(bowl, requestedPosition);
+        floorPosition.y = ResolveBowlSpawnY(need);
         bowl.transform.position = floorPosition;
 
         Vector3 lookDirection = pet.RootTransform.position - floorPosition;
@@ -264,6 +267,11 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
         {
             bowl.transform.rotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
         }
+    }
+
+    private float ResolveBowlSpawnY(PawPalDogNeed need)
+    {
+        return need == PawPalDogNeed.Water ? waterBowlSpawnY : foodBowlSpawnY;
     }
 
     private Vector3 ResolveCameraSpawnPosition(PawPalRoomPetHandle pet)

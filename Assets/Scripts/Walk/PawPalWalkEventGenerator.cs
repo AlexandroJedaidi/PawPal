@@ -87,6 +87,9 @@ public static class PawPalWalkEventGenerator
                 DisplayName = displayName,
                 BodyText = selectedTemplate.BodyText,
                 RewardItemId = rewardItemId,
+                VisitorSpecies = selectedTemplate.VisitorSpecies,
+                VisitorPetDefinitionKey = TrimOrEmpty(selectedTemplate.VisitorPetDefinitionKey),
+                VisitorDisplayName = ResolveVisitorDisplayName(selectedTemplate, displayName),
                 SourceEncounterPointId = encounter.EncounterPointId,
                 SourceNodeId = encounter.SourceNodeId,
                 EventTemplateId = selectedTemplate.EventTemplateId,
@@ -140,6 +143,7 @@ public static class PawPalWalkEventGenerator
             EventId = "dog_encounter_legacy",
             EventType = PawPalWalkEventType.DogEncounter,
             DisplayName = FallbackEncounterNames[random.Next(0, FallbackEncounterNames.Length)],
+            VisitorSpecies = IntroPetSpecies.Dog,
             StopType = PawPalWalkStopType.Bark,
             Progress = ClampEventProgress(Mathf.Lerp(0.28f, 0.72f, (float)random.NextDouble()))
         });
@@ -248,6 +252,31 @@ public static class PawPalWalkEventGenerator
         }
 
         return PickRewardItemId(runtime, random);
+    }
+
+    private static string ResolveVisitorDisplayName(PawPalWalkEncounterTemplate template, string fallbackDisplayName)
+    {
+        if (template == null || template.EventType != PawPalWalkEventType.DogEncounter)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.VisitorDisplayName))
+        {
+            return template.VisitorDisplayName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(template.EncounterDogName))
+        {
+            return template.EncounterDogName.Trim();
+        }
+
+        return TrimOrEmpty(fallbackDisplayName);
+    }
+
+    private static string TrimOrEmpty(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
     }
 
     private static string PickRewardItemId(PawPalGameRuntime runtime, System.Random random)

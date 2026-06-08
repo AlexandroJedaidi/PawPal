@@ -37,6 +37,8 @@ public class DogCameraAttention : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float fallbackNeckWeight = 0.25f;
     [SerializeField] private float reactionHeadTiltAngle = 14f;
     [SerializeField] private float reactionHeadTiltDuration = 0.6f;
+    [SerializeField] private float reactionHeadTiltRampDuration = 0.45f;
+    [SerializeField] private float reactionHeadTiltHoldDuration = 1f;
     [SerializeField, Range(0f, 1f)] private float reactionNeckTiltWeight = 0.4f;
 
     [Header("Nearby Pet Glances")]
@@ -108,8 +110,6 @@ public class DogCameraAttention : MonoBehaviour
     private float headTiltUntil;
     private float requestedHeadTiltAngle;
     private float requestedHeadTiltDuration;
-    private Quaternion appliedHeadTilt = Quaternion.identity;
-    private Quaternion appliedNeckTilt = Quaternion.identity;
     private readonly Dictionary<Transform, Transform> cachedHeadTargetsByDog = new Dictionary<Transform, Transform>();
 
     private void Awake()
@@ -190,8 +190,6 @@ public class DogCameraAttention : MonoBehaviour
         nextNearbyPetHeadTiltTime = 0f;
         requestedHeadTiltAngle = 0f;
         requestedHeadTiltDuration = 0f;
-        appliedHeadTilt = Quaternion.identity;
-        appliedNeckTilt = Quaternion.identity;
         ResetSmoothedLookPoint();
     }
 
@@ -269,12 +267,19 @@ public class DogCameraAttention : MonoBehaviour
 
     public void RequestHeadTilt(float angleDegrees, float duration)
     {
-        float clampedDuration = Mathf.Max(0.1f, duration > 0f ? duration : reactionHeadTiltDuration);
+        float minimumDuration = GetMinimumHeadTiltDuration();
+        float requestedDuration = duration > 0f ? duration : reactionHeadTiltDuration;
+        float clampedDuration = Mathf.Max(minimumDuration, requestedDuration);
         float clampedAngle = Mathf.Abs(angleDegrees) > 0.01f ? angleDegrees : reactionHeadTiltAngle;
         headTiltStartedAt = Time.time;
         headTiltUntil = headTiltStartedAt + clampedDuration;
         requestedHeadTiltAngle = clampedAngle;
         requestedHeadTiltDuration = clampedDuration;
+    }
+
+    public bool IsHeadTiltActive
+    {
+        get { return requestedHeadTiltDuration > 0f && Time.time < headTiltUntil; }
     }
 
     private void MaybeRequestNearbyPetHeadTilt(Transform nearbyPet)
@@ -450,39 +455,65 @@ public class DogCameraAttention : MonoBehaviour
             return;
         }
 
-        if (appliedHeadTilt != Quaternion.identity)
-        {
-            headTransform.localRotation *= Quaternion.Inverse(appliedHeadTilt);
-            appliedHeadTilt = Quaternion.identity;
-        }
-
-        if (neckTransform != null && neckTransform != headTransform && appliedNeckTilt != Quaternion.identity)
-        {
-            neckTransform.localRotation *= Quaternion.Inverse(appliedNeckTilt);
-            appliedNeckTilt = Quaternion.identity;
-        }
-
         if (requestedHeadTiltDuration <= 0f || Time.time >= headTiltUntil)
         {
             return;
         }
 
-        float normalized = Mathf.Clamp01((Time.time - headTiltStartedAt) / requestedHeadTiltDuration);
-        float tiltAmount = Mathf.Sin(normalized * Mathf.PI) * requestedHeadTiltAngle;
+        float tiltAmount = CalculateHeadTiltAmount(
+            Time.time - headTiltStartedAt,
+            requestedHeadTiltDuration,
+            requestedHeadTiltAngle);
         if (Mathf.Abs(tiltAmount) <= 0.01f)
         {
             return;
         }
 
-        appliedHeadTilt = Quaternion.AngleAxis(tiltAmount, Vector3.forward);
-        headTransform.localRotation *= appliedHeadTilt;
+        Quaternion headTilt = Quaternion.AngleAxis(tiltAmount, GetBestBoneAimAxis(headTransform));
+        headTransform.rotation = headTilt * headTransform.rotation;
         if (neckTransform != null && neckTransform != headTransform)
         {
-            appliedNeckTilt = Quaternion.AngleAxis(
+            Quaternion neckTilt = Quaternion.AngleAxis(
                 tiltAmount * Mathf.Clamp01(reactionNeckTiltWeight),
-                Vector3.forward);
-            neckTransform.localRotation *= appliedNeckTilt;
+                GetBestBoneAimAxis(neckTransform));
+            neckTransform.rotation = neckTilt * neckTransform.rotation;
         }
+    }
+
+    private float CalculateHeadTiltAmount(float elapsed, float duration, float targetAngle)
+    {
+        float rampDuration = Mathf.Max(0.05f, reactionHeadTiltRampDuration);
+        float holdDuration = Mathf.Max(1f, reactionHeadTiltHoldDuration);
+        float totalDuration = Mathf.Max(GetMinimumHeadTiltDuration(), duration);
+        float rampOutStart = totalDuration - rampDuration;
+
+        float weight;
+        if (elapsed < rampDuration)
+        {
+            weight = SmoothStep01(elapsed / rampDuration);
+        }
+        else if (elapsed < rampOutStart)
+        {
+            weight = 1f;
+        }
+        else
+        {
+            weight = 1f - SmoothStep01((elapsed - rampOutStart) / rampDuration);
+        }
+
+        return targetAngle * Mathf.Clamp01(weight);
+    }
+
+    private float GetMinimumHeadTiltDuration()
+    {
+        return Mathf.Max(0.05f, reactionHeadTiltRampDuration) * 2f
+            + Mathf.Max(1f, reactionHeadTiltHoldDuration);
+    }
+
+    private static float SmoothStep01(float value)
+    {
+        float t = Mathf.Clamp01(value);
+        return t * t * (3f - 2f * t);
     }
 
     private Vector3 GetClampedLookPoint(Vector3 origin, Vector3 worldDirection, float maxYaw, float maxPitch)
