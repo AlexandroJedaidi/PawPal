@@ -34,8 +34,7 @@ public class ShopScreenView : AppScreenViewBase
         Food,
         Toys,
         Accessories,
-        Clothes,
-        Beds
+        Furniture
     }
 
     private sealed class CatalogCategoryTile
@@ -417,8 +416,7 @@ public class ShopScreenView : AppScreenViewBase
         currentY = BuildRuntimeProductSection(section, "FoodSection", currentY, "Food", "icon_foodsupply_white", new Rect(5f, 3f, 29f, 29f), PawPalItemCategory.Food, CatalogScrollTarget.Food);
         currentY = BuildRuntimeProductSection(section, "ToysSection", currentY, "Toys", "icon_toys_white", new Rect(4f, 2f, 31f, 31f), PawPalItemCategory.Toys, CatalogScrollTarget.Toys);
         currentY = BuildRuntimeProductSection(section, "AccessoriesSection", currentY, "Accessories", "icon_collar_white", new Rect(3f, 1f, 33f, 33f), PawPalItemCategory.Collars, CatalogScrollTarget.Accessories);
-        currentY = BuildRuntimeProductSection(section, "ClothesSection", currentY, "Clothes", "icon_clothing_white", new Rect(5f, 4f, 29f, 29f), PawPalItemCategory.Clothing, CatalogScrollTarget.Clothes);
-        currentY = BuildRuntimeProductSection(section, "BedsSection", currentY, "Beds", "icon_dogbed_white", new Rect(4f, 3f, 31f, 31f), PawPalItemCategory.Furniture, CatalogScrollTarget.Beds);
+        currentY = BuildRuntimeProductSection(section, "FurnitureSection", currentY, "Furniture", "icon_dogbed_white", new Rect(4f, 3f, 31f, 31f), PawPalItemCategory.Furniture, CatalogScrollTarget.Furniture);
 
         float catalogHeight = currentY + 8f;
         section.sizeDelta = new Vector2(382f, catalogHeight);
@@ -633,8 +631,7 @@ public class ShopScreenView : AppScreenViewBase
         BuildCategoryButton(row, "Food", CatalogScrollTarget.Food, startX + (tileWidth + tileGap) * 1f, tileWidth, "Food", "icon_foodsupply_white", "icon_foodsupply_brand", new Rect(13f, 7f, 31f, 31f));
         BuildCategoryButton(row, "Toys", CatalogScrollTarget.Toys, startX + (tileWidth + tileGap) * 2f, tileWidth, "Toys", "icon_toys_white", "icon_toys_brand", new Rect(12f, 6f, 33f, 33f));
         BuildCategoryButton(row, "Accessories", CatalogScrollTarget.Accessories, startX + (tileWidth + tileGap) * 3f, tileWidth, "Accessories", "icon_collar_white", "icon_collar_brand", new Rect(11f, 4f, 35f, 35f));
-        BuildCategoryButton(row, "Clothes", CatalogScrollTarget.Clothes, startX + (tileWidth + tileGap) * 4f, tileWidth, "Clothes", "icon_clothing_white", "icon_clothing_brand", new Rect(13f, 8f, 31f, 31f));
-        BuildCategoryButton(row, "Beds", CatalogScrollTarget.Beds, startX + (tileWidth + tileGap) * 5f, tileWidth, "Beds", "icon_dogbed_white", "icon_dogbed_brand", new Rect(12f, 7f, 33f, 33f));
+        BuildCategoryButton(row, "Furniture", CatalogScrollTarget.Furniture, startX + (tileWidth + tileGap) * 4f, tileWidth, "Furniture", "icon_dogbed_white", "icon_dogbed_brand", new Rect(12f, 7f, 33f, 33f));
     }
 
     private void BuildProductSection(

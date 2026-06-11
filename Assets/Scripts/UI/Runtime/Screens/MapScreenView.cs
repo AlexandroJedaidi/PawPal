@@ -989,7 +989,15 @@ public class MapScreenView : AppScreenViewBase
     private void CaptureLockedWalkDog(PawPalGameRuntime runtime)
     {
         PawPalDogState activeDog = runtime != null ? runtime.ActiveDog : null;
-        lockedWalkDogId = activeDog != null ? activeDog.Id : string.Empty;
+        if (activeDog != null)
+        {
+            lockedWalkDogId = activeDog.Id;
+        }
+        else
+        {
+            lockedWalkDogId = string.Empty;
+        }
+
         if (walkPlanner != null)
         {
             walkPlanner.SetLockedDogId(lockedWalkDogId);

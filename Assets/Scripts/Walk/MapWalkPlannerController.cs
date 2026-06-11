@@ -175,9 +175,8 @@ public sealed class MapWalkPlannerController : MonoBehaviour
     {
         actionStack = CreateNode("WalkPlannerActions", root, 281f, 604f, 100f, 100f);
         CreateActionStackButton(actionStack, "ClearRoute", "Clear", 0f, 0f, 100f, false, ClearRoute);
-        CreateActionStackButton(actionStack, "UndoRoute", "Undo", 0f, 36f, 100f, false, UndoLastVisit);
 
-        RectTransform startRect = CreateActionStackButton(actionStack, "StartWalk", "Start Walk", 0f, 72f, 100f, true, TryStartWalk);
+        RectTransform startRect = CreateActionStackButton(actionStack, "StartWalk", "Start Walk", 0f, 36f, 100f, true, TryStartWalk);
         startButton = startRect.GetComponent<Button>();
         startButtonLabel = startRect.GetComponentInChildren<TextMeshProUGUI>();
         Transform underline = startRect.Find("Underline");

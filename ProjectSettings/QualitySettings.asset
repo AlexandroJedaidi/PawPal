@@ -4,7 +4,7 @@
 QualitySettings:
   m_ObjectHideFlags: 0
   serializedVersion: 5
-  m_CurrentQuality: 1
+  m_CurrentQuality: 4
   m_QualitySettings:
   - serializedVersion: 4
     name: MobileBattery
@@ -216,20 +216,74 @@ QualitySettings:
     excludedTargetPlatforms:
     - Android
     - iPhone
+  - serializedVersion: 4
+    name: PCUltra
+    pixelLightCount: 4
+    shadows: 2
+    shadowResolution: 3
+    shadowProjection: 1
+    shadowCascades: 4
+    shadowDistance: 45
+    shadowNearPlaneOffset: 2
+    shadowCascade2Split: 0.25
+    shadowCascade4Split: {x: 0.08, y: 0.22, z: 0.5}
+    shadowmaskMode: 1
+    skinWeights: 4
+    globalTextureMipmapLimit: 0
+    textureMipmapLimitSettings: []
+    anisotropicTextures: 2
+    antiAliasing: 8
+    softParticles: 1
+    softVegetation: 1
+    realtimeReflectionProbes: 1
+    billboardsFaceCameraPosition: 1
+    useLegacyDetailDistribution: 1
+    adaptiveVsync: 0
+    vSyncCount: 0
+    realtimeGICPUUsage: 100
+    adaptiveVsyncExtraA: 0
+    adaptiveVsyncExtraB: 0
+    lodBias: 2.5
+    maximumLODLevel: 0
+    enableLODCrossFade: 1
+    streamingMipmapsActive: 0
+    streamingMipmapsAddAllCameras: 1
+    streamingMipmapsMemoryBudget: 768
+    streamingMipmapsRenderersPerFrame: 768
+    streamingMipmapsMaxLevelReduction: 1
+    streamingMipmapsMaxFileIORequests: 1024
+    particleRaycastBudget: 512
+    asyncUploadTimeSlice: 4
+    asyncUploadBufferSize: 32
+    asyncUploadPersistentBuffer: 1
+    resolutionScalingFixedDPIFactor: 1
+    customRenderPipeline: {fileID: 11400000, guid: 8f0f5e1d39e548b0bcb1c0d51d2a7e34, type: 2}
+    terrainQualityOverrides: 0
+    terrainPixelError: 1
+    terrainDetailDensityScale: 1.2
+    terrainBasemapDistance: 1500
+    terrainDetailDistance: 100
+    terrainTreeDistance: 7000
+    terrainBillboardStart: 70
+    terrainFadeLength: 5
+    terrainMaxTrees: 80
+    excludedTargetPlatforms:
+    - Android
+    - iPhone
   m_TextureMipmapLimitGroupNames: []
   m_PerPlatformDefaultQuality:
     Android: 1
-    GameCoreScarlett: 3
-    GameCoreXboxOne: 3
+    GameCoreScarlett: 4
+    GameCoreXboxOne: 4
     Lumin: 1
-    Nintendo Switch: 3
-    PS4: 3
-    PS5: 3
-    Server: 3
-    Stadia: 3
-    Standalone: 3
+    Nintendo Switch: 4
+    PS4: 4
+    PS5: 4
+    Server: 4
+    Stadia: 4
+    Standalone: 4
     WebGL: 1
-    Windows Store Apps: 3
-    XboxOne: 3
+    Windows Store Apps: 4
+    XboxOne: 4
     iPhone: 1
     tvOS: 1

@@ -150,7 +150,7 @@ public static class PawPalWalkSceneFlow
         ClearPreparedWalkDog();
 
         PawPalRoomPetHandle activePet = PawPalRoomPetRuntime.ResolveActivePet();
-        if (activePet == null || !activePet.IsValid || !activePet.IsDog || activePet.RootTransform == null)
+        if (activePet == null || !activePet.IsValid || activePet.RootTransform == null)
         {
             return;
         }

@@ -403,12 +403,15 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private void ConfigureRenderSettings()
     {
         float daylight01 = currentTimeOfDayState.Daylight01;
+        bool isIndoorCaptureScene = IsIndoorCaptureScene();
+        float ambientBoost = PawPalGraphicsSettings.IsUltraQuality && isIndoorCaptureScene ? 1.35f : 1f;
+        float reflectionBoost = PawPalGraphicsSettings.IsUltraQuality && isIndoorCaptureScene ? 1.15f : 1f;
         RenderSettings.ambientMode = AmbientMode.Trilight;
         RenderSettings.ambientSkyColor = Color.Lerp(nightAmbientSky, dayAmbientSky, daylight01);
         RenderSettings.ambientEquatorColor = Color.Lerp(nightAmbientEquator, dayAmbientEquator, daylight01);
         RenderSettings.ambientGroundColor = Color.Lerp(nightAmbientGround, dayAmbientGround, daylight01);
-        RenderSettings.ambientIntensity = Mathf.Lerp(nightAmbientIntensity, dayAmbientIntensity, daylight01);
-        RenderSettings.reflectionIntensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity, daylight01);
+        RenderSettings.ambientIntensity = Mathf.Lerp(nightAmbientIntensity, dayAmbientIntensity * ambientBoost, daylight01);
+        RenderSettings.reflectionIntensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity * reflectionBoost, daylight01);
         RenderSettings.reflectionBounces = 1;
 
         if (configureSkybox)
@@ -495,6 +498,8 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         }
 
         float daylight01 = currentTimeOfDayState.Daylight01;
+        bool isIndoorCaptureScene = IsIndoorCaptureScene();
+        float sunBoost = PawPalGraphicsSettings.IsUltraQuality && isIndoorCaptureScene ? 1.15f : 1f;
         sun = resolvedSun;
         RenderSettings.sun = resolvedSun;
 
@@ -503,7 +508,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             Quaternion.Euler(nightSunEulerAngles),
             Quaternion.Euler(daySunEulerAngles),
             daylight01);
-        resolvedSun.intensity = Mathf.Lerp(nightSunIntensity, daySunIntensity, daylight01);
+        resolvedSun.intensity = Mathf.Lerp(nightSunIntensity, daySunIntensity * sunBoost, daylight01);
         resolvedSun.color = Color.Lerp(nightSunColor, daySunColor, daylight01);
         resolvedSun.useColorTemperature = true;
         resolvedSun.colorTemperature = Mathf.Lerp(nightSunColorTemperature, daySunColorTemperature, daylight01);
@@ -560,6 +565,9 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     private void ConfigureFillLights(Bounds roomBounds)
     {
         float daylight01 = currentTimeOfDayState.Daylight01;
+        bool isIndoorCaptureScene = IsIndoorCaptureScene();
+        float windowBoost = PawPalGraphicsSettings.IsUltraQuality && isIndoorCaptureScene ? 2.1f : 1f;
+        float sofaBoost = PawPalGraphicsSettings.IsUltraQuality && isIndoorCaptureScene ? 1.15f : 1f;
         Light windowLight = ResolveOrCreateLight(ref windowFillLight, WindowFillLightName, LightType.Spot);
         Vector3 windowPosition = new Vector3(
             roomBounds.max.x - Mathf.Max(0.35f, roomBounds.size.x * 0.08f),
@@ -569,7 +577,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         windowLight.transform.position = windowPosition;
         AimAt(windowLight.transform, roomBounds.center + new Vector3(-roomBounds.extents.x * 0.25f, 0.25f, -roomBounds.extents.z * 0.15f));
         windowLight.type = LightType.Spot;
-        windowLight.intensity = Mathf.Lerp(nightWindowFillIntensity, dayWindowFillIntensity, daylight01);
+        windowLight.intensity = Mathf.Lerp(nightWindowFillIntensity, dayWindowFillIntensity * windowBoost, daylight01);
         windowLight.range = Mathf.Max(4f, roomBounds.extents.magnitude * 0.7f);
         windowLight.spotAngle = 82f;
         windowLight.innerSpotAngle = 48f;
@@ -580,7 +588,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         Light sofaLight = ResolveOrCreateLight(ref sofaFillLight, SofaFillLightName, LightType.Point);
         sofaLight.transform.position = roomBounds.center + new Vector3(roomBounds.extents.x * 0.22f, Mathf.Max(1.25f, roomBounds.extents.y * 0.55f), roomBounds.extents.z * 0.2f);
         sofaLight.type = LightType.Point;
-        sofaLight.intensity = Mathf.Lerp(nightSofaFillIntensity, daySofaFillIntensity, daylight01);
+        sofaLight.intensity = Mathf.Lerp(nightSofaFillIntensity, daySofaFillIntensity * sofaBoost, daylight01);
         sofaLight.range = Mathf.Max(2.5f, roomBounds.size.x * 0.35f);
         sofaLight.color = Color.Lerp(nightSofaFillColor, daySofaFillColor, daylight01);
         sofaLight.shadows = LightShadows.None;
@@ -611,6 +619,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
                 state.Light.colorTemperature = Mathf.Lerp(2600f, state.BaseColorTemperature, daylight01);
             }
         }
+    }
+
+    private bool IsIndoorCaptureScene()
+    {
+        return gameObject.scene.IsValid() && string.Equals(gameObject.scene.name, AutoBootstrapSceneName, StringComparison.Ordinal);
     }
 
     private void ConfigureCameras()
@@ -668,17 +681,22 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         profile.hideFlags = HideFlags.DontSave;
 
         Tonemapping tonemapping = GetOrAddVolumeComponent<Tonemapping>(profile);
-        tonemapping.mode.Override(TonemappingMode.Neutral);
+        tonemapping.mode.Override(PawPalGraphicsSettings.GetTonemappingMode());
 
         ColorAdjustments colorAdjustments = GetOrAddVolumeComponent<ColorAdjustments>(profile);
-        colorAdjustments.postExposure.Override(exposure);
-        colorAdjustments.contrast.Override(contrast);
-        colorAdjustments.saturation.Override(saturation);
+        colorAdjustments.postExposure.Override(PawPalGraphicsSettings.GetPostExposure(exposure));
+        colorAdjustments.contrast.Override(PawPalGraphicsSettings.GetContrast(contrast));
+        colorAdjustments.saturation.Override(PawPalGraphicsSettings.GetSaturation(saturation));
         colorAdjustments.colorFilter.Override(Color.white);
 
         WhiteBalance whiteBalance = GetOrAddVolumeComponent<WhiteBalance>(profile);
         whiteBalance.temperature.Override(whiteBalanceTemperature);
         whiteBalance.tint.Override(0f);
+
+        LiftGammaGain liftGammaGain = GetOrAddVolumeComponent<LiftGammaGain>(profile);
+        liftGammaGain.lift.Override(new Vector4(1f, 1f, 1f, 0f));
+        liftGammaGain.gamma.Override(new Vector4(1f, 1f, 1f, 0f));
+        liftGammaGain.gain.Override(new Vector4(1f, 1f, 1f, 0f));
 
         Bloom bloom = GetOrAddVolumeComponent<Bloom>(profile);
         bloom.threshold.Override(1.4f);
@@ -693,6 +711,59 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         vignette.intensity.Override(PawPalGraphicsSettings.GetVignetteIntensity(vignetteIntensity));
         vignette.smoothness.Override(0.42f);
         vignette.rounded.Override(false);
+
+        DepthOfField depthOfField = GetOrAddVolumeComponent<DepthOfField>(profile);
+        depthOfField.mode.Override(DepthOfFieldMode.Gaussian);
+        bool isIndoorCaptureScene = IsIndoorCaptureScene();
+        if (isIndoorCaptureScene)
+        {
+            depthOfField.gaussianStart.Override(4f);
+            depthOfField.gaussianEnd.Override(8f);
+            depthOfField.gaussianMaxRadius.Override(0.12f);
+            depthOfField.highQualitySampling.Override(false);
+            depthOfField.focalLength.Override(70f);
+            depthOfField.aperture.Override(12f);
+            depthOfField.focusDistance.Override(6f);
+            depthOfField.active = PawPalGraphicsSettings.IsUltraQuality;
+        }
+        else
+        {
+            depthOfField.gaussianStart.Override(PawPalGraphicsSettings.GetDepthOfFieldFocusDistance());
+            depthOfField.gaussianEnd.Override(PawPalGraphicsSettings.GetDepthOfFieldFocusDistance() + 3.5f);
+            depthOfField.gaussianMaxRadius.Override(PawPalGraphicsSettings.IsUltraQuality ? 0.6f : 0.3f);
+            depthOfField.highQualitySampling.Override(PawPalGraphicsSettings.IsUltraQuality);
+            depthOfField.focalLength.Override(PawPalGraphicsSettings.GetDepthOfFieldFocalLength());
+            depthOfField.aperture.Override(PawPalGraphicsSettings.GetDepthOfFieldAperture());
+            depthOfField.focusDistance.Override(PawPalGraphicsSettings.GetDepthOfFieldFocusDistance());
+            depthOfField.active = PawPalGraphicsSettings.EnableDepthOfField;
+        }
+
+        ChromaticAberration chromaticAberration = GetOrAddVolumeComponent<ChromaticAberration>(profile);
+        chromaticAberration.intensity.Override(PawPalGraphicsSettings.GetChromaticAberrationIntensity());
+        chromaticAberration.active = PawPalGraphicsSettings.EnablePostProcessing;
+
+        FilmGrain filmGrain = GetOrAddVolumeComponent<FilmGrain>(profile);
+        filmGrain.type.Override(FilmGrainLookup.Thin1);
+        filmGrain.intensity.Override(PawPalGraphicsSettings.GetFilmGrainIntensity());
+        filmGrain.response.Override(0.8f);
+        filmGrain.active = PawPalGraphicsSettings.EnablePostProcessing;
+
+        ScreenSpaceLensFlare screenSpaceLensFlare = GetOrAddVolumeComponent<ScreenSpaceLensFlare>(profile);
+        screenSpaceLensFlare.intensity.Override(PawPalGraphicsSettings.IsUltraQuality ? 0.55f : 0f);
+        screenSpaceLensFlare.tintColor.Override(new Color(1f, 0.96f, 0.82f, 1f));
+        screenSpaceLensFlare.bloomMip.Override(1);
+        screenSpaceLensFlare.firstFlareIntensity.Override(1f);
+        screenSpaceLensFlare.secondaryFlareIntensity.Override(0.85f);
+        screenSpaceLensFlare.warpedFlareIntensity.Override(0.6f);
+        screenSpaceLensFlare.warpedFlareScale.Override(new Vector2(1f, 1f));
+        screenSpaceLensFlare.samples.Override(2);
+        screenSpaceLensFlare.sampleDimmer.Override(0.6f);
+        screenSpaceLensFlare.vignetteEffect.Override(0.85f);
+        screenSpaceLensFlare.startingPosition.Override(1.2f);
+        screenSpaceLensFlare.scale.Override(1.35f);
+        screenSpaceLensFlare.streaksIntensity.Override(0.45f);
+        screenSpaceLensFlare.streaksLength.Override(0.85f);
+        screenSpaceLensFlare.active = PawPalGraphicsSettings.IsUltraQuality;
     }
 
     private void ConfigureRoomReflectionProbe(Bounds roomBounds)
@@ -701,7 +772,6 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         probe.transform.position = roomBounds.center + Vector3.up * 0.15f;
         probe.mode = ReflectionProbeMode.Realtime;
         probe.refreshMode = ReflectionProbeRefreshMode.OnAwake;
-        probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.IndividualFaces;
         probe.resolution = PawPalGraphicsSettings.ReflectionProbeResolution;
         probe.intensity = Mathf.Lerp(nightReflectionIntensity, dayReflectionIntensity, currentTimeOfDayState.Daylight01);
         probe.boxProjection = PawPalGraphicsSettings.UseReflectionProbeBoxProjection;

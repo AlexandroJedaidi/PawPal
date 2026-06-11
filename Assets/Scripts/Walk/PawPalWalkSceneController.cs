@@ -1109,6 +1109,13 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         bool overlayCompleted = false;
         PawPalWalkFoundItemOverlayView.Show(runtime, walkEvent, delegate
         {
+            if (present != null)
+            {
+                Destroy(present);
+                present = null;
+            }
+        }, delegate
+        {
             overlayCompleted = true;
         });
 
@@ -1864,6 +1871,8 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         present.name = "WalkFoundPresent_02";
+        Vector3 localEuler = present.transform.localEulerAngles;
+        present.transform.localRotation = Quaternion.Euler(180f, localEuler.y, localEuler.z);
         return present;
     }
 
@@ -1933,7 +1942,8 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
         Transform presentTransform = present.transform;
         presentTransform.localPosition = sceneBindings.PresentLocalPosition;
-        presentTransform.localRotation = Quaternion.Euler(sceneBindings.PresentLocalEulerAngles);
+        Vector3 eulerAngles = sceneBindings.PresentLocalEulerAngles;
+        presentTransform.localRotation = Quaternion.Euler(180f, eulerAngles.y, eulerAngles.z);
         presentTransform.localScale = sceneBindings.PresentLocalScale;
     }
 
@@ -2312,29 +2322,38 @@ public sealed class PawPalWalkFoundItemOverlayView : MonoBehaviour
     private static readonly Color32 CardBorder = new Color32(231, 215, 188, 255);
     private static readonly Color32 CtaBlue = new Color32(50, 187, 255, 255);
     private static readonly Color32 CtaBlueDark = new Color32(0, 118, 177, 255);
-
     private const float FrameWidth = UiTheme.ReferenceWidth;
     private const float FrameHeight = UiTheme.ReferenceHeight;
 
     private PawPalGameRuntime runtime;
     private PawPalWalkGeneratedEventState walkEvent;
+    private System.Action beforeFoundStep;
     private System.Action completed;
     private RectTransform exactFrame;
 
-    public static void Show(PawPalGameRuntime runtime, PawPalWalkGeneratedEventState walkEvent, System.Action completed)
+    public static void Show(
+        PawPalGameRuntime runtime,
+        PawPalWalkGeneratedEventState walkEvent,
+        System.Action beforeFoundStep,
+        System.Action completed)
     {
         GameObject overlayObject = new GameObject("PawPalWalkFoundItemOverlay");
         PawPalWalkFoundItemOverlayView overlay = overlayObject.AddComponent<PawPalWalkFoundItemOverlayView>();
-        overlay.Initialize(runtime, walkEvent, completed);
+        overlay.Initialize(runtime, walkEvent, beforeFoundStep, completed);
     }
 
-    private void Initialize(PawPalGameRuntime runtimeInstance, PawPalWalkGeneratedEventState eventState, System.Action onCompleted)
+    private void Initialize(
+        PawPalGameRuntime runtimeInstance,
+        PawPalWalkGeneratedEventState eventState,
+        System.Action onBeforeFoundStep,
+        System.Action onCompleted)
     {
         runtime = runtimeInstance;
         walkEvent = eventState;
+        beforeFoundStep = onBeforeFoundStep;
         completed = onCompleted;
         BuildCanvas();
-        ShowFoundStep();
+        ShowStarStep();
     }
 
     private void BuildCanvas()
@@ -2371,6 +2390,39 @@ public sealed class PawPalWalkFoundItemOverlayView : MonoBehaviour
         Stretch(blocker.rectTransform);
     }
 
+    private void ShowStarStep()
+    {
+        ClearFrame();
+        BuildModalPanel(68f, 334f, 257f, 178f);
+
+        Image star = UiFactory.CreateImage("Star", exactFrame, Resources.Load<Sprite>("UI/Interaction/star"), Color.white);
+        star.type = Image.Type.Simple;
+        star.preserveAspect = true;
+        star.raycastTarget = false;
+        SetTopLeft(star.rectTransform, 119f, 368f, 90f, 90f);
+
+        TextMeshProUGUI title = CreateText("Title", exactFrame, "Found something!", 20, UiTheme.NavBrandDark, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        SetTopLeft(title.rectTransform, 82f, 458f, 228f, 26f);
+        title.enableAutoSizing = true;
+        title.fontSizeMin = 14f;
+        title.fontSizeMax = 20f;
+
+        PawPalUiAudio.PlaySparkle();
+        PawPalUiAudio.PlaySuccessPopup();
+
+        CreateStyledContinueButton("StarContinue", exactFrame, "Continue", 142.5f, 486f, 96f, 24f, HandleStarStepContinue);
+    }
+
+    private void HandleStarStepContinue()
+    {
+        if (beforeFoundStep != null)
+        {
+            beforeFoundStep();
+        }
+
+        ShowFoundStep();
+    }
+
     private void ShowFoundStep()
     {
         ClearFrame();
@@ -2383,7 +2435,7 @@ public sealed class PawPalWalkFoundItemOverlayView : MonoBehaviour
         title.fontSizeMax = 22f;
         title.textWrappingMode = TextWrappingModes.Normal;
 
-        CreateActionButton("FoundContinue", exactFrame, "Continue", 142.5f, 445f, 108f, 30f, ShowRewardStep);
+        CreateStyledContinueButton("FoundContinue", exactFrame, "Continue", 142.5f, 445f, 96f, 24f, ShowRewardStep);
     }
 
     private void ShowRewardStep()
@@ -2397,7 +2449,7 @@ public sealed class PawPalWalkFoundItemOverlayView : MonoBehaviour
         PawPalCatalogItemDefinition item = ResolveRewardItem();
         BuildRewardCard(exactFrame, item, 139f, 358f);
 
-        CreateActionButton("RewardContinue", exactFrame, "Continue", 142.5f, 511f, 108f, 30f, Complete);
+        CreateStyledContinueButton("RewardContinue", exactFrame, "Continue", 142.5f, 511f, 96f, 24f, Complete);
     }
 
     private PawPalCatalogItemDefinition ResolveRewardItem()
@@ -2542,6 +2594,27 @@ public sealed class PawPalWalkFoundItemOverlayView : MonoBehaviour
         TextMeshProUGUI text = CreateText("Label", buttonRect, label, 14, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
         SetTopLeft(text.rectTransform, 0f, -1f, width, height);
         UiFactory.AddButton(buttonRect.gameObject, onClick);
+    }
+
+    private void CreateStyledContinueButton(string name, RectTransform parent, string label, float x, float y, float width, float height, UnityEngine.Events.UnityAction onClick)
+    {
+        RectTransform rect = CreateNode(name, parent, x, y, width, height);
+        Image fill = UiFactory.CreateImage("Fill", rect, UiTheme.RoundedTenSprite, new Color32(57, 169, 226, 255));
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        fill.raycastTarget = true;
+        SetTopLeft(fill.rectTransform, 0f, 0f, width, height);
+
+        Shadow shadow = fill.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 82f / 255f, 132f / 255f, 0.28f);
+        shadow.effectDistance = new Vector2(0f, -2f);
+
+        TextMeshProUGUI text = CreateText("Label", rect, label, 14, Color.white, UiTheme.NavExtraBoldFont, TextAlignmentOptions.Center);
+        text.fontSizeMin = 12f;
+        text.fontSizeMax = 16f;
+        text.fontSize = 16f;
+        SetTopLeft(text.rectTransform, 0f, 0f, width, height);
+        UiFactory.AddButton(rect.gameObject, onClick);
     }
 
     private TextMeshProUGUI CreateText(string name, RectTransform parent, string text, int fontSize, Color color, TMP_FontAsset font, TextAlignmentOptions alignment)

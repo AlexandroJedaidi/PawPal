@@ -1009,7 +1009,7 @@ public class SettingsScreenView : AppScreenViewBase
         }
 
         bool canDecrease = preset > PawPalGraphicsPreset.Battery;
-        bool canIncrease = preset < PawPalGraphicsPreset.Quality;
+        bool canIncrease = preset < PawPalGraphicsSettings.MaximumSelectablePreset;
         ApplyVolumeStepButtonState(graphicsPresetControl.MinusButton, graphicsPresetControl.MinusFill, graphicsPresetControl.MinusLabel, canDecrease);
         ApplyVolumeStepButtonState(graphicsPresetControl.PlusButton, graphicsPresetControl.PlusFill, graphicsPresetControl.PlusLabel, canIncrease);
     }

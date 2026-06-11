@@ -6,7 +6,8 @@ public enum PawPalGraphicsPreset
 {
     Battery = 0,
     Balanced = 1,
-    Quality = 2
+    Quality = 2,
+    Ultra = 3
 }
 
 public enum PawPalGraphicsProfileKind
@@ -14,22 +15,44 @@ public enum PawPalGraphicsProfileKind
     MobileBattery = 0,
     MobileBalanced = 1,
     MobileQuality = 2,
-    PCHigh = 3
+    PCHigh = 3,
+    PCUltra = 4
 }
 
 public static class PawPalGraphicsSettings
 {
     private const string GraphicsPresetKey = "pawpal_graphics_preset_v1";
-    private const PawPalGraphicsPreset DefaultMobilePreset = PawPalGraphicsPreset.Balanced;
 
     private static bool loaded;
-    private static PawPalGraphicsPreset mobilePreset = DefaultMobilePreset;
+    private static PawPalGraphicsPreset selectedPreset = PawPalGraphicsPreset.Balanced;
 
     public static event Action GraphicsPresetChanged;
 
     private static bool UsePresetSelectorPlatform
     {
-        get { return Application.isMobilePlatform || Application.isEditor; }
+        get { return Application.isMobilePlatform || Application.isEditor || IsStandalonePresetPlatform; }
+    }
+
+    private static bool IsStandalonePresetPlatform
+    {
+        get
+        {
+            if (Application.isEditor)
+            {
+                return true;
+            }
+
+            RuntimePlatform platform = Application.platform;
+            return !Application.isMobilePlatform
+                && (platform == RuntimePlatform.WindowsPlayer
+                    || platform == RuntimePlatform.OSXPlayer
+                    || platform == RuntimePlatform.LinuxPlayer);
+        }
+    }
+
+    private static PawPalGraphicsPreset DefaultPreset
+    {
+        get { return IsStandalonePresetPlatform ? PawPalGraphicsPreset.Ultra : PawPalGraphicsPreset.Balanced; }
     }
 
     public static bool SupportsPresetSelector
@@ -37,12 +60,17 @@ public static class PawPalGraphicsSettings
         get { return UsePresetSelectorPlatform; }
     }
 
+    public static PawPalGraphicsPreset MaximumSelectablePreset
+    {
+        get { return IsStandalonePresetPlatform ? PawPalGraphicsPreset.Ultra : PawPalGraphicsPreset.Quality; }
+    }
+
     public static PawPalGraphicsPreset MobilePreset
     {
         get
         {
             EnsureLoaded();
-            return mobilePreset;
+            return selectedPreset;
         }
     }
 
@@ -50,17 +78,18 @@ public static class PawPalGraphicsSettings
     {
         get
         {
-            if (!UsePresetSelectorPlatform)
-            {
-                return PawPalGraphicsProfileKind.PCHigh;
-            }
-
-            switch (MobilePreset)
+            switch (selectedPreset)
             {
                 case PawPalGraphicsPreset.Battery:
                     return PawPalGraphicsProfileKind.MobileBattery;
+                case PawPalGraphicsPreset.Ultra:
+                    return IsStandalonePresetPlatform
+                        ? PawPalGraphicsProfileKind.PCUltra
+                        : PawPalGraphicsProfileKind.MobileQuality;
                 case PawPalGraphicsPreset.Quality:
-                    return PawPalGraphicsProfileKind.MobileQuality;
+                    return IsStandalonePresetPlatform
+                        ? PawPalGraphicsProfileKind.PCHigh
+                        : PawPalGraphicsProfileKind.MobileQuality;
                 default:
                     return PawPalGraphicsProfileKind.MobileBalanced;
             }
@@ -69,7 +98,7 @@ public static class PawPalGraphicsSettings
 
     public static bool EnableHdr
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh || ActiveProfile == PawPalGraphicsProfileKind.PCUltra; }
     }
 
     public static bool EnableCameraMsaa
@@ -82,6 +111,11 @@ public static class PawPalGraphicsSettings
         get { return ActiveProfile != PawPalGraphicsProfileKind.MobileBattery; }
     }
 
+    public static bool IsUltraQuality
+    {
+        get { return ActiveProfile == PawPalGraphicsProfileKind.PCUltra; }
+    }
+
     public static bool EnableBloom
     {
         get { return ActiveProfile != PawPalGraphicsProfileKind.MobileBattery; }
@@ -89,22 +123,32 @@ public static class PawPalGraphicsSettings
 
     public static bool EnableDithering
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality || ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get
+        {
+            return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality
+                || ActiveProfile == PawPalGraphicsProfileKind.PCHigh
+                || ActiveProfile == PawPalGraphicsProfileKind.PCUltra;
+        }
     }
 
     public static bool RequireDepthTexture
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh || ActiveProfile == PawPalGraphicsProfileKind.PCUltra; }
     }
 
     public static bool RequireOpaqueTexture
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get { return ActiveProfile == PawPalGraphicsProfileKind.PCHigh || ActiveProfile == PawPalGraphicsProfileKind.PCUltra; }
     }
 
     public static bool UseReflectionProbeBoxProjection
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality || ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get
+        {
+            return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality
+                || ActiveProfile == PawPalGraphicsProfileKind.PCHigh
+                || ActiveProfile == PawPalGraphicsProfileKind.PCUltra;
+        }
     }
 
     public static int ReflectionProbeResolution
@@ -116,6 +160,8 @@ public static class PawPalGraphicsSettings
                 case PawPalGraphicsProfileKind.MobileBattery:
                 case PawPalGraphicsProfileKind.MobileBalanced:
                     return 64;
+                case PawPalGraphicsProfileKind.PCUltra:
+                    return 512;
                 default:
                     return 128;
             }
@@ -130,6 +176,8 @@ public static class PawPalGraphicsSettings
                 return 0f;
             case PawPalGraphicsProfileKind.MobileBalanced:
                 return baseIntensity * 0.45f;
+            case PawPalGraphicsProfileKind.PCUltra:
+                return baseIntensity * 1.2f;
             default:
                 return baseIntensity;
         }
@@ -143,6 +191,8 @@ public static class PawPalGraphicsSettings
                 return 2;
             case PawPalGraphicsProfileKind.MobileBalanced:
                 return 4;
+            case PawPalGraphicsProfileKind.PCUltra:
+                return 8;
             default:
                 return 6;
         }
@@ -150,12 +200,72 @@ public static class PawPalGraphicsSettings
 
     public static bool UseHighQualityBloomFiltering
     {
-        get { return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality || ActiveProfile == PawPalGraphicsProfileKind.PCHigh; }
+        get
+        {
+            return ActiveProfile == PawPalGraphicsProfileKind.MobileQuality
+                || ActiveProfile == PawPalGraphicsProfileKind.PCHigh
+                || ActiveProfile == PawPalGraphicsProfileKind.PCUltra;
+        }
     }
 
     public static float GetVignetteIntensity(float baseIntensity)
     {
-        return EnablePostProcessing ? baseIntensity : 0f;
+        if (!EnablePostProcessing)
+        {
+            return 0f;
+        }
+
+        return IsUltraQuality ? baseIntensity * 1.15f : baseIntensity;
+    }
+
+    public static TonemappingMode GetTonemappingMode()
+    {
+        return IsUltraQuality ? TonemappingMode.ACES : TonemappingMode.Neutral;
+    }
+
+    public static float GetPostExposure(float baseExposure)
+    {
+        return IsUltraQuality ? baseExposure + 0.02f : baseExposure;
+    }
+
+    public static float GetContrast(float baseContrast)
+    {
+        return IsUltraQuality ? baseContrast + 1.5f : baseContrast;
+    }
+
+    public static float GetSaturation(float baseSaturation)
+    {
+        return IsUltraQuality ? baseSaturation + 1.5f : baseSaturation;
+    }
+
+    public static bool EnableDepthOfField
+    {
+        get { return IsUltraQuality; }
+    }
+
+    public static float GetDepthOfFieldFocalLength()
+    {
+        return IsUltraQuality ? 55f : 45f;
+    }
+
+    public static float GetDepthOfFieldAperture()
+    {
+        return IsUltraQuality ? 7.2f : 8.5f;
+    }
+
+    public static float GetDepthOfFieldFocusDistance()
+    {
+        return IsUltraQuality ? 2.4f : 2.8f;
+    }
+
+    public static float GetChromaticAberrationIntensity()
+    {
+        return IsUltraQuality ? 0.02f : 0.008f;
+    }
+
+    public static float GetFilmGrainIntensity()
+    {
+        return IsUltraQuality ? 0.08f : 0.03f;
     }
 
     public static AntialiasingMode GetCameraAntialiasingMode()
@@ -175,6 +285,8 @@ public static class PawPalGraphicsSettings
                 return AntialiasingQuality.Medium;
             case PawPalGraphicsProfileKind.PCHigh:
                 return AntialiasingQuality.High;
+            case PawPalGraphicsProfileKind.PCUltra:
+                return AntialiasingQuality.High;
             default:
                 return AntialiasingQuality.Low;
         }
@@ -188,6 +300,8 @@ public static class PawPalGraphicsSettings
                 return SoftShadowQuality.Low;
             case PawPalGraphicsProfileKind.MobileBalanced:
                 return SoftShadowQuality.Medium;
+            case PawPalGraphicsProfileKind.PCUltra:
+                return SoftShadowQuality.High;
             default:
                 return SoftShadowQuality.High;
         }
@@ -201,6 +315,8 @@ public static class PawPalGraphicsSettings
                 return "Battery";
             case PawPalGraphicsPreset.Quality:
                 return "Quality";
+            case PawPalGraphicsPreset.Ultra:
+                return "Ultra";
             default:
                 return "Balanced";
         }
@@ -213,7 +329,7 @@ public static class PawPalGraphicsSettings
             return;
         }
 
-        int next = Mathf.Clamp((int)MobilePreset + delta, (int)PawPalGraphicsPreset.Battery, (int)PawPalGraphicsPreset.Quality);
+        int next = Mathf.Clamp((int)MobilePreset + delta, (int)PawPalGraphicsPreset.Battery, (int)MaximumSelectablePreset);
         SetPreset((PawPalGraphicsPreset)next);
     }
 
@@ -225,14 +341,14 @@ public static class PawPalGraphicsSettings
         }
 
         EnsureLoaded();
-        if (mobilePreset == preset)
+        if (selectedPreset == preset)
         {
             ApplyRuntimeProfile();
             return;
         }
 
-        mobilePreset = preset;
-        PlayerPrefs.SetInt(GraphicsPresetKey, (int)mobilePreset);
+        selectedPreset = preset;
+        PlayerPrefs.SetInt(GraphicsPresetKey, (int)selectedPreset);
         PlayerPrefs.Save();
         ApplyRuntimeProfile();
         GraphicsPresetChanged?.Invoke();
@@ -267,13 +383,13 @@ public static class PawPalGraphicsSettings
 
         if (UsePresetSelectorPlatform)
         {
-            int storedValue = PlayerPrefs.GetInt(GraphicsPresetKey, (int)DefaultMobilePreset);
-            storedValue = Mathf.Clamp(storedValue, (int)PawPalGraphicsPreset.Battery, (int)PawPalGraphicsPreset.Quality);
-            mobilePreset = (PawPalGraphicsPreset)storedValue;
+            int storedValue = PlayerPrefs.GetInt(GraphicsPresetKey, (int)DefaultPreset);
+            storedValue = Mathf.Clamp(storedValue, (int)PawPalGraphicsPreset.Battery, (int)MaximumSelectablePreset);
+            selectedPreset = (PawPalGraphicsPreset)storedValue;
         }
         else
         {
-            mobilePreset = DefaultMobilePreset;
+            selectedPreset = DefaultPreset;
         }
 
         loaded = true;
@@ -303,6 +419,8 @@ public static class PawPalGraphicsSettings
                 return "MobileBalanced";
             case PawPalGraphicsProfileKind.MobileQuality:
                 return "MobileQuality";
+            case PawPalGraphicsProfileKind.PCUltra:
+                return "PCUltra";
             default:
                 return "PCHigh";
         }

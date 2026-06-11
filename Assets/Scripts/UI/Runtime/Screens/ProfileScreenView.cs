@@ -6,24 +6,30 @@ using UnityEngine.UI;
 
 public class ProfileScreenView : AppScreenViewBase
 {
-    private sealed class MilestoneLevelView
+    private enum ProfileTab
     {
-        public int Level;
-        public Image Circle;
-        public Image Outline;
+        Progress,
+        Activities,
+        Statistics
+    }
+
+    private sealed class TabButtonView
+    {
+        public ProfileTab Tab;
+        public Image Fill;
+        public Image Border;
         public TextMeshProUGUI Label;
     }
 
-    private sealed class MilestoneRewardView
+    private sealed class ProgressRowView
     {
         public int Level;
-        public TrainerMilestoneDefinition Milestone;
-        public bool UsesIcon;
-        public bool UsesPremiumCurrencyBubble;
-        public Image Background;
-        public Image Outline;
-        public Image Icon;
-        public TextMeshProUGUI Label;
+        public Image Dot;
+        public TextMeshProUGUI LevelLabel;
+        public TextMeshProUGUI HeaderLabel;
+        public TextMeshProUGUI DescriptionLabel;
+        public TextMeshProUGUI UnlockLabel;
+        public TextMeshProUGUI RewardLabel;
     }
 
     private struct ActivityCardData
@@ -59,6 +65,9 @@ public class ProfileScreenView : AppScreenViewBase
     private static readonly Color32 ProgressGreenBox = new Color32(201, 255, 203, 255);
     private static readonly Color32 ProgressGreenShadow = new Color32(0, 233, 8, 64);
     private static readonly Color32 ActivityCardFill = new Color32(255, 255, 255, 255);
+    private static readonly Color32 TabInactiveFill = new Color32(248, 239, 224, 255);
+    private static readonly Color32 TabInactiveBorder = new Color32(212, 191, 164, 255);
+    private static readonly Color32 ProgressTrack = new Color32(214, 202, 181, 255);
 
     private static readonly StatisticRowData[] Statistics =
     {
@@ -74,21 +83,29 @@ public class ProfileScreenView : AppScreenViewBase
     };
 
     private RectTransform exactFrame;
-    private RectTransform overviewRect;
-    private ScrollRect screenScrollRect;
+    private RectTransform tabsRoot;
+    private RectTransform headerRoot;
+    private RectTransform progressPanel;
+    private RectTransform activitiesPanel;
+    private RectTransform statisticsPanel;
+    private RectTransform progressScrollContent;
+    private RectTransform progressRowsRoot;
+    private RectTransform activitiesSection;
+    private RectTransform statisticsSection;
+    private ScrollRect progressScrollRect;
+    private RectTransform progressViewport;
+    private readonly List<TabButtonView> tabButtons = new List<TabButtonView>();
+    private readonly List<ProgressRowView> progressRowViews = new List<ProgressRowView>();
+    private readonly List<GameObject> activityCardObjects = new List<GameObject>();
+    private readonly Dictionary<ProfileTab, GameObject> tabPanels = new Dictionary<ProfileTab, GameObject>();
+    private ProfileTab selectedTab = ProfileTab.Activities;
     private TextMeshProUGUI progressHeaderLabel;
     private Image trainerProgressFill;
     private TextMeshProUGUI trainerLevelLabel;
     private TextMeshProUGUI trainerXpLabel;
-    private Image milestoneProgressFill;
-    private Image milestoneProgressBlend;
-    private RectTransform activitiesSection;
     private TextMeshProUGUI dailyResetLabel;
     private TextMeshProUGUI emptyActivitiesLabel;
     private string lastActivitySignature = string.Empty;
-    private readonly List<GameObject> activityCardObjects = new List<GameObject>();
-    private readonly List<MilestoneLevelView> milestoneLevelViews = new List<MilestoneLevelView>();
-    private readonly List<MilestoneRewardView> milestoneRewardViews = new List<MilestoneRewardView>();
     private ResponsiveFigmaFrameLayout frameLayout;
 
     protected override bool UseScreenContainer
@@ -141,31 +158,11 @@ public class ProfileScreenView : AppScreenViewBase
         rootBackground.preserveAspect = false;
         rootBackground.color = UiTheme.NavBackgroundCream;
 
-        overviewRect = UiFactory.CreateRect("Overview", exactFrame);
-        overviewRect.anchorMin = new Vector2(0f, 1f);
-        overviewRect.anchorMax = new Vector2(0f, 1f);
-        overviewRect.pivot = new Vector2(0f, 1f);
-        overviewRect.sizeDelta = new Vector2(379f, 786f);
-        overviewRect.anchoredPosition = new Vector2(7f, 0f);
+        BuildHeaderSection(exactFrame);
+        BuildTabBar(exactFrame);
+        BuildPanels(exactFrame);
 
-        Image overviewImage = overviewRect.gameObject.AddComponent<Image>();
-        overviewImage.sprite = UiTheme.ProfileOverviewSprite;
-        overviewImage.type = Image.Type.Simple;
-        overviewImage.preserveAspect = false;
-        overviewImage.color = UiTheme.NavBackgroundCream;
-
-        BuildLevelSection(overviewRect);
-        BuildActivitiesSection(overviewRect);
-        BuildStatisticsSection(overviewRect);
-
-        screenScrollRect = root.gameObject.AddComponent<ScrollRect>();
-        screenScrollRect.viewport = root;
-        screenScrollRect.content = exactFrame;
-        screenScrollRect.horizontal = false;
-        screenScrollRect.vertical = true;
-        screenScrollRect.movementType = ScrollRect.MovementType.Clamped;
-        screenScrollRect.scrollSensitivity = 22f;
-
+        ApplyTabSelection(selectedTab);
         RefreshRuntimeState();
     }
 
@@ -179,36 +176,38 @@ public class ProfileScreenView : AppScreenViewBase
             frameLayout = ResponsiveFigmaFrame.Apply(root, exactFrame, 887f);
         }
 
-        if (overviewRect != null)
-        {
-            overviewRect.sizeDelta = new Vector2(379f, frameLayout.LogicalHeight > 0f ? frameLayout.LogicalHeight : 887f);
-        }
-
-        if (screenScrollRect != null)
-        {
-            bool contentOverflows = frameLayout.LogicalHeight > frameLayout.VisibleLogicalHeight + 0.5f;
-            screenScrollRect.vertical = contentOverflows;
-            if (!contentOverflows)
-            {
-                screenScrollRect.verticalNormalizedPosition = 1f;
-            }
-        }
+        ApplyPanelLayout();
     }
 
-    private void BuildLevelSection(RectTransform overview)
+    private void BuildHeaderSection(RectTransform parent)
     {
-        RectTransform levelSection = CreateNode("Frame_Level", overview, 10f, 50f, 359f, 183f);
-        BuildCurrentLevel(levelSection);
-        BuildOfferwall(levelSection);
-    }
+        headerRoot = UiFactory.CreateRect("Header", parent);
+        headerRoot.anchorMin = new Vector2(0f, 1f);
+        headerRoot.anchorMax = new Vector2(0f, 1f);
+        headerRoot.pivot = new Vector2(0f, 1f);
+        headerRoot.sizeDelta = new Vector2(359f, 54f);
+        headerRoot.anchoredPosition = new Vector2(10f, -10f);
 
-    private void BuildCurrentLevel(RectTransform parent)
-    {
-        RectTransform section = CreateNode("Frame_CurrentLevel", parent, 0f, 0f, 359f, 75f);
-        CreateSectionHeader(section, "ProgressHeader", "\u201CTrainer name\u201D - Progress", 0f, 0f, 359f, 21f, 14);
-        progressHeaderLabel = section.Find("ProgressHeader/Label").GetComponent<TextMeshProUGUI>();
+        Image headerBackground = headerRoot.gameObject.AddComponent<Image>();
+        headerBackground.sprite = UiTheme.WhiteSprite;
+        headerBackground.type = Image.Type.Simple;
+        headerBackground.preserveAspect = false;
+        headerBackground.color = UiTheme.NavBackgroundCream;
 
-        RectTransform trainerFrame = CreateNode("Frame_TrainerLevel", section, 50f, 31f, 259f, 44f);
+        TextMeshProUGUI title = UiFactory.CreateLabel("Title", headerRoot, "Profile", 16, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        title.font = UiTheme.NavBoldFont;
+        title.rectTransform.anchorMin = new Vector2(0f, 1f);
+        title.rectTransform.anchorMax = new Vector2(1f, 1f);
+        title.rectTransform.pivot = new Vector2(0f, 1f);
+        title.rectTransform.sizeDelta = new Vector2(359f, 22f);
+        title.rectTransform.anchoredPosition = Vector2.zero;
+
+        RectTransform trainerFrame = UiFactory.CreateRect("TrainerFrame", headerRoot);
+        trainerFrame.anchorMin = new Vector2(0f, 1f);
+        trainerFrame.anchorMax = new Vector2(0f, 1f);
+        trainerFrame.pivot = new Vector2(0f, 1f);
+        trainerFrame.sizeDelta = new Vector2(259f, 24f);
+        trainerFrame.anchoredPosition = new Vector2(50f, -24f);
 
         Image emptyBar = UiFactory.CreateImage("BarEmpty", trainerFrame, UiTheme.ProgressPillSprite, Color.white);
         emptyBar.type = Image.Type.Sliced;
@@ -217,24 +216,16 @@ public class ProfileScreenView : AppScreenViewBase
         emptyBar.rectTransform.anchorMax = new Vector2(0f, 1f);
         emptyBar.rectTransform.pivot = new Vector2(0f, 1f);
         emptyBar.rectTransform.sizeDelta = new Vector2(249f, 11f);
-        emptyBar.rectTransform.anchoredPosition = new Vector2(10f, -10f);
-        Shadow emptyShadow = emptyBar.gameObject.AddComponent<Shadow>();
-        emptyShadow.effectColor = new Color(0f, 0f, 0f, 0.25f);
-        emptyShadow.effectDistance = new Vector2(0f, -2f);
-        emptyShadow.useGraphicAlpha = true;
+        emptyBar.rectTransform.anchoredPosition = new Vector2(10f, -5f);
 
-        trainerProgressFill = UiFactory.CreateImage(
-            "BarFill",
-            trainerFrame,
-            BuildGradientSprite("ProfileTrainerProgress", 176, 11, UiTheme.NavBrand, Color.white, false),
-            Color.white);
+        trainerProgressFill = UiFactory.CreateImage("BarFill", trainerFrame, BuildGradientSprite("ProfileTrainerProgress", 176, 11, UiTheme.NavBrand, Color.white, false), Color.white);
         trainerProgressFill.type = Image.Type.Sliced;
         trainerProgressFill.preserveAspect = false;
         trainerProgressFill.rectTransform.anchorMin = new Vector2(0f, 1f);
         trainerProgressFill.rectTransform.anchorMax = new Vector2(0f, 1f);
         trainerProgressFill.rectTransform.pivot = new Vector2(0f, 1f);
-        trainerProgressFill.rectTransform.sizeDelta = new Vector2(175.022f, 11f);
-        trainerProgressFill.rectTransform.anchoredPosition = new Vector2(10f, -10f);
+        trainerProgressFill.rectTransform.sizeDelta = new Vector2(175f, 11f);
+        trainerProgressFill.rectTransform.anchoredPosition = new Vector2(10f, -5f);
 
         Image star = UiFactory.CreateImage("Star", trainerFrame, sprites.GetResourceSprite("UI/Figma/HomeMain/trainer_star"), Color.white);
         star.type = Image.Type.Simple;
@@ -262,121 +253,175 @@ public class ProfileScreenView : AppScreenViewBase
         trainerXpLabel.rectTransform.anchoredPosition = new Vector2(47f, -26f);
     }
 
-    private void BuildOfferwall(RectTransform parent)
+    private void BuildTabBar(RectTransform parent)
     {
-        RectTransform frame = CreateNode("Frame_Offerwall", parent, 0f, 85f, 359f, 98f);
-        RectTransform viewport = UiFactory.CreateRect("Viewport", frame);
-        UiFactory.Stretch(viewport, 5f, 5f, 5f, 5f);
-        Image viewportImage = viewport.gameObject.AddComponent<Image>();
+        tabsRoot = UiFactory.CreateRect("ProfileTabs", parent);
+        tabsRoot.anchorMin = new Vector2(0f, 1f);
+        tabsRoot.anchorMax = new Vector2(0f, 1f);
+        tabsRoot.pivot = new Vector2(0f, 1f);
+        tabsRoot.sizeDelta = new Vector2(359f, 36f);
+        tabsRoot.anchoredPosition = new Vector2(10f, -80f);
+
+        AddTabButton(tabsRoot, ProfileTab.Progress, "Progress", 0f);
+        AddTabButton(tabsRoot, ProfileTab.Activities, "Activities", 123f);
+        AddTabButton(tabsRoot, ProfileTab.Statistics, "Statistics", 246f);
+    }
+
+    private void AddTabButton(RectTransform parent, ProfileTab tab, string labelText, float x)
+    {
+        RectTransform button = UiFactory.CreateRect(tab + "Tab", parent);
+        button.anchorMin = new Vector2(0f, 1f);
+        button.anchorMax = new Vector2(0f, 1f);
+        button.pivot = new Vector2(0f, 1f);
+        button.sizeDelta = new Vector2(110f, 30f);
+        button.anchoredPosition = new Vector2(x, 0f);
+
+        Image fill = UiFactory.CreateImage("Fill", button, UiTheme.RoundedFiveSprite, TabInactiveFill);
+        fill.type = Image.Type.Sliced;
+        fill.preserveAspect = false;
+        UiFactory.Stretch(fill.rectTransform, 0f, 0f, 0f, 0f);
+
+        Image border = UiFactory.CreateImage("Border", button, UiTheme.RoundedFiveOutlineSprite, TabInactiveBorder);
+        border.type = Image.Type.Sliced;
+        border.preserveAspect = false;
+        UiFactory.Stretch(border.rectTransform, 0f, 0f, 0f, 0f);
+
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", button, labelText, 13, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
+        label.font = UiTheme.NavBoldFont;
+        UiFactory.Stretch(label.rectTransform, 4f, 0f, 4f, 0f);
+
+        UiFactory.AddButton(button.gameObject, delegate
+        {
+            ApplyTabSelection(tab);
+        });
+
+        tabButtons.Add(new TabButtonView
+        {
+            Tab = tab,
+            Fill = fill,
+            Border = border,
+            Label = label
+        });
+    }
+
+    private void BuildPanels(RectTransform parent)
+    {
+        progressPanel = CreatePanel("ProgressPanel", parent);
+        BuildProgressPanel(progressPanel);
+        tabPanels[ProfileTab.Progress] = progressPanel.gameObject;
+
+        activitiesPanel = CreatePanel("ActivitiesPanel", parent);
+        BuildActivitiesSection(activitiesPanel);
+        tabPanels[ProfileTab.Activities] = activitiesPanel.gameObject;
+
+        statisticsPanel = CreatePanel("StatisticsPanel", parent);
+        BuildStatisticsSection(statisticsPanel);
+        tabPanels[ProfileTab.Statistics] = statisticsPanel.gameObject;
+    }
+
+    private RectTransform CreatePanel(string name, RectTransform parent)
+    {
+        RectTransform panel = UiFactory.CreateRect(name, parent);
+        panel.anchorMin = new Vector2(0f, 1f);
+        panel.anchorMax = new Vector2(0f, 1f);
+        panel.pivot = new Vector2(0f, 1f);
+        panel.sizeDelta = new Vector2(359f, 700f);
+        panel.anchoredPosition = new Vector2(10f, -118f);
+
+        Image background = panel.gameObject.AddComponent<Image>();
+        background.sprite = UiTheme.WhiteSprite;
+        background.type = Image.Type.Simple;
+        background.preserveAspect = false;
+        background.color = UiTheme.NavBackgroundCream;
+
+        return panel;
+    }
+
+    private void BuildProgressPanel(RectTransform parent)
+    {
+        progressScrollRect = parent.gameObject.AddComponent<ScrollRect>();
+        progressViewport = UiFactory.CreateRect("Viewport", parent);
+        UiFactory.Stretch(progressViewport, 0f, 0f, 0f, 0f);
+        Image viewportImage = progressViewport.gameObject.AddComponent<Image>();
         viewportImage.color = new Color(1f, 1f, 1f, 0.002f);
         viewportImage.raycastTarget = true;
-        viewport.gameObject.AddComponent<RectMask2D>();
+        progressViewport.gameObject.AddComponent<RectMask2D>();
 
-        RectTransform content = UiFactory.CreateRect("Group_Milestones", viewport);
-        content.anchorMin = new Vector2(0f, 1f);
-        content.anchorMax = new Vector2(0f, 1f);
-        content.pivot = new Vector2(0f, 1f);
-        content.sizeDelta = new Vector2(1542f, 88f);
-        content.anchoredPosition = Vector2.zero;
+        progressScrollContent = UiFactory.CreateRect("Content", progressViewport);
+        progressScrollContent.anchorMin = new Vector2(0f, 1f);
+        progressScrollContent.anchorMax = new Vector2(0f, 1f);
+        progressScrollContent.pivot = new Vector2(0f, 1f);
+        progressScrollContent.sizeDelta = new Vector2(359f, 960f);
+        progressScrollContent.anchoredPosition = Vector2.zero;
 
-        ScrollRect scroll = frame.gameObject.AddComponent<ScrollRect>();
-        scroll.viewport = viewport;
-        scroll.content = content;
-        scroll.horizontal = true;
-        scroll.vertical = false;
-        scroll.movementType = ScrollRect.MovementType.Clamped;
-        scroll.inertia = true;
-        scroll.scrollSensitivity = 20f;
-        Canvas.ForceUpdateCanvases();
-        scroll.horizontalNormalizedPosition = 0f;
+        progressScrollRect.viewport = progressViewport;
+        progressScrollRect.content = progressScrollContent;
+        progressScrollRect.horizontal = false;
+        progressScrollRect.vertical = true;
+        progressScrollRect.movementType = ScrollRect.MovementType.Clamped;
+        progressScrollRect.scrollSensitivity = 22f;
 
-        BuildOfferwallTicks(content);
-        BuildOfferwallProgress(content);
-        BuildOfferwallLevels(content);
-        BuildOfferwallRewards(content);
+        RectTransform levelHeader = CreateNode("Frame_CurrentLevel", progressScrollContent, 0f, 0f, 359f, 75f);
+        CreateSectionHeader(levelHeader, "ProgressHeader", "\u201CTrainer name\u201D - Progress", 0f, 0f, 359f, 21f, 14);
+        progressHeaderLabel = levelHeader.Find("ProgressHeader/Label").GetComponent<TextMeshProUGUI>();
+
+        RectTransform trainerFrame = CreateNode("Frame_TrainerLevel", levelHeader, 50f, 31f, 259f, 44f);
+        Image emptyBar = UiFactory.CreateImage("BarEmpty", trainerFrame, UiTheme.ProgressPillSprite, Color.white);
+        emptyBar.type = Image.Type.Sliced;
+        emptyBar.preserveAspect = false;
+        emptyBar.rectTransform.anchorMin = new Vector2(0f, 1f);
+        emptyBar.rectTransform.anchorMax = new Vector2(0f, 1f);
+        emptyBar.rectTransform.pivot = new Vector2(0f, 1f);
+        emptyBar.rectTransform.sizeDelta = new Vector2(249f, 11f);
+        emptyBar.rectTransform.anchoredPosition = new Vector2(10f, -10f);
+
+        trainerProgressFill = UiFactory.CreateImage("BarFill", trainerFrame, BuildGradientSprite("ProfileTrainerProgressFill", 176, 11, UiTheme.NavBrand, Color.white, false), Color.white);
+        trainerProgressFill.type = Image.Type.Sliced;
+        trainerProgressFill.preserveAspect = false;
+        trainerProgressFill.rectTransform.anchorMin = new Vector2(0f, 1f);
+        trainerProgressFill.rectTransform.anchorMax = new Vector2(0f, 1f);
+        trainerProgressFill.rectTransform.pivot = new Vector2(0f, 1f);
+        trainerProgressFill.rectTransform.sizeDelta = new Vector2(175f, 11f);
+        trainerProgressFill.rectTransform.anchoredPosition = new Vector2(10f, -10f);
+
+        Image star = UiFactory.CreateImage("Star", trainerFrame, sprites.GetResourceSprite("UI/Figma/HomeMain/trainer_star"), Color.white);
+        star.type = Image.Type.Simple;
+        star.preserveAspect = true;
+        star.rectTransform.anchorMin = new Vector2(0f, 1f);
+        star.rectTransform.anchorMax = new Vector2(0f, 1f);
+        star.rectTransform.pivot = new Vector2(0f, 1f);
+        star.rectTransform.sizeDelta = new Vector2(31f, 29f);
+        star.rectTransform.anchoredPosition = Vector2.zero;
+
+        trainerLevelLabel = UiFactory.CreateLabel("LevelLabel", trainerFrame, "5", 13, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+        trainerLevelLabel.font = UiTheme.NavBoldFont;
+        trainerLevelLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        trainerLevelLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
+        trainerLevelLabel.rectTransform.pivot = new Vector2(0f, 1f);
+        trainerLevelLabel.rectTransform.sizeDelta = new Vector2(11.03f, 22.848f);
+        trainerLevelLabel.rectTransform.anchoredPosition = new Vector2(10f, -3f);
+
+        trainerXpLabel = UiFactory.CreateLabel("XpLabel", trainerFrame, "700 / 1000 XP", 13, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Center);
+        trainerXpLabel.font = UiTheme.NavBoldFont;
+        trainerXpLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        trainerXpLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
+        trainerXpLabel.rectTransform.pivot = new Vector2(0f, 1f);
+        trainerXpLabel.rectTransform.sizeDelta = new Vector2(171f, 18f);
+        trainerXpLabel.rectTransform.anchoredPosition = new Vector2(47f, -26f);
+
+        progressRowsRoot = UiFactory.CreateRect("ProgressRows", progressScrollContent);
+        progressRowsRoot.anchorMin = new Vector2(0f, 1f);
+        progressRowsRoot.anchorMax = new Vector2(0f, 1f);
+        progressRowsRoot.pivot = new Vector2(0f, 1f);
+        progressRowsRoot.sizeDelta = new Vector2(359f, 860f);
+        progressRowsRoot.anchoredPosition = new Vector2(0f, -86f);
+
+        BuildProgressRows(progressRowsRoot);
     }
 
-    private void BuildOfferwallTicks(RectTransform parent)
+    private void BuildProgressRows(RectTransform parent)
     {
-        for (int i = 0; i < 25; i++)
-        {
-            CreateRectFill(parent, "BottomTick" + i, ComingSoonGrey, 46f + (62f * i), 61f, 1f, 13f);
-        }
-
-        CreateRectFill(parent, "TopTick0", ComingSoonGrey, 77f, 30f, 1f, 10f);
-        for (int i = 1; i < 24; i++)
-        {
-            CreateRectFill(parent, "TopTick" + i, ComingSoonGrey, 77f + (62f * i), 27f, 1f, 13f);
-        }
-    }
-
-    private void BuildOfferwallProgress(RectTransform parent)
-    {
-        CreateRoundedBar(parent, "ProgressBase", UiTheme.NavShadow, 166f, 52f, 1366f, 3f);
-        milestoneProgressFill = UiFactory.CreateImage("ProgressFill", parent, UiTheme.ProgressPillSprite, UiTheme.NavBrand);
-        milestoneProgressFill.type = Image.Type.Sliced;
-        milestoneProgressFill.preserveAspect = false;
-        milestoneProgressFill.rectTransform.anchorMin = new Vector2(0f, 1f);
-        milestoneProgressFill.rectTransform.anchorMax = new Vector2(0f, 1f);
-        milestoneProgressFill.rectTransform.pivot = new Vector2(0f, 1f);
-        milestoneProgressFill.rectTransform.sizeDelta = new Vector2(0f, 3f);
-        milestoneProgressFill.rectTransform.anchoredPosition = new Vector2(136f, -52f);
-
-        milestoneProgressBlend = UiFactory.CreateImage(
-            "ProgressBlend",
-            parent,
-            BuildOfferwallBlendSprite("ProfileOfferwallBlend", 24, 3),
-            Color.white);
-        milestoneProgressBlend.type = Image.Type.Simple;
-        milestoneProgressBlend.preserveAspect = false;
-        milestoneProgressBlend.rectTransform.anchorMin = new Vector2(0f, 1f);
-        milestoneProgressBlend.rectTransform.anchorMax = new Vector2(0f, 1f);
-        milestoneProgressBlend.rectTransform.pivot = new Vector2(0f, 1f);
-        milestoneProgressBlend.rectTransform.sizeDelta = new Vector2(24f, 3f);
-        milestoneProgressBlend.rectTransform.anchoredPosition = new Vector2(136f, -52f);
-    }
-
-    private void BuildOfferwallLevels(RectTransform parent)
-    {
-        milestoneLevelViews.Clear();
-        for (int level = 1; level <= 50; level++)
-        {
-            float x = 5f + (31f * (level - 1));
-            BuildOfferwallLevelNode(parent, x, 40f, level);
-        }
-    }
-
-    private void BuildOfferwallLevelNode(RectTransform parent, float x, float y, int level)
-    {
-        Image circle = UiFactory.CreateImage("Level_" + level, parent, UiTheme.CircleSprite, UiTheme.NavShadow);
-        circle.type = Image.Type.Simple;
-        circle.preserveAspect = false;
-        circle.rectTransform.anchorMin = new Vector2(0f, 1f);
-        circle.rectTransform.anchorMax = new Vector2(0f, 1f);
-        circle.rectTransform.pivot = new Vector2(0f, 1f);
-        circle.rectTransform.sizeDelta = new Vector2(21f, 21f);
-        circle.rectTransform.anchoredPosition = new Vector2(x, -y);
-
-        Image outline = UiFactory.CreateImage("Outline", circle.rectTransform, UiTheme.CircleOutlineSprite, SupportCream);
-        outline.type = Image.Type.Simple;
-        outline.preserveAspect = false;
-        UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
-
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", circle.rectTransform, level.ToString(), 13, Color.black, FontStyles.Normal, TextAlignmentOptions.Center);
-        label.font = UiTheme.NavBoldFont;
-        UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
-
-        MilestoneLevelView view = new MilestoneLevelView();
-        view.Level = level;
-        view.Circle = circle;
-        view.Outline = outline;
-        view.Label = label;
-        milestoneLevelViews.Add(view);
-    }
-
-    private void BuildOfferwallRewards(RectTransform parent)
-    {
-        milestoneRewardViews.Clear();
+        progressRowViews.Clear();
         PawPalGameRuntime runtime = PawPalGameRuntime.Instance;
         IReadOnlyList<TrainerMilestoneDefinition> milestones = runtime != null ? runtime.GetTrainerMilestones() : null;
         if (milestones == null)
@@ -384,325 +429,100 @@ public class ProfileScreenView : AppScreenViewBase
             return;
         }
 
+        float y = 0f;
         for (int i = 0; i < milestones.Count; i++)
         {
             TrainerMilestoneDefinition milestone = milestones[i];
-            if (milestone == null || milestone.Level <= 1 || milestone.Level > 50)
+            if (milestone == null || milestone.Level <= 1)
             {
                 continue;
             }
 
-            if (TrainerProgressionDatabase.ShouldUseIconMarker(milestone))
-            {
-                BuildOfferwallRewardIcon(parent, milestone);
-            }
-            else if (milestone.RewardKind == TrainerMilestoneRewardKind.CurrencyPremium)
-            {
-                BuildBluePawReward(parent, milestone);
-            }
-            else
-            {
-                BuildMilestonePill(parent, milestone);
-            }
+            progressRowViews.Add(BuildProgressRow(parent, milestone, y));
+            y += 102f;
         }
+
+        parent.sizeDelta = new Vector2(parent.sizeDelta.x, Mathf.Max(420f, y));
     }
 
-    private void BuildOfferwallRewardIcon(RectTransform parent, TrainerMilestoneDefinition milestone)
+    private ProgressRowView BuildProgressRow(RectTransform parent, TrainerMilestoneDefinition milestone, float y)
     {
-        string iconName = TrainerProgressionDatabase.GetMilestoneIconName(milestone);
-        bool topLane = UsesTopRewardLane(milestone.Level);
-        float x = GetMilestoneMarkerX(milestone.Level) + 8f;
-        float y = topLane ? 5f : 68f;
-        Vector2 iconLayout = GetMilestoneIconLayout(iconName);
+        RectTransform row = CreateNode("Row_" + milestone.Level, parent, 0f, y, 359f, 96f);
 
-        Image bubble = UiFactory.CreateImage("Reward_" + milestone.Level, parent, UiTheme.CircleSprite, UiTheme.White);
-        bubble.type = Image.Type.Simple;
-        bubble.preserveAspect = false;
-        bubble.rectTransform.anchorMin = new Vector2(0f, 1f);
-        bubble.rectTransform.anchorMax = new Vector2(0f, 1f);
-        bubble.rectTransform.pivot = new Vector2(0f, 1f);
-        bubble.rectTransform.sizeDelta = new Vector2(25f, 25f);
-        bubble.rectTransform.anchoredPosition = new Vector2(x, -y);
+        RectTransform timeline = CreateNode("Timeline", row, 18f, 0f, 44f, 96f);
+        Image line = UiFactory.CreateImage("Line", timeline, UiTheme.WhiteSprite, ProgressTrack);
+        line.type = Image.Type.Simple;
+        line.preserveAspect = false;
+        line.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+        line.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        line.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        line.rectTransform.sizeDelta = new Vector2(4f, 96f);
+        line.rectTransform.anchoredPosition = Vector2.zero;
 
-        Image outline = UiFactory.CreateImage("Outline", bubble.rectTransform, UiTheme.CircleOutlineSprite, UiTheme.NavBrand);
-        outline.type = Image.Type.Simple;
-        outline.preserveAspect = false;
-        UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
+        Image dot = UiFactory.CreateImage("Dot", timeline, UiTheme.CircleSprite, UiTheme.NavBrand);
+        dot.type = Image.Type.Simple;
+        dot.preserveAspect = false;
+        dot.rectTransform.anchorMin = new Vector2(0.5f, 1f);
+        dot.rectTransform.anchorMax = new Vector2(0.5f, 1f);
+        dot.rectTransform.pivot = new Vector2(0.5f, 1f);
+        dot.rectTransform.sizeDelta = new Vector2(18f, 18f);
+        dot.rectTransform.anchoredPosition = new Vector2(0f, -8f);
 
-        Image icon = UiFactory.CreateImage("Icon", bubble.rectTransform, sprites.GetIcon(iconName), Color.white);
-        icon.type = Image.Type.Simple;
-        icon.preserveAspect = true;
-        icon.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        icon.rectTransform.sizeDelta = iconLayout;
-        icon.rectTransform.anchoredPosition = Vector2.zero;
+        TextMeshProUGUI levelLabel = UiFactory.CreateLabel("Level", dot.rectTransform, milestone.Level.ToString(), 12, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
+        levelLabel.font = UiTheme.NavBoldFont;
+        UiFactory.Stretch(levelLabel.rectTransform, 0f, 0f, 0f, 0f);
 
-        MilestoneRewardView view = new MilestoneRewardView();
-        view.Level = milestone.Level;
-        view.Milestone = milestone;
-        view.UsesIcon = true;
-        view.Background = bubble;
-        view.Outline = outline;
-        view.Icon = icon;
-        milestoneRewardViews.Add(view);
+        RectTransform textRoot = CreateNode("TextRoot", row, 64f, 2f, 277f, 42f);
+        TextMeshProUGUI header = UiFactory.CreateLabel("Header", textRoot, BuildMilestoneHeader(milestone), 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        header.font = UiTheme.NavBoldFont;
+        header.rectTransform.anchorMin = new Vector2(0f, 1f);
+        header.rectTransform.anchorMax = new Vector2(1f, 1f);
+        header.rectTransform.pivot = new Vector2(0f, 1f);
+        header.rectTransform.sizeDelta = new Vector2(277f, 18f);
+        header.rectTransform.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI description = UiFactory.CreateLabel("Description", textRoot, BuildMilestoneDescription(milestone), 12, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        description.font = UiTheme.NavRegularFont;
+        description.textWrappingMode = TextWrappingModes.Normal;
+        description.rectTransform.anchorMin = new Vector2(0f, 1f);
+        description.rectTransform.anchorMax = new Vector2(1f, 1f);
+        description.rectTransform.pivot = new Vector2(0f, 1f);
+        description.rectTransform.sizeDelta = new Vector2(277f, 20f);
+        description.rectTransform.anchoredPosition = new Vector2(0f, -18f);
+
+        RectTransform unlockRoot = CreateNode("UnlockRoot", row, 64f, 48f, 277f, 34f);
+        TextMeshProUGUI unlockLabel = UiFactory.CreateLabel("UnlockLabel", unlockRoot, "Unlocks", 12, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        unlockLabel.font = UiTheme.NavBoldFont;
+        unlockLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        unlockLabel.rectTransform.anchorMax = new Vector2(1f, 1f);
+        unlockLabel.rectTransform.pivot = new Vector2(0f, 1f);
+        unlockLabel.rectTransform.sizeDelta = new Vector2(277f, 14f);
+        unlockLabel.rectTransform.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI reward = UiFactory.CreateLabel("Reward", unlockRoot, BuildMilestoneRewardText(milestone), 12, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        reward.font = UiTheme.NavRegularFont;
+        reward.textWrappingMode = TextWrappingModes.Normal;
+        reward.rectTransform.anchorMin = new Vector2(0f, 1f);
+        reward.rectTransform.anchorMax = new Vector2(1f, 1f);
+        reward.rectTransform.pivot = new Vector2(0f, 1f);
+        reward.rectTransform.sizeDelta = new Vector2(277f, 18f);
+        reward.rectTransform.anchoredPosition = new Vector2(0f, -14f);
+
+        return new ProgressRowView
+        {
+            Level = milestone.Level,
+            Dot = dot,
+            LevelLabel = levelLabel,
+            HeaderLabel = header,
+            DescriptionLabel = description,
+            UnlockLabel = unlockLabel,
+            RewardLabel = reward
+        };
     }
 
-    private void BuildBluePawReward(RectTransform parent, TrainerMilestoneDefinition milestone)
+    private void BuildActivitiesSection(RectTransform parent)
     {
-        bool topLane = UsesTopRewardLane(milestone.Level);
-        RectTransform group = CreateNode("BluePawReward_" + milestone.Level, parent, GetMilestoneMarkerX(milestone.Level), topLane ? 7f : 70f, 45f, 22f);
-
-        Image bubble = UiFactory.CreateImage("Bubble", group, UiTheme.CircleSprite, CtaBlue);
-        bubble.type = Image.Type.Simple;
-        bubble.preserveAspect = false;
-        bubble.rectTransform.anchorMin = new Vector2(0f, 1f);
-        bubble.rectTransform.anchorMax = new Vector2(0f, 1f);
-        bubble.rectTransform.pivot = new Vector2(0f, 1f);
-        bubble.rectTransform.sizeDelta = new Vector2(22f, 22f);
-        bubble.rectTransform.anchoredPosition = Vector2.zero;
-
-        Image paw = UiFactory.CreateImage("Paw", bubble.rectTransform, sprites.GetIcon("icon_paw_white"), Color.white);
-        paw.type = Image.Type.Simple;
-        paw.preserveAspect = true;
-        paw.rectTransform.anchorMin = new Vector2(0f, 1f);
-        paw.rectTransform.anchorMax = new Vector2(0f, 1f);
-        paw.rectTransform.pivot = new Vector2(0f, 1f);
-        paw.rectTransform.sizeDelta = new Vector2(19f, 19f);
-        paw.rectTransform.anchoredPosition = new Vector2(1.5f, -1.5f);
-
-        TextMeshProUGUI value = UiFactory.CreateLabel("Value", group, TrainerProgressionDatabase.GetMilestoneShortLabel(milestone), 13, CtaBlue, FontStyles.Normal, TextAlignmentOptions.Left);
-        ConfigureCompactLabel(value, UiTheme.DefaultFont, 13);
-        value.rectTransform.anchorMin = new Vector2(0f, 1f);
-        value.rectTransform.anchorMax = new Vector2(0f, 1f);
-        value.rectTransform.pivot = new Vector2(0f, 1f);
-        value.rectTransform.sizeDelta = new Vector2(23f, 21f);
-        value.rectTransform.anchoredPosition = new Vector2(24.5f, -0.5f);
-
-        MilestoneRewardView view = new MilestoneRewardView();
-        view.Level = milestone.Level;
-        view.Milestone = milestone;
-        view.UsesPremiumCurrencyBubble = true;
-        view.Background = bubble;
-        view.Icon = paw;
-        view.Label = value;
-        milestoneRewardViews.Add(view);
-    }
-
-    private void BuildMilestonePill(RectTransform parent, TrainerMilestoneDefinition milestone)
-    {
-        bool topLane = UsesTopRewardLane(milestone.Level);
-        string labelText = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
-        float width = GetMilestonePillWidth(labelText);
-        Image background = UiFactory.CreateImage("Pill_" + milestone.Level, parent, UiTheme.RoundedTenSprite, UiTheme.White);
-        background.type = Image.Type.Sliced;
-        background.preserveAspect = false;
-        background.rectTransform.anchorMin = new Vector2(0f, 1f);
-        background.rectTransform.anchorMax = new Vector2(0f, 1f);
-        background.rectTransform.pivot = new Vector2(0f, 1f);
-        background.rectTransform.sizeDelta = new Vector2(width, 21f);
-        background.rectTransform.anchoredPosition = new Vector2(GetMilestoneMarkerX(milestone.Level), -(topLane ? 7f : 70f));
-
-        Image outline = UiFactory.CreateImage("Outline", background.rectTransform, UiTheme.RoundedTenOutlineSprite, GetMilestoneAccentColor(milestone));
-        outline.type = Image.Type.Sliced;
-        outline.preserveAspect = false;
-        UiFactory.Stretch(outline.rectTransform, 0f, 0f, 0f, 0f);
-
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", background.rectTransform, labelText, 13, GetMilestoneAccentColor(milestone), FontStyles.Normal, TextAlignmentOptions.Center);
-        ConfigureCompactLabel(label, UiTheme.DefaultFont, 13);
-        UiFactory.Stretch(label.rectTransform, 0f, 0f, 0f, 0f);
-
-        MilestoneRewardView view = new MilestoneRewardView();
-        view.Level = milestone.Level;
-        view.Milestone = milestone;
-        view.Background = background;
-        view.Outline = outline;
-        view.Label = label;
-        milestoneRewardViews.Add(view);
-    }
-
-    private void RefreshMilestoneRail(PawPalGameRuntime runtime, TrainerProgressionSnapshot snapshot)
-    {
-        if (milestoneProgressFill != null)
-        {
-            float fillWidth = 1366f * snapshot.AbsoluteProgress01;
-            milestoneProgressFill.rectTransform.sizeDelta = new Vector2(fillWidth, 3f);
-
-            if (milestoneProgressBlend != null)
-            {
-                float blendX = 136f + Mathf.Clamp(fillWidth - 24f, 0f, 1366f - 24f);
-                milestoneProgressBlend.rectTransform.anchoredPosition = new Vector2(blendX, -52f);
-                milestoneProgressBlend.gameObject.SetActive(fillWidth > 0.01f);
-            }
-        }
-
-        for (int i = 0; i < milestoneLevelViews.Count; i++)
-        {
-            MilestoneLevelView levelView = milestoneLevelViews[i];
-            bool unlocked = levelView != null && levelView.Level <= snapshot.Level;
-            if (levelView == null)
-            {
-                continue;
-            }
-
-            if (levelView.Circle != null)
-            {
-                levelView.Circle.color = unlocked ? UiTheme.NavBrand : UiTheme.NavShadow;
-            }
-
-            if (levelView.Outline != null)
-            {
-                levelView.Outline.color = SupportCream;
-            }
-
-            if (levelView.Label != null)
-            {
-                levelView.Label.text = levelView.Level.ToString();
-                levelView.Label.color = unlocked ? UiTheme.White : Color.black;
-            }
-        }
-
-        IReadOnlyList<TrainerMilestoneDefinition> milestones = runtime.GetTrainerMilestones();
-        for (int i = 0; i < milestoneRewardViews.Count; i++)
-        {
-            MilestoneRewardView rewardView = milestoneRewardViews[i];
-            if (rewardView == null || rewardView.Level <= 0 || rewardView.Level > milestones.Count)
-            {
-                continue;
-            }
-
-            rewardView.Milestone = milestones[rewardView.Level - 1];
-            bool reached = rewardView.Level <= snapshot.Level;
-            ApplyMilestoneRewardStyle(rewardView, reached);
-        }
-    }
-
-    private void ApplyMilestoneRewardStyle(MilestoneRewardView rewardView, bool reached)
-    {
-        TrainerMilestoneDefinition milestone = rewardView.Milestone;
-        Color accent = GetMilestoneAccentColor(milestone);
-        Color mutedText = MutedTextGrey;
-        Color mutedOutline = ComingSoonGrey;
-        Color mutedFill = new Color32(244, 242, 238, 255);
-
-        if (rewardView.UsesPremiumCurrencyBubble)
-        {
-            if (rewardView.Background != null)
-            {
-                rewardView.Background.color = reached ? CtaBlue : ComingSoonGrey;
-            }
-
-            if (rewardView.Icon != null)
-            {
-                rewardView.Icon.color = reached ? Color.white : mutedFill;
-            }
-
-            if (rewardView.Label != null)
-            {
-                rewardView.Label.text = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
-                rewardView.Label.color = reached ? CtaBlue : mutedText;
-            }
-
-            return;
-        }
-
-        if (rewardView.UsesIcon)
-        {
-            if (rewardView.Background != null)
-            {
-                rewardView.Background.color = reached ? UiTheme.White : mutedFill;
-            }
-
-            if (rewardView.Outline != null)
-            {
-                rewardView.Outline.color = reached ? UiTheme.NavBrand : mutedOutline;
-            }
-
-            if (rewardView.Icon != null)
-            {
-                rewardView.Icon.color = reached ? Color.white : mutedText;
-            }
-
-            return;
-        }
-
-        if (rewardView.Background != null)
-        {
-            rewardView.Background.color = UiTheme.White;
-        }
-
-        if (rewardView.Outline != null)
-        {
-            rewardView.Outline.color = reached ? accent : mutedOutline;
-        }
-
-        if (rewardView.Label != null)
-        {
-            rewardView.Label.text = TrainerProgressionDatabase.GetMilestoneShortLabel(milestone);
-            rewardView.Label.color = reached ? accent : mutedText;
-        }
-    }
-
-    private static bool UsesTopRewardLane(int level)
-    {
-        return ((level - 2) & 1) == 1;
-    }
-
-    private static float GetMilestoneMarkerX(int level)
-    {
-        return (5f + (31f * (level - 1))) - 10f;
-    }
-
-    private static float GetMilestonePillWidth(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return 40f;
-        }
-
-        return Mathf.Clamp(14f + (text.Length * 6f), 40f, 62f);
-    }
-
-    private static Color GetMilestoneAccentColor(TrainerMilestoneDefinition milestone)
-    {
-        if (milestone == null)
-        {
-            return UiTheme.NavBrandDark;
-        }
-
-        switch (milestone.RewardKind)
-        {
-            case TrainerMilestoneRewardKind.Feature:
-            case TrainerMilestoneRewardKind.DogUnlock:
-                return AgilityGold;
-            default:
-                return UiTheme.NavBrandDark;
-        }
-    }
-
-    private static Vector2 GetMilestoneIconLayout(string iconName)
-    {
-        if (string.Equals(iconName, "icon_collar_brand", System.StringComparison.Ordinal))
-        {
-            return new Vector2(23f, 23f);
-        }
-
-        if (string.Equals(iconName, "icon_toys_brand", System.StringComparison.Ordinal))
-        {
-            return new Vector2(21f, 21f);
-        }
-
-        if (string.Equals(iconName, "icon_dog_brand", System.StringComparison.Ordinal))
-        {
-            return new Vector2(17f, 17f);
-        }
-
-        return new Vector2(17f, 17f);
-    }
-
-    private void BuildActivitiesSection(RectTransform overview)
-    {
-        activitiesSection = CreateNode("Frame_Activities", overview, 10f, 273f, 359f, 238f);
+        activitiesSection = CreateNode("Frame_Activities", parent, 0f, 0f, 359f, 238f);
         CreateSectionHeader(activitiesSection, "ActivitiesHeader", "Daily activities", 0f, 0f, 359f, 21f, 14);
 
         Image timePill = UiFactory.CreateImage("TimePill", activitiesSection, UiTheme.RoundedFiveSprite, UiTheme.NavBrand);
@@ -787,16 +607,8 @@ public class ProfileScreenView : AppScreenViewBase
         barEmpty.rectTransform.pivot = new Vector2(0f, 1f);
         barEmpty.rectTransform.sizeDelta = new Vector2(196f, 14f);
         barEmpty.rectTransform.anchoredPosition = new Vector2(0f, -20f);
-        Shadow emptyShadow = barEmpty.gameObject.AddComponent<Shadow>();
-        emptyShadow.effectColor = new Color(0f, 0f, 0f, 0.25f);
-        emptyShadow.effectDistance = new Vector2(0f, -1f);
-        emptyShadow.useGraphicAlpha = true;
 
-        Image barFill = UiFactory.CreateImage(
-            "BarFill",
-            row,
-            BuildGradientSprite("Activity_" + data.Goal.Replace(" ", string.Empty), 196, 14, data.ProgressLeft, data.ProgressRight, true),
-            Color.white);
+        Image barFill = UiFactory.CreateImage("BarFill", row, BuildGradientSprite("Activity_" + data.Goal.Replace(" ", string.Empty), 196, 14, data.ProgressLeft, data.ProgressRight, true), Color.white);
         barFill.type = Image.Type.Sliced;
         barFill.preserveAspect = false;
         barFill.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -817,6 +629,45 @@ public class ProfileScreenView : AppScreenViewBase
         CreateRewardBadge(row, "CurrencyBadge", data.CurrencyText, 298f, 3f, 41f, 28f, data.CurrencyFill, data.CurrencyTextColor, ColorsEqual(data.CurrencyFill, UiTheme.NavBrand) ? UiTheme.NavBrandDark : data.CurrencyFill);
     }
 
+    private void BuildStatisticsSection(RectTransform parent)
+    {
+        statisticsSection = CreateNode("Frame_Statistics", parent, 0f, 0f, 359f, 326f);
+        CreateSectionHeader(statisticsSection, "StatisticsHeader", "Statistics", 0f, 0f, 359f, 21f, 14);
+
+        float y = 26f;
+        for (int i = 0; i < Statistics.Length; i++)
+        {
+            BuildStatisticRow(statisticsSection, Statistics[i], y);
+            y += 26f;
+            if (i < Statistics.Length - 1)
+            {
+                CreateRectFill(statisticsSection, "Divider" + i, SupportCream, 0f, y + 0.0175f, 359f, 1f);
+                y += 5f;
+            }
+        }
+    }
+
+    private void BuildStatisticRow(RectTransform parent, StatisticRowData row, float y)
+    {
+        RectTransform item = CreateNode("Row_" + row.Label.Replace(" ", string.Empty), parent, 0f, y, 359f, 21f);
+
+        TextMeshProUGUI label = UiFactory.CreateLabel("Label", item, row.Label, 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
+        ConfigureCompactLabel(label, UiTheme.DefaultFont, 14);
+        label.rectTransform.anchorMin = new Vector2(0f, 1f);
+        label.rectTransform.anchorMax = new Vector2(0f, 1f);
+        label.rectTransform.pivot = new Vector2(0f, 1f);
+        label.rectTransform.sizeDelta = new Vector2(260f, 21f);
+        label.rectTransform.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI value = UiFactory.CreateLabel("Value", item, row.Value, 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Right);
+        ConfigureCompactLabel(value, UiTheme.DefaultFont, 14);
+        value.rectTransform.anchorMin = new Vector2(1f, 1f);
+        value.rectTransform.anchorMax = new Vector2(1f, 1f);
+        value.rectTransform.pivot = new Vector2(1f, 1f);
+        value.rectTransform.sizeDelta = new Vector2(90f, 21f);
+        value.rectTransform.anchoredPosition = Vector2.zero;
+    }
+
     private void HandleRuntimeStateChanged()
     {
         RefreshRuntimeState();
@@ -831,7 +682,6 @@ public class ProfileScreenView : AppScreenViewBase
         }
 
         TrainerProgressionSnapshot snapshot = runtime.GetTrainerProgressionSnapshot();
-
         if (progressHeaderLabel != null)
         {
             progressHeaderLabel.text = "\u201C" + runtime.TrainerState.TrainerName + "\u201D - Progress";
@@ -857,8 +707,61 @@ public class ProfileScreenView : AppScreenViewBase
             dailyResetLabel.text = runtime.GetDailyResetCountdownText();
         }
 
-        RefreshMilestoneRail(runtime, snapshot);
+        RefreshProgressRows(runtime, snapshot);
         RebuildActivityCards(runtime);
+        ApplyTabSelection(selectedTab);
+    }
+
+    private void RefreshProgressRows(PawPalGameRuntime runtime, TrainerProgressionSnapshot snapshot)
+    {
+        if (runtime == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<TrainerMilestoneDefinition> milestones = runtime.GetTrainerMilestones();
+        for (int i = 0; i < progressRowViews.Count; i++)
+        {
+            ProgressRowView row = progressRowViews[i];
+            if (row == null || row.Level <= 0 || row.Level > milestones.Count)
+            {
+                continue;
+            }
+
+            TrainerMilestoneDefinition milestone = milestones[row.Level - 1];
+            bool reached = row.Level <= snapshot.Level;
+
+            if (row.Dot != null)
+            {
+                row.Dot.color = reached ? UiTheme.NavBrand : ProgressTrack;
+            }
+
+            if (row.LevelLabel != null)
+            {
+                row.LevelLabel.color = reached ? Color.white : UiTheme.NavBrandDark;
+            }
+
+            if (row.HeaderLabel != null)
+            {
+                row.HeaderLabel.text = BuildMilestoneHeader(milestone);
+            }
+
+            if (row.DescriptionLabel != null)
+            {
+                row.DescriptionLabel.text = BuildMilestoneDescription(milestone);
+            }
+
+            if (row.UnlockLabel != null)
+            {
+                row.UnlockLabel.text = reached ? "Unlocked" : "Unlocks";
+            }
+
+            if (row.RewardLabel != null)
+            {
+                row.RewardLabel.text = BuildMilestoneRewardText(milestone);
+                row.RewardLabel.color = reached ? UiTheme.NavBrandDark : MutedTextGrey;
+            }
+        }
     }
 
     private void RebuildActivityCards(PawPalGameRuntime runtime)
@@ -911,7 +814,7 @@ public class ProfileScreenView : AppScreenViewBase
     private static string BuildActivitySignature(PawPalGameRuntime runtime)
     {
         StringBuilder builder = new StringBuilder();
-            IList<PawPalDailyTaskState> tasks = runtime.DailyTasks;
+        IList<PawPalDailyTaskState> tasks = runtime.DailyTasks;
         builder.Append(tasks.Count);
         for (int i = 0; i < tasks.Count; i++)
         {
@@ -975,43 +878,78 @@ public class ProfileScreenView : AppScreenViewBase
         UiFactory.Stretch(label.rectTransform, 4f, 5f, 4f, 5f);
     }
 
-    private void BuildStatisticsSection(RectTransform overview)
+    private void ApplyTabSelection(ProfileTab tab)
     {
-        RectTransform section = CreateNode("Frame_Statistics", overview, 10f, 551f, 359f, 326f);
-        CreateSectionHeader(section, "StatisticsHeader", "Statistics", 0f, 0f, 359f, 21f, 14);
+        selectedTab = tab;
 
-        float y = 26f;
-        for (int i = 0; i < Statistics.Length; i++)
+        foreach (KeyValuePair<ProfileTab, GameObject> panel in tabPanels)
         {
-            BuildStatisticRow(section, Statistics[i], y);
-            y += 26f;
-            if (i < Statistics.Length - 1)
+            if (panel.Value != null)
             {
-                CreateRectFill(section, "Divider" + i, SupportCream, 0f, y + 0.0175f, 359f, 1f);
-                y += 5f;
+                panel.Value.SetActive(panel.Key == tab);
+            }
+        }
+
+        for (int i = 0; i < tabButtons.Count; i++)
+        {
+            TabButtonView button = tabButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            bool selected = button.Tab == tab;
+            if (button.Fill != null)
+            {
+                button.Fill.color = selected ? UiTheme.NavBrand : TabInactiveFill;
+            }
+
+            if (button.Border != null)
+            {
+                button.Border.color = selected ? UiTheme.NavBrandDark : TabInactiveBorder;
+            }
+
+            if (button.Label != null)
+            {
+                button.Label.color = selected ? Color.white : UiTheme.NavBrandDark;
+                button.Label.font = selected ? UiTheme.NavExtraBoldFont : UiTheme.NavBoldFont;
             }
         }
     }
 
-    private void BuildStatisticRow(RectTransform parent, StatisticRowData row, float y)
+    private void ApplyPanelLayout()
     {
-        RectTransform item = CreateNode("Row_" + row.Label.Replace(" ", string.Empty), parent, 0f, y, 359f, 21f);
+        float visibleHeight = frameLayout.VisibleLogicalHeight > 0f ? frameLayout.VisibleLogicalHeight : 887f;
+        if (tabsRoot != null)
+        {
+            tabsRoot.anchoredPosition = new Vector2(10f, -80f);
+        }
 
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", item, row.Label, 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Left);
-        ConfigureCompactLabel(label, UiTheme.DefaultFont, 14);
-        label.rectTransform.anchorMin = new Vector2(0f, 1f);
-        label.rectTransform.anchorMax = new Vector2(0f, 1f);
-        label.rectTransform.pivot = new Vector2(0f, 1f);
-        label.rectTransform.sizeDelta = new Vector2(260f, 21f);
-        label.rectTransform.anchoredPosition = Vector2.zero;
+        if (progressPanel != null)
+        {
+            progressPanel.sizeDelta = new Vector2(359f, Mathf.Max(visibleHeight - 126f, 520f));
+        }
 
-        TextMeshProUGUI value = UiFactory.CreateLabel("Value", item, row.Value, 14, UiTheme.NavBrandDark, FontStyles.Normal, TextAlignmentOptions.Right);
-        ConfigureCompactLabel(value, UiTheme.DefaultFont, 14);
-        value.rectTransform.anchorMin = new Vector2(1f, 1f);
-        value.rectTransform.anchorMax = new Vector2(1f, 1f);
-        value.rectTransform.pivot = new Vector2(1f, 1f);
-        value.rectTransform.sizeDelta = new Vector2(90f, 21f);
-        value.rectTransform.anchoredPosition = Vector2.zero;
+        if (activitiesPanel != null)
+        {
+            activitiesPanel.sizeDelta = new Vector2(359f, Mathf.Max(visibleHeight - 126f, 520f));
+        }
+
+        if (statisticsPanel != null)
+        {
+            statisticsPanel.sizeDelta = new Vector2(359f, Mathf.Max(visibleHeight - 126f, 520f));
+        }
+
+        if (progressScrollRect != null && progressScrollContent != null)
+        {
+            progressScrollRect.viewport = progressViewport;
+            progressScrollRect.content = progressScrollContent;
+        }
+
+        if (progressRowsRoot != null)
+        {
+            progressRowsRoot.sizeDelta = new Vector2(359f, Mathf.Max(progressRowsRoot.sizeDelta.y, 860f));
+        }
     }
 
     private void CreateSectionHeader(RectTransform parent, string name, string text, float x, float y, float width, float height, int fontSize)
@@ -1035,7 +973,7 @@ public class ProfileScreenView : AppScreenViewBase
         UiFactory.Stretch(label.rectTransform, 5f, 0f, 5f, 0f);
     }
 
-    private static void ConfigureCompactLabel(TextMeshProUGUI label, TMP_FontAsset font, float fontSize)
+    private void ConfigureCompactLabel(TextMeshProUGUI label, TMP_FontAsset font, float fontSize)
     {
         if (label == null)
         {
@@ -1073,18 +1011,6 @@ public class ProfileScreenView : AppScreenViewBase
         image.rectTransform.anchoredPosition = new Vector2(x, -y);
     }
 
-    private static void CreateRoundedBar(RectTransform parent, string name, Color color, float x, float y, float width, float height)
-    {
-        Image bar = UiFactory.CreateImage(name, parent, UiTheme.ProgressPillSprite, color);
-        bar.type = Image.Type.Sliced;
-        bar.preserveAspect = false;
-        bar.rectTransform.anchorMin = new Vector2(0f, 1f);
-        bar.rectTransform.anchorMax = new Vector2(0f, 1f);
-        bar.rectTransform.pivot = new Vector2(0f, 1f);
-        bar.rectTransform.sizeDelta = new Vector2(width, height);
-        bar.rectTransform.anchoredPosition = new Vector2(x, -y);
-    }
-
     private static Sprite BuildGradientSprite(string name, int width, int height, Color32 startColor, Color32 endColor, bool vertical)
     {
         Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
@@ -1093,7 +1019,6 @@ public class ProfileScreenView : AppScreenViewBase
         texture.wrapMode = TextureWrapMode.Clamp;
 
         float radius = height * 0.5f;
-
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
@@ -1116,55 +1041,70 @@ public class ProfileScreenView : AppScreenViewBase
         return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, borders);
     }
 
-    private static Sprite BuildOfferwallBlendSprite(string name, int width, int height)
-    {
-        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
-        texture.name = name;
-        texture.filterMode = FilterMode.Bilinear;
-        texture.wrapMode = TextureWrapMode.Clamp;
-
-        float radius = height * 0.5f;
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                if (!IsInsideRoundedRect(x, y, width, height, radius))
-                {
-                    texture.SetPixel(x, y, new Color32(255, 255, 255, 0));
-                    continue;
-                }
-
-                float t = width <= 1 ? 0f : (float)x / (width - 1f);
-                Color pixel;
-                if (t <= 0.19f)
-                {
-                    pixel = UiTheme.NavBrand;
-                }
-                else if (t >= 0.20f)
-                {
-                    pixel = UiTheme.NavShadow;
-                }
-                else
-                {
-                    float blendT = Mathf.InverseLerp(0.19f, 0.20f, t);
-                    pixel = Color.Lerp(UiTheme.NavBrand, UiTheme.NavShadow, blendT);
-                }
-
-                texture.SetPixel(x, y, pixel);
-            }
-        }
-
-        texture.Apply();
-        Vector4 borders = new Vector4(radius, radius, radius, radius);
-        return Sprite.Create(texture, new Rect(0f, 0f, width, height), new Vector2(0.5f, 0.5f), 100f, 0u, SpriteMeshType.FullRect, borders);
-    }
-
     private static bool IsInsideRoundedRect(int x, int y, int width, int height, float radius)
     {
         float clampedX = Mathf.Clamp(x, radius, width - radius - 1f);
         float clampedY = Mathf.Clamp(y, radius, height - radius - 1f);
         float distance = Vector2.Distance(new Vector2(x, y), new Vector2(clampedX, clampedY));
         return distance <= radius;
+    }
+
+    private static string BuildMilestoneHeader(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(milestone.RewardLabel) ? "Level " + milestone.Level : milestone.RewardLabel;
+    }
+
+    private static string BuildMilestoneDescription(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return string.Empty;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.CurrencyBasic:
+                return "Earn basic currency as you progress.";
+            case TrainerMilestoneRewardKind.CurrencyPremium:
+                return "Unlock premium currency for special purchases.";
+            case TrainerMilestoneRewardKind.PremiumFood:
+                return "Gain access to premium food support.";
+            case TrainerMilestoneRewardKind.DogUnlock:
+                return "Unlock a new dog for your home roster.";
+            case TrainerMilestoneRewardKind.Feature:
+                return "Unlock a new profile feature.";
+            case TrainerMilestoneRewardKind.CatalogItemReward:
+                return "Unlock a catalog reward tied to this level.";
+            default:
+                return "Continue training to unlock the next reward.";
+        }
+    }
+
+    private static string BuildMilestoneRewardText(TrainerMilestoneDefinition milestone)
+    {
+        return milestone != null ? TrainerProgressionDatabase.GetMilestoneShortLabel(milestone) : string.Empty;
+    }
+
+    private static Color GetMilestoneAccentColor(TrainerMilestoneDefinition milestone)
+    {
+        if (milestone == null)
+        {
+            return UiTheme.NavBrandDark;
+        }
+
+        switch (milestone.RewardKind)
+        {
+            case TrainerMilestoneRewardKind.Feature:
+            case TrainerMilestoneRewardKind.DogUnlock:
+                return AgilityGold;
+            default:
+                return UiTheme.NavBrandDark;
+        }
     }
 
     private static bool ColorsEqual(Color32 a, Color32 b)

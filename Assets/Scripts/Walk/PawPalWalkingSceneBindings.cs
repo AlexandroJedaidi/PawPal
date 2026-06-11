@@ -37,7 +37,7 @@ public sealed class PawPalWalkingSceneBindings : MonoBehaviour
     [SerializeField] private Vector3 presentLocalScale = new Vector3(0.08f, 0.08f, 0.08f);
     [SerializeField] private Vector3 presentLocalEulerAngles = new Vector3(0f, 187.255f, 0f);
     [Header("Pet Encounter")]
-    [SerializeField] private Vector3 petEncounterCameraOffset = new Vector3(0f, 1.15f, -3.2f);
+    [SerializeField] private Vector3 petEncounterCameraOffset = new Vector3(0.35f, 1.15f, -3.2f);
     [SerializeField] private Vector3 petEncounterLookAtOffset = new Vector3(0f, 0.55f, 0f);
     [SerializeField, Min(0.5f)] private float petEncounterVisitorSpawnDistance = 3.2f;
     [SerializeField, Min(0.25f)] private float petEncounterMeetDistance = 1.25f;
