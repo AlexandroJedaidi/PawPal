@@ -167,6 +167,14 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
 
             graphicsEnhancer.ApplyGraphics();
         }
+
+        PawPalWalkTimeOfDayController walkTimeOfDayController = PawPalWalkTimeOfDayBootstrap.EnsureController(
+            gameObject.scene,
+            false);
+        if (walkTimeOfDayController != null)
+        {
+            walkTimeOfDayController.ApplyVisualsNow();
+        }
     }
 
     private void EnsureWalkMusic()
