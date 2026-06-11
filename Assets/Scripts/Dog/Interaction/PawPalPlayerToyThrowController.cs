@@ -52,6 +52,10 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
     [SerializeField] private float throwArcHeight = 1.1f;
     [SerializeField] private float throwTargetNavMeshSampleRadius = 1.4f;
     [SerializeField] private float fetchDispatchDelay = 0.75f;
+    [SerializeField] private float thrownToyLinearDrag = 0.55f;
+    [SerializeField] private float thrownToyAngularDrag = 3.75f;
+    [SerializeField] private float minThrownToySpinImpulse = 0.01f;
+    [SerializeField] private float maxThrownToySpinImpulse = 0.05f;
     [SerializeField] private bool showAimPreview;
     [SerializeField] private Color aimPreviewColor = new Color(1f, 0.42f, 0.28f, 0.85f);
 
@@ -519,6 +523,8 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         body.isKinematic = false;
         body.useGravity = true;
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        body.linearDamping = Mathf.Max(0f, thrownToyLinearDrag);
+        body.angularDamping = Mathf.Max(0f, thrownToyAngularDrag);
         body.linearVelocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;
         EnsureThrownToyBounceAudio(thrownToy);
@@ -537,7 +543,9 @@ public sealed class PawPalPlayerToyThrowController : MonoBehaviour
         Vector3 torqueAxis = Vector3.Cross(Vector3.up, launchDirection);
         if (torqueAxis.sqrMagnitude > 0.001f)
         {
-            body.AddTorque(torqueAxis.normalized * Mathf.Lerp(0.04f, 0.18f, throwPower), ForceMode.Impulse);
+            body.AddTorque(
+                torqueAxis.normalized * Mathf.Lerp(minThrownToySpinImpulse, maxThrownToySpinImpulse, throwPower),
+                ForceMode.Impulse);
         }
 
         ArmThrownToyRecovery(thrownToy);

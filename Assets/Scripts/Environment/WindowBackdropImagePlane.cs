@@ -41,7 +41,7 @@ public class WindowBackdropImagePlane : MonoBehaviour
     [SerializeField] private float distance = 10f;
     [SerializeField] private Vector3 localOffset = new Vector3(0f, 0.5f, 0f);
     [SerializeField] private bool useManualCardTransform;
-    [SerializeField] private Vector3 manualCardLocalPosition = new Vector3(-0.07f, -0.63f, -1.84f);
+    [SerializeField] private Vector3 manualCardLocalPosition = new Vector3(-0.07f, -0.3f, -1.838f);
     [SerializeField] private Vector3 manualCardLocalEulerAngles = Vector3.zero;
     [SerializeField] private Vector3 manualCardLocalScale = new Vector3(14f, 7.583333f, 1.166667f);
     [SerializeField] private Color tint = Color.white;

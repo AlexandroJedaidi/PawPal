@@ -233,6 +233,16 @@ public static class PawPalGraphicsSettings
         return IsUltraQuality ? baseContrast + 1.5f : baseContrast;
     }
 
+    public static float GetIndoorContrast(float baseContrast)
+    {
+        return IsUltraQuality ? baseContrast - 2f : baseContrast;
+    }
+
+    public static float GetIndoorSaturation(float baseSaturation)
+    {
+        return IsUltraQuality ? baseSaturation - 6f : baseSaturation;
+    }
+
     public static float GetSaturation(float baseSaturation)
     {
         return IsUltraQuality ? baseSaturation + 1.5f : baseSaturation;

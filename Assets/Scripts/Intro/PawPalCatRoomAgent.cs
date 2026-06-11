@@ -12,6 +12,7 @@ using Random = UnityEngine.Random;
 public sealed class PawPalCatRoomAgent : MonoBehaviour
 {
     private const float DefaultArrivalDistance = 0.18f;
+    private const float InteractionYieldRequestCooldown = 0.9f;
     private const float SitStartDuration = 0.28f;
     private const float SitEndDuration = 0.24f;
     private const float MovementDebugLogCooldown = 0.75f;
@@ -138,6 +139,8 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
     private bool isPlayingOneShotAnimation;
     private bool trainingBusy;
     private bool wasLastTravelSuccessful = true;
+    private Transform lastInteractionYieldCaller;
+    private float nextAllowedInteractionYieldAt;
     private Transform interactionLookTarget;
     private float interactionLookUntil;
     private int barkStateHash;
@@ -521,6 +524,11 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return false;
         }
 
+        if (lastInteractionYieldCaller == caller && Time.time < nextAllowedInteractionYieldAt)
+        {
+            return false;
+        }
+
         WakeForPlayerInteraction();
         CancelAmbientAction();
         EndInteractionIdleLoop();
@@ -546,6 +554,8 @@ public sealed class PawPalCatRoomAgent : MonoBehaviour
             return false;
         }
 
+        lastInteractionYieldCaller = caller;
+        nextAllowedInteractionYieldAt = Time.time + InteractionYieldRequestCooldown;
         activeMovementContext = "Yield";
         SetMoving(ShouldUseLocomotion());
         return true;

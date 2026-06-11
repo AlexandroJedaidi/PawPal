@@ -1406,7 +1406,7 @@ public sealed class PawPalGameRuntime : MonoBehaviour
     public const int MaxBondXp = (MaxBondLevel - 1) * BondXpPerLevel;
     private const string SaveFileName = "pawpal_profile_v1.json";
     private const string StarterDogId = "pepper";
-    private const string StarterCollarItemId = "collar_c2";
+    private const string StarterCollarItemId = "collar_simple_c2";
     private const string BasicFoodItemId = "food_basic";
     private const string PremiumFoodItemId = "food_premium";
     private const string DownloadedShopSpriteRoot = "UI/Downloaded/Shop/";
@@ -3557,6 +3557,15 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             InventoryCardTheme = InventoryCardTheme.Roll
         });
 
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_bone_1", "Golden Bone", "bone_1", "PawPal/RoomPrefabs/Bone_1", InventoryCardTheme.Bone, PawPalToyInteractionMode.CarryInMouth, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_bone_2", "Rose Bone", "bone_2", string.Empty, InventoryCardTheme.Bone, PawPalToyInteractionMode.CarryInMouth, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_1", "Lime Ball", "ball_1", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_2", "Rally Ball", "ball_2", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_ball_3", "Sunny Ball", "ball_3", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_1", "Stripe Ball", "big_ball_1", "PawPal/RoomPrefabs/Big_ball_1", InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_2", "Sunset Ball", "big_ball_2", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_3", "Forest Ball", "big_ball_3", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
+        AddCatalogItem(BuildDownloadedToyDefinition("toy_big_ball_4", "Blush Ball", "big_ball_4", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
         AddCatalogItem(BuildDownloadedToyDefinition("cat_ball_4", "Ball 4", "cat_ball_4", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
         AddCatalogItem(BuildDownloadedToyDefinition("cat_ball_3", "Ball 3", "cat_ball_3", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
         AddCatalogItem(BuildDownloadedToyDefinition("cat_ball_2", "Ball 2", "cat_ball_2", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
@@ -3568,6 +3577,10 @@ public sealed class PawPalGameRuntime : MonoBehaviour
         AddCatalogItem(BuildDownloadedToyDefinition("cat_ball_6", "Ball 6", "cat_ball_6", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
         AddCatalogItem(BuildDownloadedToyDefinition("cat_ball_5", "Ball 5", "cat_ball_5", string.Empty, InventoryCardTheme.Ball, PawPalToyInteractionMode.PawHitRoll, Color.white));
 
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c1", "Ruby Band", DownloadedShopSpriteRoot + "collarsimple_c1", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Band, false, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c2", "Ocean Band", 50, DownloadedShopSpriteRoot + "collarsimple_c2", "PawPal/Accessories/CollarSimple_C2", InventoryCardTheme.Band, true, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_simple_c3", "Forest Band", DownloadedShopSpriteRoot + "collarsimple_c3", "PawPal/Accessories/CollarSimple_C3", InventoryCardTheme.Band, false, Color.white));
+        AddCatalogItem(BuildCollarDefinition("collar_standard", "Shadow Loop", DownloadedShopSpriteRoot + "collar", "PawPal/Accessories/CollarSimple_C1", InventoryCardTheme.Loop, false, Color.white));
         AddCatalogItem(BuildCollarDefinition("collar_c1", "Collar C1", DownloadedShopSpriteRoot + "collar_c1", string.Empty, InventoryCardTheme.Band, false, Color.white));
         AddCatalogItem(BuildCollarDefinition("collar_c2", "Collar C2", DownloadedShopSpriteRoot + "collar_c2", string.Empty, InventoryCardTheme.Band, false, Color.white));
         AddCatalogItem(BuildCollarDefinition("collar_c3", "Collar C3", DownloadedShopSpriteRoot + "collar_c3", string.Empty, InventoryCardTheme.Band, false, Color.white));
@@ -3710,6 +3723,8 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             Debug.LogWarning("PawPalGameRuntime skipped a catalog item because it had no valid id.");
             return;
         }
+
+        PawPalShopPreviewCatalog.ApplyPreviewDefaults(item);
 
         if (catalogById.ContainsKey(item.Id))
         {

@@ -191,14 +191,14 @@ public sealed class DogNeedInteractionDirector : MonoBehaviour
             }
 
             Vector3 approachPoint = ResolveApproachPoint(pet, activeBowl.transform.position);
-            yield return pet.MoveNearPrecise(approachPoint, moveTimeout, DogMovementPace.Walk, preciseArrivalDistance);
+            yield return pet.MoveNearPlayerInteraction(approachPoint, moveTimeout, DogMovementPace.Trot, preciseArrivalDistance);
             if (!IsPetCloseEnoughForBowlUse(pet, activeBowl.transform.position, approachPoint))
             {
                 approachPoint = ResolveApproachPoint(pet, activeBowl.transform.position);
-                yield return pet.MoveNearPrecise(
+                yield return pet.MoveNearPlayerInteraction(
                     approachPoint,
                     Mathf.Max(1f, moveTimeout * 0.45f),
-                    DogMovementPace.Walk,
+                    DogMovementPace.Trot,
                     preciseArrivalDistance);
 
                 if (!IsPetCloseEnoughForBowlUse(pet, activeBowl.transform.position, approachPoint))

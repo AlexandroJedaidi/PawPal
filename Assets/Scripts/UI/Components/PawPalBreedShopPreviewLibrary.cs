@@ -2,16 +2,10 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
-
 public sealed class PawPalBreedShopPreviewEntry
 {
     public string BreedKey;
-    public string LeftPrefabAssetPath;
-    public string CenterPrefabAssetPath;
-    public string RightPrefabAssetPath;
+    public IntroPetDefinition Definition;
     public Vector3 GroupOffset = Vector3.zero;
     public float GroupScale = 1f;
 }
@@ -33,25 +27,25 @@ public static class PawPalBreedShopPreviewLibrary
         string breedKey = NormalizeBreedKey(item);
         return !string.IsNullOrEmpty(breedKey)
             && EntryCache.TryGetValue(breedKey, out entry)
-            && entry != null;
+            && entry != null
+            && entry.Definition != null
+            && entry.Definition.BasePrefab != null;
     }
 
-#if UNITY_EDITOR
     public static GameObject LoadLeftPrefab(PawPalBreedShopPreviewEntry entry)
     {
-        return LoadPrefab(entry != null ? entry.LeftPrefabAssetPath : null);
+        return entry != null && entry.Definition != null ? entry.Definition.BasePrefab : null;
     }
 
     public static GameObject LoadCenterPrefab(PawPalBreedShopPreviewEntry entry)
     {
-        return LoadPrefab(entry != null ? entry.CenterPrefabAssetPath : null);
+        return entry != null && entry.Definition != null ? entry.Definition.BasePrefab : null;
     }
 
     public static GameObject LoadRightPrefab(PawPalBreedShopPreviewEntry entry)
     {
-        return LoadPrefab(entry != null ? entry.RightPrefabAssetPath : null);
+        return entry != null && entry.Definition != null ? entry.Definition.BasePrefab : null;
     }
-#endif
 
     private static void EnsureCache()
     {
@@ -63,28 +57,55 @@ public static class PawPalBreedShopPreviewLibrary
         cacheBuilt = true;
         EntryCache.Clear();
 
-#if UNITY_EDITOR
-        foreach (PawPalPetAnimationEntry animationEntry in PawPalPetAnimationRegistry.GetAllEntries())
+        IntroPetDefinition[] definitions = Resources.LoadAll<IntroPetDefinition>("PawPal/IntroPets/Definitions");
+        for (int i = 0; i < definitions.Length; i++)
         {
-            if (animationEntry == null || animationEntry.Species != IntroPetSpecies.Dog || animationEntry.LifeStage != PawPalPetLifeStage.Adult)
+            IntroPetDefinition definition = definitions[i];
+            if (definition == null || definition.Species != IntroPetSpecies.Dog || definition.BasePrefab == null)
             {
                 continue;
             }
 
-            PawPalBreedShopPreviewEntry previewEntry;
-            if (!TryBuildEditorEntry(animationEntry, out previewEntry) || previewEntry == null)
+            PawPalBreedShopPreviewEntry entry = new PawPalBreedShopPreviewEntry
             {
-                continue;
-            }
+                BreedKey = ResolveDefinitionKey(definition),
+                Definition = definition
+            };
 
-            EntryCache[animationEntry.CanonicalKey] = previewEntry;
-            string normalizedKey = PawPalPetAnimationRegistry.NormalizeKey(animationEntry.CanonicalKey);
-            if (!string.IsNullOrEmpty(normalizedKey))
-            {
-                EntryCache[normalizedKey] = previewEntry;
-            }
+            RegisterEntry(definition.PetId, entry);
+            RegisterEntry(definition.BreedName, entry);
+            RegisterEntry(definition.DisplayName, entry);
+            RegisterEntry(entry.BreedKey, entry);
         }
-#endif
+    }
+
+    private static void RegisterEntry(string rawKey, PawPalBreedShopPreviewEntry entry)
+    {
+        string normalizedKey = PawPalPetAnimationRegistry.NormalizeKey(rawKey);
+        if (!string.IsNullOrEmpty(normalizedKey) && entry != null)
+        {
+            EntryCache[normalizedKey] = entry;
+        }
+    }
+
+    private static string ResolveDefinitionKey(IntroPetDefinition definition)
+    {
+        if (definition == null)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrEmpty(definition.PetId))
+        {
+            return PawPalPetAnimationRegistry.NormalizeKey(definition.PetId);
+        }
+
+        if (!string.IsNullOrEmpty(definition.BreedName))
+        {
+            return PawPalPetAnimationRegistry.NormalizeKey(definition.BreedName);
+        }
+
+        return PawPalPetAnimationRegistry.NormalizeKey(definition.DisplayName);
     }
 
     private static string NormalizeBreedKey(PawPalCatalogItemDefinition item)
@@ -101,95 +122,4 @@ public static class PawPalBreedShopPreviewLibrary
 
         return PawPalPetAnimationRegistry.NormalizeKey(item.DisplayName);
     }
-
-#if UNITY_EDITOR
-    private static bool TryBuildEditorEntry(PawPalPetAnimationEntry animationEntry, out PawPalBreedShopPreviewEntry entry)
-    {
-        entry = null;
-        if (animationEntry == null || string.IsNullOrWhiteSpace(animationEntry.ImportedAnimationAssetPath))
-        {
-            return false;
-        }
-
-        string importedAnimationAssetPath = animationEntry.ImportedAnimationAssetPath.Replace('\\', '/');
-        int animFolderMarker = importedAnimationAssetPath.LastIndexOf("/FBX/Anim/", StringComparison.OrdinalIgnoreCase);
-        if (animFolderMarker <= 0)
-        {
-            return false;
-        }
-
-        string breedFolder = importedAnimationAssetPath.Substring(0, animFolderMarker);
-        string prefabFolder = breedFolder + "/Prefabs";
-        if (string.IsNullOrWhiteSpace(prefabFolder) || !AssetDatabase.IsValidFolder(prefabFolder))
-        {
-            return false;
-        }
-
-        string leftPrefabAssetPath;
-        string centerPrefabAssetPath;
-        string rightPrefabAssetPath;
-        if (!TryFindBreedVariantPrefab(prefabFolder, "c1", out centerPrefabAssetPath)
-            || !TryFindBreedVariantPrefab(prefabFolder, "c2", out leftPrefabAssetPath)
-            || !TryFindBreedVariantPrefab(prefabFolder, "c3", out rightPrefabAssetPath))
-        {
-            return false;
-        }
-
-        entry = new PawPalBreedShopPreviewEntry
-        {
-            BreedKey = animationEntry.CanonicalKey,
-            LeftPrefabAssetPath = leftPrefabAssetPath,
-            CenterPrefabAssetPath = centerPrefabAssetPath,
-            RightPrefabAssetPath = rightPrefabAssetPath
-        };
-        return true;
-    }
-
-    private static bool TryFindBreedVariantPrefab(string prefabFolder, string variantSuffix, out string assetPath)
-    {
-        assetPath = string.Empty;
-        string[] guids = AssetDatabase.FindAssets("t:GameObject", new[] { prefabFolder });
-        if (guids == null || guids.Length == 0)
-        {
-            return false;
-        }
-
-        string requiredSuffix = "_" + variantSuffix + ".prefab";
-        for (int i = 0; i < guids.Length; i++)
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guids[i]).Replace('\\', '/');
-            string fileName = System.IO.Path.GetFileName(path);
-            if (string.IsNullOrEmpty(fileName))
-            {
-                continue;
-            }
-
-            if (!fileName.EndsWith(requiredSuffix, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string normalized = fileName.ToLowerInvariant();
-            if (normalized.Contains("_lod_")
-                || normalized.Contains("_lowpoly_")
-                || normalized.Contains("_noalpha_")
-                || normalized.Contains("_anim_"))
-            {
-                continue;
-            }
-
-            assetPath = path;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static GameObject LoadPrefab(string assetPath)
-    {
-        return string.IsNullOrWhiteSpace(assetPath)
-            ? null
-            : AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
-    }
-#endif
 }

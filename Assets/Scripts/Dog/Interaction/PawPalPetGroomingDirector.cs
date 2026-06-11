@@ -10,7 +10,7 @@ using UnityEditor;
 [DisallowMultipleComponent]
 public sealed class PawPalPetGroomingDirector : MonoBehaviour
 {
-    private const string EditorBrushPrefabAssetPath = "Assets/BrushHair/BrushHair Variant.prefab";
+    private const string EditorBrushPrefabAssetPath = "Assets/3rd Party Packs/BrushHair/BrushHair Variant.prefab";
     private const string StarBurstResourcePath = "UI/Interaction/star";
     private const float SymbolBurstDuration = 1.2f;
     private const float SymbolBurstScreenLift = 68f;
@@ -184,7 +184,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             yield return MovePetIntoGroomingPresentation(pet);
             if (pet.IsDog && pet.DogAgent != null && !pet.DogAgent.WasLastTravelSuccessful)
             {
-                yield break;
+                Debug.LogWarning("PawPalPetGroomingDirector: continuing grooming interaction even though the dog could not reach the preferred presentation point.", this);
             }
 
             yield return RotatePetSideOn(pet);
@@ -437,18 +437,7 @@ public sealed class PawPalPetGroomingDirector : MonoBehaviour
             yield break;
         }
 
-        Camera camera = ResolveRoomCamera();
-        Vector3 presentationPoint;
-        if (pet.IsDog && pet.DogAgent != null && camera != null && TryResolveDogCameraApproachPoint(pet.DogAgent, camera, out presentationPoint))
-        {
-            yield return pet.MoveNearPlayerInteraction(presentationPoint, moveTimeout, DogMovementPace.Trot, preciseArrivalDistance);
-            if (pet.DogAgent.WasLastTravelSuccessful)
-            {
-                yield break;
-            }
-        }
-
-        presentationPoint = ResolvePresentationPoint(pet);
+        Vector3 presentationPoint = ResolvePresentationPoint(pet);
         yield return pet.MoveNearPlayerInteraction(
             presentationPoint,
             moveTimeout,

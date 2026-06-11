@@ -70,6 +70,7 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float nightSunShadowStrength = 0.18f;
     [SerializeField] private float sunShadowBias = 0.025f;
     [SerializeField] private float sunShadowNormalBias = 0.18f;
+    [SerializeField] private bool allowManualIndoorSunPlacement = true;
 
     [Header("Room Fill")]
     [SerializeField] private bool createFillLights = true;
@@ -504,10 +505,13 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         RenderSettings.sun = resolvedSun;
 
         resolvedSun.type = LightType.Directional;
-        resolvedSun.transform.rotation = Quaternion.Slerp(
-            Quaternion.Euler(nightSunEulerAngles),
-            Quaternion.Euler(daySunEulerAngles),
-            daylight01);
+        if (!(isIndoorCaptureScene && allowManualIndoorSunPlacement))
+        {
+            resolvedSun.transform.rotation = Quaternion.Slerp(
+                Quaternion.Euler(nightSunEulerAngles),
+                Quaternion.Euler(daySunEulerAngles),
+                daylight01);
+        }
         resolvedSun.intensity = Mathf.Lerp(nightSunIntensity, daySunIntensity * sunBoost, daylight01);
         resolvedSun.color = Color.Lerp(nightSunColor, daySunColor, daylight01);
         resolvedSun.useColorTemperature = true;
@@ -612,6 +616,10 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
 
             state.Light.intensity = state.BaseIntensity * intensityMultiplier;
             state.Light.color = state.BaseColor * colorTint;
+            if (string.Equals(state.Light.name, "Ceiling Lamp", StringComparison.OrdinalIgnoreCase))
+            {
+                state.Light.shadows = LightShadows.None;
+            }
 
             if (state.HasColorTemperature)
             {
@@ -684,9 +692,15 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
         tonemapping.mode.Override(PawPalGraphicsSettings.GetTonemappingMode());
 
         ColorAdjustments colorAdjustments = GetOrAddVolumeComponent<ColorAdjustments>(profile);
-        colorAdjustments.postExposure.Override(PawPalGraphicsSettings.GetPostExposure(exposure));
-        colorAdjustments.contrast.Override(PawPalGraphicsSettings.GetContrast(contrast));
-        colorAdjustments.saturation.Override(PawPalGraphicsSettings.GetSaturation(saturation));
+        colorAdjustments.postExposure.Override(IsIndoorCaptureScene()
+            ? PawPalGraphicsSettings.GetPostExposure(exposure)
+            : PawPalGraphicsSettings.GetPostExposure(exposure));
+        colorAdjustments.contrast.Override(IsIndoorCaptureScene()
+            ? PawPalGraphicsSettings.GetIndoorContrast(contrast)
+            : PawPalGraphicsSettings.GetContrast(contrast));
+        colorAdjustments.saturation.Override(IsIndoorCaptureScene()
+            ? PawPalGraphicsSettings.GetIndoorSaturation(saturation)
+            : PawPalGraphicsSettings.GetSaturation(saturation));
         colorAdjustments.colorFilter.Override(Color.white);
 
         WhiteBalance whiteBalance = GetOrAddVolumeComponent<WhiteBalance>(profile);
@@ -1320,6 +1334,11 @@ public class LivingRoomGraphicsEnhancer : MonoBehaviour
             light == windowFillLight ||
             light == sofaFillLight ||
             light.type == LightType.Directional)
+        {
+            return false;
+        }
+
+        if (string.Equals(light.name, "Ceiling Lamp", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

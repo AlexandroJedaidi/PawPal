@@ -76,6 +76,7 @@ public struct DogCircadianProfile
 [RequireComponent(typeof(NavMeshAgent))]
 public class DogRoomAgent : MonoBehaviour
 {
+    private const float InteractionYieldRequestCooldown = 0.9f;
     private const float IntroPreviewVocalCooldownSeconds = 20f;
     private const float DefaultSunriseHour = 7f;
     private const float DefaultSunsetHour = 20f;
@@ -287,6 +288,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float restCrossFadeDuration = 0.18f;
     [SerializeField] private float wakePauseDuration = 0.45f;
     [SerializeField] private bool useImportedRestClipsInEditor = true;
+    private Transform lastInteractionYieldCaller;
+    private float nextAllowedInteractionYieldAt;
     [SerializeField] private string lieStartStateName = "LieBellyStart";
     [SerializeField] private string lieLoopStateName = "CatSimple_Lie_side_loop_1";
     [SerializeField] private string lieSleepStartStateName = "LieSleepStart";
@@ -344,6 +347,8 @@ public class DogRoomAgent : MonoBehaviour
     [SerializeField] private float bigBallHitImpulse = 1.35f;
     [SerializeField] private float bigBallSideImpulseBias = 0.18f;
     [SerializeField] private float bigBallHitTorque = 0.65f;
+    [SerializeField] private float bigBallPostHitLinearDrag = 0.6f;
+    [SerializeField] private float bigBallPostHitAngularDrag = 4.5f;
     [SerializeField] private float bigBallPostHitWait = 0.45f;
     [SerializeField, Range(0f, 1f)] private float bigBallChaseChance = 0.75f;
     [SerializeField] private float bigBallChaseTimeout = 2.5f;
@@ -1803,7 +1808,7 @@ public class DogRoomAgent : MonoBehaviour
 
     public IEnumerator MoveNearInteraction(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
     {
-        yield return TravelTo(worldPosition, 0f, pace, false, reachedDistance, false, crowdingSpacingPadding, true, false, null, true);
+        yield return TravelTo(worldPosition, timeout, pace, false, reachedDistance, true, crowdingSpacingPadding, true, false, null, true);
     }
 
     public IEnumerator MoveNearPrecise(Vector3 worldPosition, float timeout, DogMovementPace pace, float reachedDistance)
@@ -1819,6 +1824,11 @@ public class DogRoomAgent : MonoBehaviour
     public bool TryYieldForPlayerInteractionPath(Vector3 protectedDestination, Transform caller)
     {
         if (!isActiveAndEnabled || caller == null || caller == transform || transform.IsChildOf(caller) || caller.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        if (lastInteractionYieldCaller == caller && Time.time < nextAllowedInteractionYieldAt)
         {
             return false;
         }
@@ -1849,7 +1859,14 @@ public class DogRoomAgent : MonoBehaviour
             return false;
         }
 
-        return TrySetDestination(yieldPoint, DogMovementPace.Walk);
+        bool accepted = TrySetDestination(yieldPoint, DogMovementPace.Walk);
+        if (accepted)
+        {
+            lastInteractionYieldCaller = caller;
+            nextAllowedInteractionYieldAt = Time.time + InteractionYieldRequestCooldown;
+        }
+
+        return accepted;
     }
 
     public void StartHeldToyTugAnimation()
@@ -5609,6 +5626,8 @@ public class DogRoomAgent : MonoBehaviour
         body.useGravity = true;
         body.mass = Mathf.Max(0.1f, body.mass);
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        body.linearDamping = Mathf.Max(0f, bigBallPostHitLinearDrag);
+        body.angularDamping = Mathf.Max(0f, bigBallPostHitAngularDrag);
         body.WakeUp();
 
         Vector3 awayFromDog = GetBigBallWorldCenter(toy) - transform.position;
@@ -5627,7 +5646,9 @@ public class DogRoomAgent : MonoBehaviour
         Vector3 torqueAxis = Vector3.Cross(Vector3.up, impulseDirection);
         if (torqueAxis.sqrMagnitude > 0.001f)
         {
-            body.AddTorque(torqueAxis.normalized * Mathf.Max(0f, bigBallHitTorque * BigBallHitTorqueScale), ForceMode.Impulse);
+            body.AddTorque(
+                torqueAxis.normalized * Mathf.Max(0f, bigBallHitTorque * BigBallHitTorqueScale * 0.35f),
+                ForceMode.Impulse);
         }
     }
 
