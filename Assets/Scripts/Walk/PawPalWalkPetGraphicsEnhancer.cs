@@ -14,30 +14,10 @@ public sealed class PawPalWalkPetGraphicsEnhancer : MonoBehaviour
     [SerializeField, Range(0f, 3f)] private float fillLightIntensity = 0.72f;
     [SerializeField, Min(0.1f)] private float fillLightRange = 3.2f;
     [SerializeField] private Vector3 fillLightCameraOffset = new Vector3(0.35f, 0.85f, -0.7f);
-    [SerializeField] private Vector3 shadowKeyLightEuler = new Vector3(46f, -32f, 0f);
-    [SerializeField, Range(0f, 1f)] private float shadowKeyStrength = 0.42f;
-
     private Transform petRoot;
     private Camera walkCamera;
     private Light fillLight;
-    private Light createdShadowKeyLight;
     private Renderer[] cachedRenderers;
-    private bool capturedRenderSettings;
-    private Light previousSun;
-    private AmbientMode previousAmbientMode;
-    private Color previousAmbientLight;
-    private Color previousAmbientSkyColor;
-    private Color previousAmbientEquatorColor;
-    private Color previousAmbientGroundColor;
-    private float previousAmbientIntensity;
-    private float previousReflectionIntensity;
-    private int previousReflectionBounces;
-    private bool previousFog;
-    private Color previousFogColor;
-    private FogMode previousFogMode;
-    private float previousFogDensity;
-    private float previousFogStartDistance;
-    private float previousFogEndDistance;
 
     public void Configure(Transform targetPetRoot, Camera targetWalkCamera, List<Collider> receivingRoads)
     {
@@ -52,8 +32,6 @@ public sealed class PawPalWalkPetGraphicsEnhancer : MonoBehaviour
         ConfigurePetRenderers();
         ConfigureReceivingSurfaces(receivingRoads);
         EnsureContactShadow();
-        CaptureRenderSettingsIfNeeded();
-        EnsureSceneShadowLight();
         EnsureFillLight();
         UpdateFillLight();
     }
@@ -70,18 +48,10 @@ public sealed class PawPalWalkPetGraphicsEnhancer : MonoBehaviour
 
     private void OnDisable()
     {
-        RestoreRenderSettingsIfCaptured();
-
         if (fillLight != null)
         {
             DestroyGeneratedObject(fillLight.gameObject);
             fillLight = null;
-        }
-
-        if (createdShadowKeyLight != null)
-        {
-            DestroyGeneratedObject(createdShadowKeyLight.gameObject);
-            createdShadowKeyLight = null;
         }
     }
 
@@ -156,78 +126,6 @@ public sealed class PawPalWalkPetGraphicsEnhancer : MonoBehaviour
                 renderer.receiveShadows = true;
             }
         }
-    }
-
-    private void EnsureSceneShadowLight()
-    {
-        if (createdShadowKeyLight == null)
-        {
-            GameObject lightObject = new GameObject("WalkPetShadowKeyRuntime");
-            lightObject.hideFlags = HideFlags.DontSave;
-            lightObject.transform.SetParent(transform, false);
-            createdShadowKeyLight = lightObject.AddComponent<Light>();
-        }
-
-        createdShadowKeyLight.type = LightType.Directional;
-        createdShadowKeyLight.intensity = 0.85f;
-        createdShadowKeyLight.color = new Color(1f, 0.95f, 0.84f, 1f);
-        createdShadowKeyLight.transform.rotation = Quaternion.Euler(shadowKeyLightEuler);
-        createdShadowKeyLight.shadows = LightShadows.Soft;
-        createdShadowKeyLight.shadowStrength = shadowKeyStrength;
-        createdShadowKeyLight.shadowBias = 0.04f;
-        createdShadowKeyLight.shadowNormalBias = 0.35f;
-        createdShadowKeyLight.renderMode = LightRenderMode.ForcePixel;
-        RenderSettings.sun = createdShadowKeyLight;
-    }
-
-    private void CaptureRenderSettingsIfNeeded()
-    {
-        if (capturedRenderSettings)
-        {
-            return;
-        }
-
-        capturedRenderSettings = true;
-        previousSun = RenderSettings.sun;
-        previousAmbientMode = RenderSettings.ambientMode;
-        previousAmbientLight = RenderSettings.ambientLight;
-        previousAmbientSkyColor = RenderSettings.ambientSkyColor;
-        previousAmbientEquatorColor = RenderSettings.ambientEquatorColor;
-        previousAmbientGroundColor = RenderSettings.ambientGroundColor;
-        previousAmbientIntensity = RenderSettings.ambientIntensity;
-        previousReflectionIntensity = RenderSettings.reflectionIntensity;
-        previousReflectionBounces = RenderSettings.reflectionBounces;
-        previousFog = RenderSettings.fog;
-        previousFogColor = RenderSettings.fogColor;
-        previousFogMode = RenderSettings.fogMode;
-        previousFogDensity = RenderSettings.fogDensity;
-        previousFogStartDistance = RenderSettings.fogStartDistance;
-        previousFogEndDistance = RenderSettings.fogEndDistance;
-    }
-
-    private void RestoreRenderSettingsIfCaptured()
-    {
-        if (!capturedRenderSettings)
-        {
-            return;
-        }
-
-        RenderSettings.sun = previousSun;
-        RenderSettings.ambientMode = previousAmbientMode;
-        RenderSettings.ambientLight = previousAmbientLight;
-        RenderSettings.ambientSkyColor = previousAmbientSkyColor;
-        RenderSettings.ambientEquatorColor = previousAmbientEquatorColor;
-        RenderSettings.ambientGroundColor = previousAmbientGroundColor;
-        RenderSettings.ambientIntensity = previousAmbientIntensity;
-        RenderSettings.reflectionIntensity = previousReflectionIntensity;
-        RenderSettings.reflectionBounces = previousReflectionBounces;
-        RenderSettings.fog = previousFog;
-        RenderSettings.fogColor = previousFogColor;
-        RenderSettings.fogMode = previousFogMode;
-        RenderSettings.fogDensity = previousFogDensity;
-        RenderSettings.fogStartDistance = previousFogStartDistance;
-        RenderSettings.fogEndDistance = previousFogEndDistance;
-        capturedRenderSettings = false;
     }
 
     private void EnsureContactShadow()

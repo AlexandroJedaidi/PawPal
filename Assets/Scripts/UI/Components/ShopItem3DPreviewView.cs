@@ -7,6 +7,10 @@ using UnityEngine.EventSystems;
 using UnityEngine.Playables;
 using UnityEngine.UI;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 [RequireComponent(typeof(RectTransform))]
 public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler, IScrollHandler
 {
@@ -116,7 +120,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         }
 
         ClearPreview();
-        if (item != null && TryBuildProceduralPreview(item))
+        if (item != null && TryBuildProceduralToyPreview(item))
         {
             return;
         }
@@ -327,6 +331,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             return false;
         }
 
+#if UNITY_EDITOR
         GameObject centerPrefab = PawPalBreedShopPreviewLibrary.LoadCenterPrefab(breedEntry);
         GameObject leftPrefab = PawPalBreedShopPreviewLibrary.LoadLeftPrefab(breedEntry);
         GameObject rightPrefab = PawPalBreedShopPreviewLibrary.LoadRightPrefab(breedEntry);
@@ -369,6 +374,10 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         ApplyCameraZoom();
         RenderPreview();
         return true;
+#else
+        WarnMissingBreedPreview(item, "breed 3D preview is only available in the Unity editor");
+        return false;
+#endif
     }
 
     private bool TryBuildSpritePreview(PawPalCatalogItemDefinition item)
@@ -423,19 +432,14 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         return true;
     }
 
-    private bool TryBuildProceduralPreview(PawPalCatalogItemDefinition item)
+    private bool TryBuildProceduralToyPreview(PawPalCatalogItemDefinition item)
     {
-        if (item == null)
+        if (item == null || item.Category != PawPalItemCategory.Toys)
         {
             return false;
         }
 
-        if (item.PreviewMode == PawPalShopPreviewMode.WearableOnDog && TryBuildProceduralWearablePreview(item))
-        {
-            return true;
-        }
-
-        if (!ShouldUseProceduralStandalonePreview(item))
+        if (!ShouldUseProceduralToyPreview(item))
         {
             return false;
         }
@@ -448,7 +452,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         modelRoot.localRotation = Quaternion.identity;
         modelRoot.localScale = Vector3.one;
 
-        GameObject model = BuildProceduralStandaloneModel(item);
+        GameObject model = BuildProceduralToyModel(item);
         if (model == null)
         {
             return false;
@@ -472,6 +476,7 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         return true;
     }
 
+#if UNITY_EDITOR
     private bool TryBuildBreedPreviewDog(GameObject prefab, string breedKey, Vector3 localPosition, Quaternion localRotation, PreviewBreedPose pose)
     {
         if (prefab == null || modelRoot == null)
@@ -493,11 +498,15 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         }
 
         RegisterPreviewAnimator(animator);
-        ApplyBreedPreviewPose(dog, animator, breedKey, pose);
+        if (!TryPlayLoopingBreedPreviewPose(dog, animator, breedKey, pose))
+        {
+            SettleBreedPreviewPose(dog, animator, breedKey, pose);
+        }
         return true;
     }
+#endif
 
-    private static bool ShouldUseProceduralStandalonePreview(PawPalCatalogItemDefinition item)
+    private static bool ShouldUseProceduralToyPreview(PawPalCatalogItemDefinition item)
     {
         if (item == null)
         {
@@ -513,11 +522,6 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             return true;
         }
 
-        if (item.PreviewMode == PawPalShopPreviewMode.StandaloneModel)
-        {
-            return true;
-        }
-
         string name = item.DisplayName ?? string.Empty;
         return name.IndexOf("ball", System.StringComparison.OrdinalIgnoreCase) >= 0
             || name.IndexOf("bone", System.StringComparison.OrdinalIgnoreCase) >= 0
@@ -525,13 +529,8 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             || name.IndexOf("wheel", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private GameObject BuildProceduralStandaloneModel(PawPalCatalogItemDefinition item)
+    private GameObject BuildProceduralToyModel(PawPalCatalogItemDefinition item)
     {
-        if (item == null)
-        {
-            return null;
-        }
-
         string id = item.Id ?? string.Empty;
         if (id.IndexOf("bone", System.StringComparison.OrdinalIgnoreCase) >= 0)
         {
@@ -542,41 +541,6 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
             || id.IndexOf("wheel", System.StringComparison.OrdinalIgnoreCase) >= 0)
         {
             return BuildProceduralWheel(item);
-        }
-
-        if (id.IndexOf("bed_", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralBed(item);
-        }
-
-        if (id.IndexOf("bowl", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralBowl(item);
-        }
-
-        if (id.IndexOf("carrier", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralCarrier(item);
-        }
-
-        if (id.IndexOf("house", System.StringComparison.OrdinalIgnoreCase) >= 0 || id.IndexOf("box", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralHouse(item);
-        }
-
-        if (id.IndexOf("scratch", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralScratchingPost(item);
-        }
-
-        if (id.IndexOf("sofa", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralSofa(item);
-        }
-
-        if (id.IndexOf("mouse", System.StringComparison.OrdinalIgnoreCase) >= 0 || id.IndexOf("cattoy", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralMouseToy(item);
         }
 
         return BuildProceduralBall(item);
@@ -771,223 +735,6 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         }
     }
 
-    private bool TryBuildProceduralWearablePreview(PawPalCatalogItemDefinition item)
-    {
-        if (item == null)
-        {
-            return false;
-        }
-
-        GameObject dogSource = ResolveWearablePreviewDogSource();
-        if (dogSource == null)
-        {
-            return false;
-        }
-
-        activePreviewMode = PawPalShopPreviewMode.WearableOnDog;
-        CreatePreviewStage();
-        modelRoot = new GameObject("ShopItemPreviewProceduralWearable").transform;
-        modelRoot.SetParent(stageRoot.transform, false);
-        modelRoot.localPosition = Vector3.zero;
-        modelRoot.localRotation = Quaternion.identity;
-        modelRoot.localScale = Vector3.one;
-
-        GameObject dog = Instantiate(dogSource, modelRoot, false);
-        dog.name = dogSource.name;
-        StripPreviewOnlyComponents(dog, true);
-        previewDogAnimator = ConfigurePreviewDogAnimator(dog);
-        RegisterPreviewAnimator(previewDogAnimator);
-
-        Transform parent = ResolveFallbackCollarAnchor(dog.transform);
-        if (parent == null)
-        {
-            return false;
-        }
-
-        HideBuiltInCollarSources(dog.transform);
-
-        GameObject wearable = BuildProceduralWearableModel(item, parent);
-        if (wearable == null)
-        {
-            return false;
-        }
-
-        focusRoot = wearable.transform;
-        StartPreviewDogAnimation();
-        SetLayerRecursively(stageRoot.transform, PreviewLayer);
-        if (!TryFrameModel())
-        {
-            return false;
-        }
-
-        fallbackImage.enabled = false;
-        previewImage.enabled = true;
-        previewImage.texture = renderTexture;
-        previewYaw = 155f;
-        zoomScale = 1f;
-        ApplyModelRotation();
-        ApplyCameraZoom();
-        RenderPreview();
-        return true;
-    }
-
-    private GameObject BuildProceduralBed(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralBed");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material baseMaterial = CreatePreviewMaterial(new Color32(196, 154, 108, 255), "ProceduralBedBase", 0.28f);
-        Material cushionMaterial = CreatePreviewMaterial(ResolveProceduralToyColor(item), "ProceduralBedCushion", 0.22f);
-        GameObject baseBox = CreatePreviewPrimitive("Base", PrimitiveType.Cube, root.transform);
-        baseBox.transform.localScale = new Vector3(1.1f, 0.16f, 0.82f);
-        baseBox.transform.localPosition = new Vector3(0f, -0.08f, 0f);
-        AssignPreviewMaterial(baseBox, baseMaterial);
-
-        GameObject cushion = CreatePreviewPrimitive("Cushion", PrimitiveType.Cube, root.transform);
-        cushion.transform.localScale = new Vector3(0.92f, 0.14f, 0.62f);
-        cushion.transform.localPosition = new Vector3(0f, 0.04f, 0f);
-        AssignPreviewMaterial(cushion, cushionMaterial);
-        return root;
-    }
-
-    private GameObject BuildProceduralBowl(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralBowl");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material bowlMaterial = CreatePreviewMaterial(new Color32(184, 194, 206, 255), "ProceduralBowlMaterial", 0.74f);
-        if ((item.Id ?? string.Empty).IndexOf("doble", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            CreateBowlHalf(root.transform, bowlMaterial, -0.28f);
-            CreateBowlHalf(root.transform, bowlMaterial, 0.28f);
-        }
-        else
-        {
-            CreateBowlHalf(root.transform, bowlMaterial, 0f);
-        }
-
-        return root;
-    }
-
-    private GameObject BuildProceduralCarrier(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralCarrier");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material shell = CreatePreviewMaterial(new Color32(127, 176, 224, 255), "ProceduralCarrierShell", 0.34f);
-        Material grate = CreatePreviewMaterial(new Color32(232, 236, 241, 255), "ProceduralCarrierGrate", 0.78f);
-        GameObject body = CreatePreviewPrimitive("Body", PrimitiveType.Cube, root.transform);
-        body.transform.localScale = new Vector3(1.02f, 0.72f, 0.68f);
-        AssignPreviewMaterial(body, shell);
-
-        GameObject door = CreatePreviewPrimitive("Door", PrimitiveType.Cube, root.transform);
-        door.transform.localScale = new Vector3(0.08f, 0.52f, 0.5f);
-        door.transform.localPosition = new Vector3(0.48f, 0f, 0f);
-        AssignPreviewMaterial(door, grate);
-        return root;
-    }
-
-    private GameObject BuildProceduralHouse(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralHouse");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material wall = CreatePreviewMaterial(new Color32(214, 182, 129, 255), "ProceduralHouseWall", 0.21f);
-        Material roof = CreatePreviewMaterial(new Color32(166, 103, 87, 255), "ProceduralHouseRoof", 0.18f);
-        GameObject baseBox = CreatePreviewPrimitive("Base", PrimitiveType.Cube, root.transform);
-        baseBox.transform.localScale = new Vector3(1.05f, 0.64f, 0.84f);
-        AssignPreviewMaterial(baseBox, wall);
-
-        GameObject roofBox = CreatePreviewPrimitive("Roof", PrimitiveType.Cube, root.transform);
-        roofBox.transform.localScale = new Vector3(1.18f, 0.18f, 0.94f);
-        roofBox.transform.localPosition = new Vector3(0f, 0.39f, 0f);
-        roofBox.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);
-        AssignPreviewMaterial(roofBox, roof);
-        return root;
-    }
-
-    private GameObject BuildProceduralScratchingPost(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralScratchingPost");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material wood = CreatePreviewMaterial(new Color32(161, 127, 78, 255), "ProceduralScratchWood", 0.16f);
-        Material fabric = CreatePreviewMaterial(new Color32(212, 186, 144, 255), "ProceduralScratchFabric", 0.12f);
-        GameObject baseBox = CreatePreviewPrimitive("Base", PrimitiveType.Cube, root.transform);
-        baseBox.transform.localScale = new Vector3(0.82f, 0.08f, 0.82f);
-        baseBox.transform.localPosition = new Vector3(0f, -0.36f, 0f);
-        AssignPreviewMaterial(baseBox, wood);
-
-        GameObject post = CreatePreviewPrimitive("Post", PrimitiveType.Cylinder, root.transform);
-        post.transform.localScale = new Vector3(0.18f, 0.62f, 0.18f);
-        post.transform.localPosition = new Vector3(0f, 0.06f, 0f);
-        AssignPreviewMaterial(post, fabric);
-        return root;
-    }
-
-    private GameObject BuildProceduralSofa(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralSofa");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material sofa = CreatePreviewMaterial(new Color32(118, 168, 122, 255), "ProceduralSofaMaterial", 0.24f);
-        GameObject seat = CreatePreviewPrimitive("Seat", PrimitiveType.Cube, root.transform);
-        seat.transform.localScale = new Vector3(1.12f, 0.24f, 0.74f);
-        seat.transform.localPosition = new Vector3(0f, -0.12f, 0f);
-        AssignPreviewMaterial(seat, sofa);
-
-        GameObject back = CreatePreviewPrimitive("Back", PrimitiveType.Cube, root.transform);
-        back.transform.localScale = new Vector3(1.12f, 0.58f, 0.18f);
-        back.transform.localPosition = new Vector3(0f, 0.12f, -0.28f);
-        AssignPreviewMaterial(back, sofa);
-        return root;
-    }
-
-    private GameObject BuildProceduralMouseToy(PawPalCatalogItemDefinition item)
-    {
-        GameObject root = new GameObject("ProceduralMouseToy");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(modelRoot, false);
-
-        Material material = CreatePreviewMaterial(new Color32(126, 102, 88, 255), "ProceduralMouseMaterial", 0.25f);
-        GameObject body = CreatePreviewPrimitive("Body", PrimitiveType.Sphere, root.transform);
-        body.transform.localScale = new Vector3(0.62f, 0.42f, 0.86f);
-        AssignPreviewMaterial(body, material);
-
-        GameObject head = CreatePreviewPrimitive("Head", PrimitiveType.Sphere, root.transform);
-        head.transform.localScale = new Vector3(0.32f, 0.28f, 0.32f);
-        head.transform.localPosition = new Vector3(0.22f, 0.02f, 0.34f);
-        AssignPreviewMaterial(head, material);
-        return root;
-    }
-
-    private GameObject BuildProceduralWearableModel(PawPalCatalogItemDefinition item, Transform parent)
-    {
-        string id = item != null ? item.Id ?? string.Empty : string.Empty;
-        if (parent == null || string.IsNullOrEmpty(id))
-        {
-            return null;
-        }
-
-        if (id.IndexOf("ears_", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralEars(item, parent);
-        }
-
-        if (id.IndexOf("bow", System.StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            return BuildProceduralCollarBow(item, parent);
-        }
-
-        return BuildProceduralCollar(item, parent);
-    }
-
     private bool BuildWearablePreview(PawPalCatalogItemDefinition item, GameObject wearablePrefab)
     {
         GameObject dogSource = ResolveWearablePreviewDogSource();
@@ -1039,73 +786,6 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         ApplyPreviewTint(wearable, item.CollarTint);
         StartPreviewDogAnimation();
         return true;
-    }
-
-    private void CreateBowlHalf(Transform parent, Material material, float xOffset)
-    {
-        GameObject bowl = CreatePreviewPrimitive("Bowl", PrimitiveType.Cylinder, parent);
-        bowl.transform.localScale = new Vector3(0.34f, 0.12f, 0.34f);
-        bowl.transform.localPosition = new Vector3(xOffset, -0.04f, 0f);
-        AssignPreviewMaterial(bowl, material);
-    }
-
-    private GameObject BuildProceduralCollar(PawPalCatalogItemDefinition item, Transform parent)
-    {
-        GameObject collar = new GameObject("ProceduralCollar");
-        collar.hideFlags = HideFlags.HideAndDontSave;
-        collar.transform.SetParent(parent, false);
-        collar.transform.localPosition = item.CollarLocalPosition;
-        collar.transform.localRotation = item.CollarLocalRotation;
-        collar.transform.localScale = item.CollarLocalScale;
-
-        Material material = CreatePreviewMaterial(ApproximatelyWhite(item.CollarTint) ? new Color32(210, 84, 90, 255) : item.CollarTint, "ProceduralCollarMaterial", 0.36f);
-        GameObject ring = CreatePreviewPrimitive("Ring", PrimitiveType.Cylinder, collar.transform);
-        ring.transform.localScale = new Vector3(0.22f, 0.012f, 0.22f);
-        ring.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        AssignPreviewMaterial(ring, material);
-        return collar;
-    }
-
-    private GameObject BuildProceduralCollarBow(PawPalCatalogItemDefinition item, Transform parent)
-    {
-        GameObject collar = BuildProceduralCollar(item, parent);
-        Material bowMaterial = CreatePreviewMaterial(ApproximatelyWhite(item.CollarTint) ? new Color32(228, 116, 153, 255) : item.CollarTint, "ProceduralBowMaterial", 0.26f);
-        GameObject left = CreatePreviewPrimitive("BowLeft", PrimitiveType.Cube, collar.transform);
-        left.transform.localScale = new Vector3(0.08f, 0.05f, 0.05f);
-        left.transform.localPosition = new Vector3(-0.045f, 0.03f, 0.08f);
-        left.transform.localRotation = Quaternion.Euler(0f, 0f, 22f);
-        AssignPreviewMaterial(left, bowMaterial);
-
-        GameObject right = CreatePreviewPrimitive("BowRight", PrimitiveType.Cube, collar.transform);
-        right.transform.localScale = new Vector3(0.08f, 0.05f, 0.05f);
-        right.transform.localPosition = new Vector3(0.045f, 0.03f, 0.08f);
-        right.transform.localRotation = Quaternion.Euler(0f, 0f, -22f);
-        AssignPreviewMaterial(right, bowMaterial);
-        return collar;
-    }
-
-    private GameObject BuildProceduralEars(PawPalCatalogItemDefinition item, Transform parent)
-    {
-        GameObject root = new GameObject("ProceduralEars");
-        root.hideFlags = HideFlags.HideAndDontSave;
-        root.transform.SetParent(parent, false);
-        root.transform.localPosition = new Vector3(0f, 0.12f, 0.06f);
-        root.transform.localRotation = Quaternion.identity;
-        root.transform.localScale = Vector3.one;
-
-        Material material = CreatePreviewMaterial(new Color32(150, 116, 88, 255), "ProceduralEarsMaterial", 0.22f);
-        GameObject left = CreatePreviewPrimitive("EarLeft", PrimitiveType.Capsule, root.transform);
-        left.transform.localScale = new Vector3(0.06f, 0.12f, 0.06f);
-        left.transform.localPosition = new Vector3(-0.08f, 0.1f, 0f);
-        left.transform.localRotation = Quaternion.Euler(0f, 0f, 28f);
-        AssignPreviewMaterial(left, material);
-
-        GameObject right = CreatePreviewPrimitive("EarRight", PrimitiveType.Capsule, root.transform);
-        right.transform.localScale = new Vector3(0.06f, 0.12f, 0.06f);
-        right.transform.localPosition = new Vector3(0.08f, 0.1f, 0f);
-        right.transform.localRotation = Quaternion.Euler(0f, 0f, -28f);
-        AssignPreviewMaterial(right, material);
-        return root;
     }
 
     private static GameObject ResolveWearablePreviewDogSource()
@@ -1630,42 +1310,6 @@ public sealed class ShopItem3DPreviewView : MonoBehaviour, IPointerDownHandler, 
         animator.updateMode = AnimatorUpdateMode.UnscaledTime;
         ResetPreviewDogParameters(animator);
         return animator;
-    }
-
-    private static void ApplyBreedPreviewPose(GameObject dog, Animator animator, string breedKey, PreviewBreedPose pose)
-    {
-        if (dog == null || animator == null)
-        {
-            return;
-        }
-
-        ResetPreviewDogParameters(animator);
-        switch (pose)
-        {
-            case PreviewBreedPose.Sit:
-                PlayPreviewPoseStateRuntime(animator, PreviewSittingStartSeconds, "SittingStart", "Sitting_start", "Sit start", "SitStart");
-                PlayPreviewPoseStateRuntime(animator, PreviewLieLoopSettleSeconds, "SittingLoop1", "Sitting_loop_1", "Sit loop", "Sit");
-                break;
-            case PreviewBreedPose.Lie:
-                PlayPreviewPoseStateRuntime(animator, PreviewLieStartSeconds, "LieBellyStart", "Lie_belly_start");
-                PlayPreviewPoseStateRuntime(animator, PreviewLieLoopSettleSeconds, "LieBellyLoop", "Lie_belly_loop_1", "CatSimple_Lie_side_loop_1");
-                break;
-            default:
-                PlayPreviewPoseStateRuntime(animator, 0.12f, "Idle2", "Idle_2", "Idle_Base");
-                break;
-        }
-    }
-
-    private static void PlayPreviewPoseStateRuntime(Animator animator, float settleSeconds, params string[] stateNames)
-    {
-        int stateHash = ResolveAnimatorStateHash(animator, stateNames);
-        if (stateHash == 0)
-        {
-            return;
-        }
-
-        animator.CrossFadeInFixedTime(stateHash, PreviewAnimationCrossFadeSeconds, AnimatorBaseLayerIndex, 0f);
-        animator.Update(Mathf.Max(0.01f, settleSeconds));
     }
 
     private void StartPreviewDogAnimation()

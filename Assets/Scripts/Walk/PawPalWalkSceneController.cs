@@ -136,6 +136,7 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         }
 
         PawPalWalkSceneFlow.SetAppShellVisible(false);
+        ApplySceneGraphics();
         ConfigureWalkerForWalk();
         EnsureWalkMusic();
         progress = Mathf.Clamp01(session.LastProgress);
@@ -147,6 +148,25 @@ public sealed class PawPalWalkSceneController : MonoBehaviour
         ConfigureWalkLeashDirector();
         state = WalkState.Running;
         PushProgressToRuntime();
+    }
+
+    private void ApplySceneGraphics()
+    {
+        PawPalGraphicsSettings.ApplyRuntimeProfile();
+
+        LivingRoomGraphicsEnhancer[] graphicsEnhancers = FindObjectsByType<LivingRoomGraphicsEnhancer>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        for (int i = 0; i < graphicsEnhancers.Length; i++)
+        {
+            LivingRoomGraphicsEnhancer graphicsEnhancer = graphicsEnhancers[i];
+            if (graphicsEnhancer == null || graphicsEnhancer.gameObject.scene != gameObject.scene)
+            {
+                continue;
+            }
+
+            graphicsEnhancer.ApplyGraphics();
+        }
     }
 
     private void EnsureWalkMusic()

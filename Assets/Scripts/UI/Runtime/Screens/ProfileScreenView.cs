@@ -361,11 +361,9 @@ public class ProfileScreenView : AppScreenViewBase
         progressScrollRect.movementType = ScrollRect.MovementType.Clamped;
         progressScrollRect.scrollSensitivity = 22f;
 
-        RectTransform levelHeader = CreateNode("Frame_CurrentLevel", progressScrollContent, 0f, 0f, 359f, 75f);
-        CreateSectionHeader(levelHeader, "ProgressHeader", "\u201CTrainer name\u201D - Progress", 0f, 0f, 359f, 21f, 14);
-        progressHeaderLabel = levelHeader.Find("ProgressHeader/Label").GetComponent<TextMeshProUGUI>();
+        RectTransform levelHeader = CreateNode("Frame_CurrentLevel", progressScrollContent, 0f, 0f, 359f, 54f);
 
-        RectTransform trainerFrame = CreateNode("Frame_TrainerLevel", levelHeader, 50f, 31f, 259f, 44f);
+        RectTransform trainerFrame = CreateNode("Frame_TrainerLevel", levelHeader, 50f, 6f, 259f, 44f);
         Image emptyBar = UiFactory.CreateImage("BarEmpty", trainerFrame, UiTheme.ProgressPillSprite, Color.white);
         emptyBar.type = Image.Type.Sliced;
         emptyBar.preserveAspect = false;
@@ -414,7 +412,7 @@ public class ProfileScreenView : AppScreenViewBase
         progressRowsRoot.anchorMax = new Vector2(0f, 1f);
         progressRowsRoot.pivot = new Vector2(0f, 1f);
         progressRowsRoot.sizeDelta = new Vector2(359f, 860f);
-        progressRowsRoot.anchoredPosition = new Vector2(0f, -86f);
+        progressRowsRoot.anchoredPosition = new Vector2(0f, -62f);
 
         BuildProgressRows(progressRowsRoot);
     }
@@ -523,7 +521,6 @@ public class ProfileScreenView : AppScreenViewBase
     private void BuildActivitiesSection(RectTransform parent)
     {
         activitiesSection = CreateNode("Frame_Activities", parent, 0f, 0f, 359f, 238f);
-        CreateSectionHeader(activitiesSection, "ActivitiesHeader", "Daily activities", 0f, 0f, 359f, 21f, 14);
 
         Image timePill = UiFactory.CreateImage("TimePill", activitiesSection, UiTheme.RoundedFiveSprite, UiTheme.NavBrand);
         timePill.type = Image.Type.Sliced;
@@ -532,7 +529,7 @@ public class ProfileScreenView : AppScreenViewBase
         timePill.rectTransform.anchorMax = new Vector2(0f, 1f);
         timePill.rectTransform.pivot = new Vector2(0f, 1f);
         timePill.rectTransform.sizeDelta = new Vector2(90f, 25f);
-        timePill.rectTransform.anchoredPosition = new Vector2(269f, -26f);
+        timePill.rectTransform.anchoredPosition = new Vector2(269f, 0f);
 
         Image timeOutline = UiFactory.CreateImage("Outline", timePill.rectTransform, UiTheme.RoundedFiveOutlineSprite, UiTheme.NavBackgroundCream);
         timeOutline.type = Image.Type.Sliced;
@@ -563,7 +560,7 @@ public class ProfileScreenView : AppScreenViewBase
         emptyActivitiesLabel.rectTransform.anchorMax = new Vector2(0f, 1f);
         emptyActivitiesLabel.rectTransform.pivot = new Vector2(0f, 1f);
         emptyActivitiesLabel.rectTransform.sizeDelta = new Vector2(260f, 40f);
-        emptyActivitiesLabel.rectTransform.anchoredPosition = new Vector2(49f, -128f);
+        emptyActivitiesLabel.rectTransform.anchoredPosition = new Vector2(49f, -102f);
         emptyActivitiesLabel.gameObject.SetActive(false);
 
         RebuildActivityCards(PawPalGameRuntime.Instance);
@@ -631,10 +628,9 @@ public class ProfileScreenView : AppScreenViewBase
 
     private void BuildStatisticsSection(RectTransform parent)
     {
-        statisticsSection = CreateNode("Frame_Statistics", parent, 0f, 0f, 359f, 326f);
-        CreateSectionHeader(statisticsSection, "StatisticsHeader", "Statistics", 0f, 0f, 359f, 21f, 14);
+        statisticsSection = CreateNode("Frame_Statistics", parent, 0f, 0f, 359f, 300f);
 
-        float y = 26f;
+        float y = 0f;
         for (int i = 0; i < Statistics.Length; i++)
         {
             BuildStatisticRow(statisticsSection, Statistics[i], y);
@@ -950,27 +946,6 @@ public class ProfileScreenView : AppScreenViewBase
         {
             progressRowsRoot.sizeDelta = new Vector2(359f, Mathf.Max(progressRowsRoot.sizeDelta.y, 860f));
         }
-    }
-
-    private void CreateSectionHeader(RectTransform parent, string name, string text, float x, float y, float width, float height, int fontSize)
-    {
-        Image header = UiFactory.CreateImage(name, parent, UiTheme.RoundedFiveSprite, UiTheme.NavBrand);
-        header.type = Image.Type.Sliced;
-        header.preserveAspect = false;
-        header.rectTransform.anchorMin = new Vector2(0f, 1f);
-        header.rectTransform.anchorMax = new Vector2(0f, 1f);
-        header.rectTransform.pivot = new Vector2(0f, 1f);
-        header.rectTransform.sizeDelta = new Vector2(width, height);
-        header.rectTransform.anchoredPosition = new Vector2(x, -y);
-
-        Shadow shadow = header.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = UiTheme.NavBrandDark;
-        shadow.effectDistance = new Vector2(0f, -2f);
-        shadow.useGraphicAlpha = true;
-
-        TextMeshProUGUI label = UiFactory.CreateLabel("Label", header.rectTransform, text, fontSize, UiTheme.White, FontStyles.Normal, TextAlignmentOptions.Center);
-        ConfigureCompactLabel(label, UiTheme.DefaultFont, fontSize);
-        UiFactory.Stretch(label.rectTransform, 5f, 0f, 5f, 0f);
     }
 
     private void ConfigureCompactLabel(TextMeshProUGUI label, TMP_FontAsset font, float fontSize)

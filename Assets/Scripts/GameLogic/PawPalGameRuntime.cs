@@ -3724,8 +3724,6 @@ public sealed class PawPalGameRuntime : MonoBehaviour
             return;
         }
 
-        PawPalShopPreviewCatalog.ApplyPreviewDefaults(item);
-
         if (catalogById.ContainsKey(item.Id))
         {
             Debug.LogWarning("PawPalGameRuntime found a duplicate catalog id '" + item.Id + "'. The later definition will overwrite the earlier lookup.");
